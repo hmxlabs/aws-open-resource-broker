@@ -1,6 +1,6 @@
 exclude = [
     "documentation",
-    "src/hostfactory/alembic/versions/*"
+    "src/open_resource_broker/alembic/versions/*"
 ]
 
 target-version = "py312"
@@ -109,7 +109,7 @@ flake8-tidy-imports.banned-api."ms.version".msg = "ms.version is legacy/deprecat
 
 [lint.per-file-ignores]
 # Certain linter options do not make sense for tests
-"src/hostfactory/tests/**/*.py" = [
+"src/open_resource_broker/tests/**/*.py" = [
     "S101",     # allow assert statement
     "SLF001",   # allow private member access in tests
     "ANN",      # do not expect type annotations

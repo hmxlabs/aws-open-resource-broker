@@ -11,7 +11,7 @@
       system = "x86_64-linux";
       pkgs = nixpkgs.legacyPackages.${system};
       flakePkgs = pkgs.callPackages ./. { };
-      defaultPackage = flakePkgs.hostfactory;
+      defaultPackage = flakePkgs.open-resource-broker;
     in
     {
       defaultPackage.${system} = defaultPackage;

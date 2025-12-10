@@ -5,7 +5,7 @@ requires = [
 build-backend = "hatchling.build"
 
 [project]
-name = "hostfactory"
+name = "open-resource-broker"
 description = "Symphony k8s deployment tools"
 
 readme = "README.md"
@@ -20,7 +20,7 @@ dependencies = [
     "boto3",
     "jinja2",
     "typing-extensions",
-    "inotify",
+    "watchdog",
     "hatchling",
     "rich",
     "wrapt",
@@ -29,7 +29,7 @@ dependencies = [
     "tenacity",
     "prometheus-client",
     "sqlalchemy",
-    "psycopg2",
+    "pg8000",
     "alembic",
     "fastapi",
     "uvicorn"
@@ -42,7 +42,7 @@ testing = [
     "pytest-cov",
     "pytest",
     "mypy",
-    "ruff==0.12.2",
+    "ruff>=0.8.0",
     "typos",
     "httpx"
 ]
@@ -53,33 +53,39 @@ documentation = [
 ]
 
 [project.scripts]
-hostfactory = "hostfactory.cli.hf:run"
-hostfactory-admin = "hostfactory.cli.hfadmin:run"
-hostfactory-events = "hostfactory.cli.events_db:run"
-hostfactory-utils = "hostfactory.cli.hfutils:runserver"
+open-resource-broker = "open_resource_broker.cli.hf:run"
+open-resource-broker-admin = "open_resource_broker.cli.hfadmin:run"
+open-resource-broker-events = "open_resource_broker.cli.events_db:run"
+open-resource-broker-utils = "open_resource_broker.cli.hfutils:runserver"
 
 [tool.hatch.metadata]
 allow-direct-references = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/open_resource_broker"]
+
+[tool.hatch.build.targets.wheel.sources]
+"src/open_resource_broker" = "open_resource_broker"
 
 [tool.hatch.build.targets.sdist]
 exclude = ["/*venv"]
 
 [tool.pytest.ini_options]
-addopts = "--cov src/hostfactory --cov-report term-missing --verbose --cov-fail-under 40"
+addopts = "--cov src/open_resource_broker --cov-report term-missing --verbose --cov-fail-under 40"
 norecursedirs = ["dist", "build", ".tox", "relvenv"]
-testpaths = ["src/hostfactory/tests/unit","src/hostfactory/test/regression"]
+testpaths = ["src/open_resource_broker/tests/unit"]
 markers = [
     "unit: testing with no external dependencies",
     "regression: expects the pr instance to be up"]
 
 [tool.coverage.run]
 branch = true
-omit = ["src/hostfactory/tests/*"]
+omit = ["src/open_resource_broker/tests/*"]
 
 [tool.coverage.paths]
 source = [
-    "src/hostfactory/",
-    "*/site-packages/",
+    "src/open_resource_broker/",
+    "*/site-packages/open_resource_broker/",
 ]
 
 [tool.coverage.report]

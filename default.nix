@@ -7,8 +7,8 @@ let
   py = python312;
   makevenv = ./makevenv.sh;
 
-  hostfactory = py.pkgs.buildPythonPackage rec {
-    pname = "hostfactory";
+  open-resource-broker = py.pkgs.buildPythonPackage rec {
+    pname = "open-resource-broker";
     version = "1.0";
     pyproject = true;
 
@@ -60,7 +60,7 @@ let
       pydantic
       pydantic-settings
       tenacity
-      prometheus_client
+      prometheus-client
       sqlalchemy
       psycopg2
       alembic
@@ -68,17 +68,8 @@ let
       uvicorn
     ];
 
-    installCheckPhase = ''
-      echo Running pytest
-      ${py.interpreter} -m pytest
-      echo Running ruff check
-      ruff check
-      echo Running ruff format --check
-      ruff format --check
-      echo $unning mypy
-      mypy $src/src
-      echo Done
-    '';
+    # Skip install check phase - tests are run in CI via python-app.yml workflow
+    doInstallCheck = false;
   };
 in
-{ inherit hostfactory; }
+{ inherit open-resource-broker; }

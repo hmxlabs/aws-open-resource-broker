@@ -21,6 +21,7 @@ jobs:
       - name: Run Bandit (SARIF)
         run: >
           bandit --format sarif --exit-zero --recursive
+          --configfile .github/conf/bandit.conf
           --output ${{ env.BANDIT_REPORT_FILE }} .
       - name: Upload SARIF to GitHub Security
         uses: github/codeql-action/upload-sarif@v3

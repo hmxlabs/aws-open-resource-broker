@@ -6,7 +6,7 @@
 # -- Project information -----------------------------------------------------
 # https://www.sphinx-doc.org/en/master/usage/configuration.html#project-information
 
-project = "hostfactory for k8s"
+project = "open-resource-broker for k8s"
 copyright = "2025, Morgan Stanley"
 author = "Morgan Stanley"
 release = "1.0.0"
