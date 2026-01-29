@@ -30,65 +30,6 @@ from domain.template.template_aggregate import Template
 T = TypeVar("T")
 
 
-def _normalize_provider_entry(entry: Any) -> dict[str, Any]:
-    """Normalize provider entry (dict or DomainMachine) to a common shape.
-
-    Example (AWS-like dict -> normalized):
-        input:  {"InstanceId": "i-123", "State": "running", "PrivateIpAddress": "10.0.0.5"}
-        output: {"instance_id": "i-123", "status": MachineStatus.RUNNING, "private_ip": "10.0.0.5"}
-    """
-    from domain.machine.aggregate import Machine as DomainMachine
-    from domain.machine.machine_status import MachineStatus
-
-    if isinstance(entry, DomainMachine):
-        status_val = entry.status
-        try:
-            status_obj = (
-                status_val
-                if isinstance(status_val, MachineStatus)
-                else MachineStatus.from_str(str(status_val))
-            )
-        except Exception:
-            status_obj = MachineStatus.UNKNOWN
-        return {
-            "instance_id": str(entry.instance_id.value),
-            "status": status_obj,
-            "private_ip": entry.private_ip,
-            "public_ip": entry.public_ip,
-            "launch_time": entry.launch_time,
-            "instance_type": getattr(entry.instance_type, "value", entry.instance_type),
-            "image_id": entry.image_id,
-            "subnet_id": entry.subnet_id,
-            "metadata": entry.metadata or {},
-            "raw": entry,
-        }
-    if isinstance(entry, dict):
-        status_val = entry.get("status") or entry.get("State") or entry.get("state")
-        try:
-            status_obj = (
-                status_val
-                if isinstance(status_val, MachineStatus)
-                else MachineStatus.from_str(str(status_val))
-                if status_val
-                else MachineStatus.UNKNOWN
-            )
-        except Exception:
-            status_obj = MachineStatus.UNKNOWN
-        return {
-            "instance_id": entry.get("instance_id") or entry.get("InstanceId"),
-            "status": status_obj,
-            "private_ip": entry.get("private_ip") or entry.get("PrivateIpAddress"),
-            "public_ip": entry.get("public_ip") or entry.get("PublicIpAddress"),
-            "launch_time": entry.get("launch_time") or entry.get("LaunchTime"),
-            "instance_type": entry.get("instance_type") or entry.get("InstanceType"),
-            "image_id": entry.get("image_id") or entry.get("ImageId"),
-            "subnet_id": entry.get("subnet_id") or entry.get("SubnetId"),
-            "metadata": entry.get("metadata") or entry,
-            "raw": entry,
-        }
-    return {}
-
-
 # Query handlers
 @query_handler(GetRequestQuery)
 class GetRequestHandler(BaseQueryHandler[GetRequestQuery, RequestDTO]):
@@ -329,6 +270,64 @@ class GetRequestHandler(BaseQueryHandler[GetRequestQuery, RequestDTO]):
 
         return provider_machines, (result.metadata or {})
 
+    def _normalize_provider_entry(self, entry: Any) -> dict[str, Any]:
+        """Normalize provider entry (dict or DomainMachine) to a common shape.
+
+        Example (AWS-like dict -> normalized):
+            input:  {"InstanceId": "i-123", "State": "running", "PrivateIpAddress": "10.0.0.5"}
+            output: {"instance_id": "i-123", "status": MachineStatus.RUNNING, "private_ip": "10.0.0.5"}
+        """
+        from domain.machine.aggregate import Machine as DomainMachine
+        from domain.machine.machine_status import MachineStatus
+
+        if isinstance(entry, DomainMachine):
+            status_val = entry.status
+            try:
+                status_obj = (
+                    status_val
+                    if isinstance(status_val, MachineStatus)
+                    else MachineStatus.from_str(str(status_val))
+                )
+            except Exception:
+                status_obj = MachineStatus.UNKNOWN
+            return {
+                "instance_id": str(entry.instance_id.value),
+                "status": status_obj,
+                "private_ip": entry.private_ip,
+                "public_ip": entry.public_ip,
+                "launch_time": entry.launch_time,
+                "instance_type": getattr(entry.instance_type, "value", entry.instance_type),
+                "image_id": entry.image_id,
+                "subnet_id": entry.subnet_id,
+                "metadata": entry.metadata or {},
+                "raw": entry,
+            }
+        if isinstance(entry, dict):
+            status_val = entry.get("status") or entry.get("State") or entry.get("state")
+            try:
+                status_obj = (
+                    status_val
+                    if isinstance(status_val, MachineStatus)
+                    else MachineStatus.from_str(str(status_val))
+                    if status_val
+                    else MachineStatus.UNKNOWN
+                )
+            except Exception:
+                status_obj = MachineStatus.UNKNOWN
+            return {
+                "instance_id": entry.get("instance_id") or entry.get("InstanceId"),
+                "status": status_obj,
+                "private_ip": entry.get("private_ip") or entry.get("PrivateIpAddress"),
+                "public_ip": entry.get("public_ip") or entry.get("PublicIpAddress"),
+                "launch_time": entry.get("launch_time") or entry.get("LaunchTime"),
+                "instance_type": entry.get("instance_type") or entry.get("InstanceType"),
+                "image_id": entry.get("image_id") or entry.get("ImageId"),
+                "subnet_id": entry.get("subnet_id") or entry.get("SubnetId"),
+                "metadata": entry.get("metadata") or entry,
+                "raw": entry,
+            }
+        return {}
+
     async def _update_machine_status_from_aws(
         self,
         machines: list,
@@ -385,7 +384,7 @@ class GetRequestHandler(BaseQueryHandler[GetRequestQuery, RequestDTO]):
             # <3.> Reconcile provider view with local machines (compute updates/creates).
             # Update existing machines and add new ones discovered from provider
             for dm in domain_machines:
-                normalized = _normalize_provider_entry(dm)
+                normalized = self._normalize_provider_entry(dm)
                 dm_id = normalized.get("instance_id")
                 if not dm_id:
                     continue
