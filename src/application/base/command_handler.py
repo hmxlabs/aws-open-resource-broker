@@ -12,14 +12,15 @@ Architecture:
 from typing import Any, Optional, TypeVar
 
 # Import the CQRS interface
+from application.dto.base import BaseCommand, BaseResponse
 from application.interfaces.command_handler import CommandHandler
 
-# Type variables for generic command handlers
-TCommand = TypeVar("TCommand")
+# Type variables for generic command handlers - bound to match CommandHandler constraints
+TCommand = TypeVar("TCommand", bound=BaseCommand)
 TResponse = TypeVar("TResponse")
 
 
-class ApplicationCommandHandler(CommandHandler[TCommand, TResponse]):
+class ApplicationCommandHandler(CommandHandler[TCommand, TResponse]):  # type: ignore[type-var]
     """
     Base class for application layer CQRS command handlers.
 
@@ -72,7 +73,7 @@ class ApplicationCommandHandler(CommandHandler[TCommand, TResponse]):
             self.metrics.record(metric_name, value, **tags)
 
 
-class CLICommandHandler(CommandHandler[TCommand, TResponse]):
+class CLICommandHandler(CommandHandler[TCommand, TResponse]):  # type: ignore[type-var]
     """
     Base class for CLI interface command handlers.
 
