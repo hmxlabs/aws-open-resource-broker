@@ -43,7 +43,7 @@ class SQLStorageStrategy(BaseStorageStrategy):
 
         # Initialize components
         self.connection_manager = SQLConnectionManager(config)
-        self.query_builder = SQLQueryBuilder(table_name, columns)
+        self.query_builder = SQLQueryBuilder(table_name, columns)  # type: ignore[abstract]
         self.serializer = SQLSerializer(id_column=self._get_id_column())
         self.lock_manager = LockManager("simple")  # Simple lock for SQL
 
@@ -310,7 +310,7 @@ class SQLStorageStrategy(BaseStorageStrategy):
         self.logger.debug("Transaction rollback (handled by session)")
 
     @contextmanager
-    def transaction(self) -> None:
+    def transaction(self):  # type: ignore[override]
         """Context manager for database transactions."""
         with self.connection_manager.get_session() as session:
             try:
@@ -320,6 +320,18 @@ class SQLStorageStrategy(BaseStorageStrategy):
                 session.rollback()
                 self.logger.error("Transaction failed: %s", e)
                 raise
+
+    def count(self) -> int:
+        """Count total entities in the table."""
+        try:
+            query = self.query_builder.build_count()
+            with self.connection_manager.get_session() as session:
+                result = session.execute(text(query))
+                row = result.fetchone()
+                return int(row[0]) if row else 0
+        except Exception as e:
+            self.logger.error("Failed to count entities: %s", e)
+            return 0
 
     def cleanup(self) -> None:
         """Clean up resources."""
