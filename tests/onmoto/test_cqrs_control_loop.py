@@ -78,7 +78,7 @@ def patch_moto_compat():
 
     with (
         patch(
-            "providers.aws.infrastructure.services.aws_image_resolution_service"
+            "orb.providers.aws.infrastructure.services.aws_image_resolution_service"
             ".AWSImageResolutionService.is_resolution_needed",
             return_value=False,
         ),
