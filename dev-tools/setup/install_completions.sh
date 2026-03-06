@@ -37,8 +37,8 @@ if ! command -v python &> /dev/null; then
     exit 1
 fi
 
-if [ ! -f "src/run.py" ]; then
-    print_error "src/run.py not found. Please run from project root."
+if [ ! -f "src/orb/run.py" ]; then
+    print_error "src/orb/run.py not found. Please run from project root."
     exit 1
 fi
 
@@ -86,7 +86,7 @@ if [ "$INSTALL_BASH" = true ]; then
     mkdir -p ~/.local/share/bash-completion/completions
 
     # Generate and install completion
-    python src/run.py --completion bash > ~/.local/share/bash-completion/completions/orb
+    python src/orb/run.py --completion bash > ~/.local/share/bash-completion/completions/orb
 
     print_success "Bash completions installed to ~/.local/share/bash-completion/completions/orb"
 
@@ -109,7 +109,7 @@ if [ "$INSTALL_ZSH" = true ]; then
     mkdir -p ~/.local/share/zsh/site-functions
 
     # Generate and install completion
-    python src/run.py --completion zsh > ~/.local/share/zsh/site-functions/_orb
+    python src/orb/run.py --completion zsh > ~/.local/share/zsh/site-functions/_orb
 
     print_success "Zsh completions installed to ~/.local/share/zsh/site-functions/_orb"
 
@@ -140,8 +140,8 @@ echo "  orb --format <TAB>           # Show format options"
 echo ""
 print_status "Manual installation commands:"
 if [ "$INSTALL_BASH" = true ]; then
-    echo "  Bash: python src/run.py --completion bash > ~/.local/share/bash-completion/completions/orb"
+    echo "  Bash: python src/orb/run.py --completion bash > ~/.local/share/bash-completion/completions/orb"
 fi
 if [ "$INSTALL_ZSH" = true ]; then
-    echo "  Zsh:  python src/run.py --completion zsh > ~/.local/share/zsh/site-functions/_orb"
+    echo "  Zsh:  python src/orb/run.py --completion zsh > ~/.local/share/zsh/site-functions/_orb"
 fi

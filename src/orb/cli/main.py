@@ -24,7 +24,7 @@ async def _show_resource_help(resource):
     """Show help for a resource when no action is provided."""
     import subprocess  # nosec B404
 
-    subprocess.run([sys.executable, "-m", "run", resource, "--help"], check=False)  # nosec B603
+    subprocess.run([sys.executable, "-m", "orb", resource, "--help"], check=False)  # nosec B603
     return {"success": True, "message": f"Showed help for {resource}"}
 
 

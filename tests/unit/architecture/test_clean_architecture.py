@@ -24,10 +24,10 @@ class TestCleanArchitecture:
         """Ensure dependencies point inward only."""
         # Define layer hierarchy (outer -> inner)
         layers = {
-            "interface": ["src/interface", "src/cli", "src/api"],
-            "infrastructure": ["src/infrastructure"],
-            "application": ["src/application"],
-            "domain": ["src/domain"],
+            "interface": ["src/orb/interface", "src/orb/cli", "src/orb/api"],
+            "infrastructure": ["src/orb/infrastructure"],
+            "application": ["src/orb/application"],
+            "domain": ["src/orb/domain"],
         }
 
         # Test that domain layer has no outward dependencies
@@ -236,7 +236,7 @@ class TestCleanArchitecture:
         """Test that domain layer is independent of external frameworks."""
         # Domain layer should not import external frameworks
         domain_files = []
-        domain_path = Path("src/domain")
+        domain_path = Path("src/orb/domain")
 
         if domain_path.exists():
             for py_file in domain_path.rglob("*.py"):

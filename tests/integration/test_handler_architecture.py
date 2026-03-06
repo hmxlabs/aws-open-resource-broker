@@ -448,10 +448,10 @@ def test_import_consistency():
         print("   Checking import consistency...")
 
         handler_files = [
-            "src/providers/aws/infrastructure/handlers/spot_fleet_handler.py",
-            "src/providers/aws/infrastructure/handlers/ec2_fleet_handler.py",
-            "src/providers/aws/infrastructure/handlers/run_instances_handler.py",
-            "src/providers/aws/infrastructure/handlers/asg_handler.py",
+            "src/orb/providers/aws/infrastructure/handlers/spot_fleet_handler.py",
+            "src/orb/providers/aws/infrastructure/handlers/ec2_fleet_handler.py",
+            "src/orb/providers/aws/infrastructure/handlers/run_instances_handler.py",
+            "src/orb/providers/aws/infrastructure/handlers/asg_handler.py",
         ]
 
         # Required imports for all handlers

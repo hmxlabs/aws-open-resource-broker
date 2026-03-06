@@ -42,7 +42,7 @@ class TestLazyLoadingPerformance:
 
         start_time = time.time()
         result = subprocess.run(
-            [sys.executable, "src/run.py", "--help"],
+            [sys.executable, "src/orb/run.py", "--help"],
             check=False,
             capture_output=True,
             text=True,
@@ -204,7 +204,7 @@ class TestLazyLoadingPerformance:
 
         start_time = time.time()
         result = subprocess.run(
-            [sys.executable, "src/run.py", "templates", "list"],
+            [sys.executable, "src/orb/run.py", "templates", "list"],
             check=False,
             capture_output=True,
             text=True,

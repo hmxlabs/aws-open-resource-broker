@@ -33,11 +33,11 @@ if [ "$LOG_SCRIPTS" = "true" ] || [ "$LOG_SCRIPTS" = "1" ]; then
 fi
 
 # Get script directory and project root
-# Walk up from SCRIPT_DIR until we find src/run.py (works whether scripts are at
+# Walk up from SCRIPT_DIR until we find src/orb/run.py (works whether scripts are at
 # scripts/ after orb init or at src/infrastructure/scheduler/hostfactory/scripts/ in dev)
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 PROJECT_ROOT="$SCRIPT_DIR"
-while [ "$PROJECT_ROOT" != "/" ] && [ ! -f "$PROJECT_ROOT/src/run.py" ]; do
+while [ "$PROJECT_ROOT" != "/" ] && [ ! -f "$PROJECT_ROOT/src/orb/run.py" ]; do
     PROJECT_ROOT="$(dirname "$PROJECT_ROOT")"
 done
 
@@ -59,15 +59,15 @@ export HF_LOGGING_CONSOLE_ENABLED
 
 # Determine execution mode
 if [ "$USE_LOCAL_DEV" = "true" ] || [ "$USE_LOCAL_DEV" = "1" ]; then
-    # Local development mode - use src/run.py from project root
-    # echo "Using local development mode (src/run.py)" >&2
+    # Local development mode - use python -m orb from project root
+    # echo "Using local development mode (python -m orb)" >&2
 
     # Add project root to PYTHONPATH
     export PYTHONPATH="${PROJECT_ROOT}:${PYTHONPATH}"
 
-    # Check if src/run.py exists
-    if [ ! -f "${PROJECT_ROOT}/src/run.py" ]; then
-        echo "Error: src/run.py not found at ${PROJECT_ROOT}/src/run.py" >&2
+    # Check if src/orb/run.py exists
+    if [ ! -f "${PROJECT_ROOT}/src/orb/run.py" ]; then
+        echo "Error: src/orb/run.py not found at ${PROJECT_ROOT}/src/orb/run.py" >&2
         echo "Make sure you're running from the correct directory or install the package." >&2
         exit 1
     fi
@@ -94,8 +94,8 @@ if [ "$USE_LOCAL_DEV" = "true" ] || [ "$USE_LOCAL_DEV" = "1" ]; then
         i=$((i + 1))
     done
 
-    # Execute: run.py [-f <file>] <everything else verbatim>
-	    "$PYTHON_CMD" "${PROJECT_ROOT}/src/run.py" "${file_args[@]}" "${pass_args[@]}" 2>&1 | tee -a "$SCRIPTS_LOG_FILE"
+    # Execute: python -m orb [-f <file>] <everything else verbatim>
+	    "$PYTHON_CMD" -m orb "${file_args[@]}" "${pass_args[@]}" 2>&1 | tee -a "$SCRIPTS_LOG_FILE"
 	    exit "${PIPESTATUS[0]}"
 
 else
