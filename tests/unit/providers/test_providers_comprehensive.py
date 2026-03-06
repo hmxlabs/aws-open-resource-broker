@@ -776,7 +776,6 @@ class TestAWSAuthenticationComprehensive:
             pass
 
 
-
 @pytest.mark.unit
 @pytest.mark.providers
 class TestAWSResilienceComprehensive:
