@@ -10,7 +10,7 @@ try:
 except ImportError:
     raise ImportError("FastAPI routing requires: pip install orb-py[api]") from None
 
-from orb.api.dependencies import get_request_machines_handler, get_return_machines_handler
+from orb.api.dependencies import get_query_bus, get_request_machines_handler, get_return_machines_handler
 from orb.api.models.base import APIRequest
 from orb.infrastructure.error.decorators import handle_rest_exceptions
 
@@ -19,6 +19,7 @@ router = APIRouter(prefix="/machines", tags=["Machines"])
 # Module-level dependency variables to avoid B008 warnings
 REQUEST_MACHINES_HANDLER = Depends(get_request_machines_handler)
 RETURN_MACHINES_HANDLER = Depends(get_return_machines_handler)
+QUERY_BUS = Depends(get_query_bus)
 STATUS_QUERY = Query(None, description="Filter by machine status")
 REQUEST_ID_QUERY = Query(None, description="Filter by request ID")
 LIMIT_QUERY = Query(None, description="Limit number of results")
@@ -117,44 +118,23 @@ async def return_machines(
 async def list_machines(
     status: Optional[str] = STATUS_QUERY,
     request_id: Optional[str] = REQUEST_ID_QUERY,
-    limit: Optional[int] = LIMIT_QUERY,
+    limit: int = Query(50),
+    query_bus=QUERY_BUS,
 ) -> JSONResponse:
-    """
-    List machines with optional filtering.
+    from orb.application.dto.queries import ListMachinesQuery
 
-    - **status**: Filter by machine status (pending, running, stopped, etc.)
-    - **request_id**: Filter by request ID
-    - **limit**: Limit number of results
-    """
-    return JSONResponse(
-        status_code=501,
-        content={
-            "error": "Not implemented",
-            "endpoint": "GET /api/v1/machines",
-            "message": (
-                "Machine listing is planned but not yet available. "
-                "Use GET /api/v1/requests/{request_id}/status to check provisioning status."
-            ),
-        },
-    )
+    query = ListMachinesQuery(status=status, request_id=request_id, limit=limit)
+    results = await query_bus.execute(query)
+    serialized = [r.to_dict() if hasattr(r, "to_dict") else r for r in results] if isinstance(results, list) else results
+    return JSONResponse(content=jsonable_encoder(serialized))
 
 
 @router.get("/{machine_id}", summary="Get Machine", description="Get specific machine details")
 @handle_rest_exceptions(endpoint="/api/v1/machines/{machine_id}", method="GET")
-async def get_machine(machine_id: str) -> JSONResponse:
-    """
-    Get specific machine details.
+async def get_machine(machine_id: str, query_bus=QUERY_BUS) -> JSONResponse:
+    from orb.application.dto.queries import GetMachineQuery
 
-    - **machine_id**: Machine identifier
-    """
-    return JSONResponse(
-        status_code=501,
-        content={
-            "error": "Not implemented",
-            "endpoint": "GET /api/v1/machines/{machine_id}",
-            "message": (
-                "Individual machine detail lookup is planned but not yet available. "
-                "Use GET /api/v1/requests/{request_id}/status to check provisioning status."
-            ),
-        },
-    )
+    query = GetMachineQuery(machine_id=machine_id)
+    result = await query_bus.execute(query)
+    data = result.to_dict() if hasattr(result, "to_dict") else result
+    return JSONResponse(content=jsonable_encoder(data))

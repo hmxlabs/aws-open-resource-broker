@@ -12,6 +12,7 @@ except ImportError:
     raise ImportError("FastAPI routing requires: pip install orb-py[api]") from None
 
 from orb.api.dependencies import (
+    get_command_bus,
     get_query_bus,
     get_request_status_handler,
 )
@@ -22,6 +23,7 @@ router = APIRouter(prefix="/requests", tags=["Requests"])
 # Module-level dependency variables to avoid B008 warnings
 REQUEST_STATUS_HANDLER = Depends(get_request_status_handler)
 QUERY_BUS = Depends(get_query_bus)
+COMMAND_BUS = Depends(get_command_bus)
 STATUS_QUERY = Query(None, description="Filter by request status")
 LIMIT_QUERY = Query(50, description="Limit number of results")
 
@@ -62,6 +64,7 @@ async def get_request_status(
 async def list_requests(
     status: Optional[str] = STATUS_QUERY,
     limit: Optional[int] = LIMIT_QUERY,
+    sync: bool = Query(False, description="Sync with provider before returning results"),
     query_bus=QUERY_BUS,
 ) -> JSONResponse:
     """
@@ -69,7 +72,16 @@ async def list_requests(
 
     - **status**: Filter by request status (pending, running, complete, failed)
     - **limit**: Limit number of results
+    - **sync**: Sync with provider before returning results
     """
+    if sync:
+        from orb.application.dto.queries import ListActiveRequestsQuery
+
+        query = ListActiveRequestsQuery(limit=limit or 50, all_resources=True)
+        results = await query_bus.execute(query)
+        serialized = [r.to_dict() if hasattr(r, "to_dict") else r for r in results] if isinstance(results, list) else results
+        return JSONResponse(content=jsonable_encoder(serialized))
+
     from orb.application.request.queries import ListRequestsQuery
 
     query = ListRequestsQuery(status=status, limit=limit or 50)
@@ -146,6 +158,20 @@ async def stream_request_status(
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+@router.delete("/{request_id}", summary="Cancel Request", description="Cancel a pending request")
+@handle_rest_exceptions(endpoint="/api/v1/requests/{request_id}", method="DELETE")
+async def cancel_request(
+    request_id: str,
+    reason: Optional[str] = Query(None, description="Cancellation reason"),
+    command_bus=COMMAND_BUS,
+) -> JSONResponse:
+    from orb.application.dto.commands import CancelRequestCommand
+
+    command = CancelRequestCommand(request_id=request_id, reason=reason or "Cancelled via REST API")
+    await command_bus.execute(command)
+    return JSONResponse(content=jsonable_encoder({"request_id": request_id, "status": "cancelled"}))
 
 
 @router.get(
