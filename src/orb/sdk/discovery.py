@@ -325,7 +325,9 @@ class SDKMethodDiscovery:
         fields = self._COMMAND_OUTPUT_FIELDS.get(type(command).__name__)
         if not fields:
             return None
-        output = {f: getattr(command, f, None) for f in fields if getattr(command, f, None) is not None}
+        output = {
+            f: getattr(command, f, None) for f in fields if getattr(command, f, None) is not None
+        }
         return output if output else None
 
     def _create_command_method_cqrs(
