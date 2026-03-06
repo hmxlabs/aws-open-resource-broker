@@ -135,7 +135,6 @@ Requires Python 3.10+.
 | `orb templates show <template-id>` | Show a single template |
 | `orb templates validate --file <file>` | Validate a template file |
 | `orb machines request <template-id> <n>` | Request n machines |
-| `orb machines request <template-id> <n> --wait` | Request and wait until ready |
 | `orb machines list` | List active machines |
 | `orb machines return --request-id <id>` | Return machines from a request |
 | `orb requests status <request-id>` | Check request status |
