@@ -517,7 +517,9 @@ def _get_credential_requirements(provider_type: str) -> dict:
         return {}
 
 
-def _discover_infrastructure(provider_type: str, region: str, profile: str | None) -> Dict[str, Any]:
+def _discover_infrastructure(
+    provider_type: str, region: str, profile: str | None
+) -> Dict[str, Any]:
     """Discover infrastructure interactively using provider strategy."""
     try:
         from orb.providers.registry import get_provider_registry
