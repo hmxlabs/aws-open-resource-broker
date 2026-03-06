@@ -170,7 +170,9 @@ async def get_template(
 
 @router.post("/", summary="Create Template", description="Create a new template")
 @handle_rest_exceptions(endpoint="/api/v1/templates", method="POST")
-async def create_template(template_data: TemplateCreateRequest, command_bus=COMMAND_BUS) -> JSONResponse:
+async def create_template(
+    template_data: TemplateCreateRequest, command_bus=COMMAND_BUS
+) -> JSONResponse:
     """
     Create a new template.
 
@@ -213,7 +215,9 @@ async def create_template(template_data: TemplateCreateRequest, command_bus=COMM
     description="Update an existing template",
 )
 @handle_rest_exceptions(endpoint="/api/v1/templates/{template_id}", method="PUT")
-async def update_template(template_id: str, template_data: TemplateUpdateRequest, command_bus=COMMAND_BUS) -> JSONResponse:
+async def update_template(
+    template_id: str, template_data: TemplateUpdateRequest, command_bus=COMMAND_BUS
+) -> JSONResponse:
     """
     Update an existing template.
 
