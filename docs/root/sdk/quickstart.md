@@ -186,6 +186,8 @@ async with orb(app_config={"provider": {"type": "aws", "providers": [{"name": "e
         west_templates = await west_client.list_templates()
 ```
 
+For a complete working example, see `examples/sdk_usage.py` in the repository.
+
 ## CLI vs SDK Equivalents
 
 For users familiar with the CLI, the SDK provides both convenience methods and direct CQRS methods:
@@ -349,12 +351,6 @@ async with orb(provider="aws") as sdk:
 async with orb(provider="aws") as sdk:
     # Get system status
     status = await sdk.get_system_status()
-
-    # Run health check
-    health = await sdk.check_system_health(detailed=True)
-
-    # Get system metrics
-    metrics = await sdk.get_system_metrics()
 ```
 
 ## Error Handling
@@ -391,7 +387,7 @@ from orb import ORBClient as orb, SDKMiddleware
 
 class LoggingMiddleware(SDKMiddleware):
     async def process(self, method_name, args, kwargs, next_handler):
-        print(f"Calling {method_name} with args={args}, kwargs={kwargs}")
+        print(f"Calling {method_name} with kwargs={kwargs}")
         result = await next_handler(args, kwargs)
         print(f"{method_name} returned: {result}")
         return result
@@ -457,8 +453,6 @@ async with orb(provider="aws") as sdk:
 
 ## Performance Considerations
 
-- **Connection Pooling**: The SDK uses connection pooling for better performance
-- **Caching**: Query results are cached when appropriate
 - **Async Operations**: All operations are async for better concurrency
 - **Batch Processing**: Use batch operations for multiple requests
 
