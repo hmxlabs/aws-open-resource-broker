@@ -10,6 +10,8 @@ from contextlib import suppress
 from typing import Any, Callable, Dict, Optional
 
 from orb.bootstrap import Application
+from orb.domain.base.ports.configuration_port import ConfigurationPort
+from orb.infrastructure.di.container import get_container
 
 from .config import SDKConfig
 from .discovery import MethodInfo, SDKMethodDiscovery
@@ -92,14 +94,34 @@ class ORBClient:
             return True
 
         try:
-            # Initialize application with configuration
-            self._app = Application(config_path=self._config.config_path)
+            # skip_validation=True bypasses StartupValidator (sys.exit) in Application.__init__.
+            # We still validate config_path existence here so callers get a clean
+            # ConfigurationError instead of a cryptic downstream failure.
+            import os
+
+            if self._config.config_path and not os.path.exists(self._config.config_path):
+                raise ConfigurationError(
+                    f"Configuration file not found: {self._config.config_path}"
+                )
+
+            # skip_validation=True bypasses StartupValidator (sys.exit) in Application.__init__
+            self._app = Application(
+                config_path=self._config.config_path, skip_validation=True
+            )
 
             if not await self._app.initialize():
                 raise ProviderError(
                     f"Failed to initialize {self._config.provider} provider",
                     provider=self._config.provider,
                 )
+
+            # Apply region/profile overrides from SDK config (mirrors CLI pattern)
+            if self._config.region or self._config.profile:
+                config_port = get_container().get(ConfigurationPort)
+                if self._config.region:
+                    config_port.override_provider_region(self._config.region)
+                if self._config.profile:
+                    config_port.override_provider_profile(self._config.profile)
 
             # Get CQRS buses directly from the initialized application
             self._query_bus = self._app.get_query_bus()
@@ -123,6 +145,12 @@ class ORBClient:
             self._initialized = True
             return True
 
+        except SystemExit as e:
+            # Defensive catch: if any downstream code calls sys.exit, convert it so
+            # the SDK never kills the caller's process.
+            raise ConfigurationError(
+                f"Configuration validation failed (exit code {e.code})"
+            ) from e
         except Exception as e:
             if isinstance(e, (SDKError, ConfigurationError, ProviderError)):
                 raise
@@ -294,7 +322,7 @@ class ORBClient:
                 "SDK not initialized. Call initialize() or use as async context manager."
             )
 
-        return await self.create_request(template_id=template_id, machine_count=count, **kwargs)  # type: ignore[attr-defined]
+        return await self.create_request(template_id=template_id, count=count, **kwargs)  # type: ignore[attr-defined]
 
     async def show_template(self, template_id: str) -> Any:
         """Show template details (CLI-style convenience method).

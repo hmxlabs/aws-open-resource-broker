@@ -301,6 +301,33 @@ class SDKMethodDiscovery:
 
         return sdk_method
 
+    # Output fields populated by handlers on mutable command objects after execution.
+    # Keyed by command class name so the lookup is O(1) and requires no imports here.
+    _COMMAND_OUTPUT_FIELDS: dict[str, list[str]] = {
+        "CreateRequestCommand": ["created_request_id"],
+        "CreateReturnRequestCommand": [
+            "created_request_ids",
+            "processed_machines",
+            "skipped_machines",
+        ],
+        "CleanupOldRequestsCommand": ["requests_cleaned", "request_ids_found"],
+        "CleanupAllResourcesCommand": ["requests_cleaned", "machines_cleaned", "total_cleaned"],
+    }
+
+    def _extract_command_output(self, command: Any) -> Any:
+        """
+        After a command has been executed, check whether the handler populated
+        any mutable output fields on the command object and return them as a dict.
+
+        Returns None when no output fields are present so callers that do not
+        need a return value are unaffected.
+        """
+        fields = self._COMMAND_OUTPUT_FIELDS.get(type(command).__name__)
+        if not fields:
+            return None
+        output = {f: getattr(command, f, None) for f in fields if getattr(command, f, None) is not None}
+        return output if output else None
+
     def _create_command_method_cqrs(
         self, command_bus, command_type: type, method_info: MethodInfo
     ) -> Callable:
@@ -315,7 +342,10 @@ class SDKMethodDiscovery:
                 command = command_type(**mapped_kwargs)
 
                 # Execute via command bus directly
-                result = await command_bus.execute(command)
+                await command_bus.execute(command)
+
+                # Commands return void; check for handler-populated output fields
+                result = self._extract_command_output(command)
 
                 # Standardize return type to dict
                 return self._standardize_return_type(result)
