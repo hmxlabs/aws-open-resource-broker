@@ -97,11 +97,11 @@ jobs:
       - name: Test CLI functionality
         run: |
           # Test basic CLI works
-          python -m orb.run --help
-          python -m orb.run --version
+          python -m orb --help
+          python -m orb --version
 
           # Test commands that should work in all variants
-          python -m orb.run templates list --help || echo "Templates command help failed (expected in some cases)"
+          python -m orb templates list --help || echo "Templates command help failed (expected in some cases)"
 
       - name: Test CLI Rich formatting
         if: matrix.variant.test_cli_rich
@@ -426,8 +426,8 @@ jobs:
 
       - name: Test CLI commands
         run: |
-          python -m orb.run --help
-          python -m orb.run --version
+          python -m orb --help
+          python -m orb --version
           echo "PASS: CLI commands work"
 
   summary:
