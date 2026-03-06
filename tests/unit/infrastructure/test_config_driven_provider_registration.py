@@ -19,7 +19,9 @@ class TestConfigDrivenProviderRegistration:
         container = DIContainer()
 
         with (
-            patch("orb.infrastructure.di.provider_services._register_application_services") as mock_app,
+            patch(
+                "orb.infrastructure.di.provider_services._register_application_services"
+            ) as mock_app,
             patch(
                 "orb.infrastructure.di.provider_services._register_provider_utility_services"
             ) as mock_util,
@@ -38,7 +40,9 @@ class TestConfigDrivenProviderRegistration:
 
         with (
             patch("importlib.util.find_spec", return_value=MagicMock()),
-            patch("orb.providers.aws.registration.register_aws_services_with_di") as mock_aws_register,
+            patch(
+                "orb.providers.aws.registration.register_aws_services_with_di"
+            ) as mock_aws_register,
         ):
             _register_provider_utility_services(container)
             mock_aws_register.assert_called_once_with(container)
