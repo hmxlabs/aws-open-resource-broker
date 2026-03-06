@@ -11,36 +11,21 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/awslabs/open-resource-broker/actions/workflows/test-matrix.yml"><img src="https://github.com/awslabs/open-resource-broker/workflows/Test%20Matrix/badge.svg" alt="Test Matrix"></a>
-  <a href="https://github.com/awslabs/open-resource-broker/actions/workflows/ci-quality.yml"><img src="https://github.com/awslabs/open-resource-broker/workflows/Quality%20Checks/badge.svg" alt="Quality Checks"></a>
-  <a href="https://github.com/awslabs/open-resource-broker/actions/workflows/security-code.yml"><img src="https://github.com/awslabs/open-resource-broker/workflows/Security%20Scanning/badge.svg" alt="Security Scanning"></a>
-  <br>
-  <a href="https://github.com/awslabs/open-resource-broker/releases"><img src="https://img.shields.io/github/v/release/awslabs/open-resource-broker" alt="Latest Release"></a>
   <a href="https://pypi.org/project/orb-py/"><img src="https://img.shields.io/pypi/v/orb-py" alt="PyPI Version"></a>
   <a href="https://pypi.org/project/orb-py/"><img src="https://img.shields.io/pypi/pyversions/orb-py" alt="Python Versions"></a>
   <a href="LICENSE"><img src="https://img.shields.io/github/license/awslabs/open-resource-broker" alt="License"></a>
-  <br>
-  <a href="https://deepwiki.com/awslabs/open-resource-broker"><img src="https://img.shields.io/badge/DeepWiki-awslabs%2Fopen--resource--broker-blue?logo=data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMjQiIGhlaWdodD0iMjQiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PHBhdGggZD0iTTEyIDJDNi40OCAyIDIgNi40OCAyIDEyczQuNDggMTAgMTAgMTAgMTAtNC40OCAxMC0xMFMxNy41MiAyIDEyIDJ6bTAgMThjLTQuNDIgMC04LTMuNTgtOC04czMuNTgtOCA4LTggOCAzLjU4IDggOC0zLjU4IDgtOCA4eiIgZmlsbD0id2hpdGUiLz48cGF0aCBkPSJNMTEgN2gydjZoLTJ6bTAgOGgydjJoLTJ6IiBmaWxsPSJ3aGl0ZSIvPjwvc3ZnPg==" alt="DeepWiki"></a>
-  <a href="https://awslabs.github.io/open-resource-broker/"><img src="https://img.shields.io/badge/docs-awslabs.github.io-blue" alt="Documentation"></a>
+  <a href="https://github.com/awslabs/open-resource-broker/releases"><img src="https://img.shields.io/github/v/release/awslabs/open-resource-broker" alt="Latest Release"></a>
+  <a href="https://deepwiki.com/awslabs/open-resource-broker"><img src="https://deepwiki.com/badge.svg" alt="Ask DeepWiki"></a>
 </p>
 
 ---
 
 ORB lets you request, track, and return cloud compute resources through a single CLI. It integrates with IBM Spectrum Symphony as a HostFactory provider plugin and also works standalone. It supports AWS (EC2, Auto Scaling Groups, SpotFleet, EC2Fleet) and is designed to be extended to additional providers. Resources are provisioned on demand and returned when no longer needed.
 
-### Providers
-
 | Provider | Resource Types | Status |
 |---|---|---|
 | **AWS** | EC2 RunInstances, EC2Fleet, SpotFleet, Auto Scaling Groups | Supported |
 | *Custom* | Extensible via provider registry | [Guide](docs/root/developer_guide/architecture.md) |
-
-### Schedulers
-
-| Scheduler | Integration | Description |
-|---|---|---|
-| **HostFactory** | IBM Spectrum Symphony | ORB runs as a HostFactory provider plugin for Symphony |
-| **Default** | Standalone | Direct CLI and REST API usage without an external scheduler |
 
 ## Quick Start
 
@@ -408,7 +393,11 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the full development guide.
 ---
 
 <details>
-<summary>Documentation</summary>
+<summary>Documentation & CI</summary>
+
+[![Test Matrix](https://github.com/awslabs/open-resource-broker/workflows/Test%20Matrix/badge.svg)](https://github.com/awslabs/open-resource-broker/actions/workflows/test-matrix.yml)
+[![Quality Checks](https://github.com/awslabs/open-resource-broker/workflows/Quality%20Checks/badge.svg)](https://github.com/awslabs/open-resource-broker/actions/workflows/ci-quality.yml)
+[![Security Scanning](https://github.com/awslabs/open-resource-broker/workflows/Security%20Scanning/badge.svg)](https://github.com/awslabs/open-resource-broker/actions/workflows/security-code.yml)
 
 - [Quick Start](docs/root/getting_started/quick_start.md)
 - [CLI Reference](docs/root/cli/cli-reference.md)
