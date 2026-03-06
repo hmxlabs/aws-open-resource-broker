@@ -271,7 +271,7 @@ class AWSValidationAdapter(BaseProviderValidationAdapter):
         if "." not in instance_type:
             return False
 
-        family, size = instance_type.split(".", 1)
+        family, _size = instance_type.split(".", 1)
 
         # Common AWS instance families
         common_families = [
