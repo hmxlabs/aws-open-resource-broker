@@ -157,7 +157,9 @@ class TestApplicationWithConfigDict:
         finally:
             container_module.get_container = original_get_container
 
-        registered_types = [call.args[0] for call in mock_container.register_instance.call_args_list]
+        registered_types = [
+            call.args[0] for call in mock_container.register_instance.call_args_list
+        ]
         assert ConfigurationManager not in registered_types
 
 
@@ -204,6 +206,7 @@ class TestORBClientAppConfig:
 
         try:
             import asyncio
+
             asyncio.get_event_loop().run_until_complete(sdk.initialize())
         except Exception:
             pass
