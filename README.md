@@ -125,6 +125,8 @@ Requires Python 3.10+.
 <details>
 <summary>CLI Reference</summary>
 
+All available commands and flags.
+
 | Command | Description |
 |---|---|
 | `orb init` | Initialize config and discover AWS infrastructure |
@@ -286,6 +288,8 @@ See the [Architecture Guide](docs/root/developer_guide/architecture.md) for deta
 <details>
 <summary>REST API</summary>
 
+Example API calls. Requires `pip install "orb-py[api]"` and `orb system serve`.
+
 ```bash
 # Get available templates
 curl -X GET "http://localhost:8000/api/v1/templates"
@@ -299,14 +303,14 @@ curl -X POST "http://localhost:8000/api/v1/requests" \
 curl -X GET "http://localhost:8000/api/v1/requests/req-12345"
 ```
 
-Start the API server with `pip install "orb-py[api]"` and `orb system serve`.
-
 </details>
 
 ---
 
 <details>
 <summary>Python SDK</summary>
+
+Async-first programmatic access via `ORBClient`.
 
 ```python
 from orb import ORBClient as orb
@@ -419,6 +423,8 @@ See the [HostFactory Guide](docs/root/hostfactory/integration_guide.md) for full
 <details>
 <summary>Docker Deployment</summary>
 
+Run ORB as a containerized service.
+
 ```bash
 git clone https://github.com/awslabs/open-resource-broker.git
 cd open-resource-broker
@@ -434,6 +440,8 @@ curl http://localhost:8000/health
 
 <details>
 <summary>Development</summary>
+
+Set up a local development environment.
 
 ```bash
 git clone https://github.com/awslabs/open-resource-broker.git
