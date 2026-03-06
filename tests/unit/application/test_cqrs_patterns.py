@@ -140,7 +140,9 @@ class TestCommandQuerySeparation:
         mock_provider_validation_result = Mock()
         mock_provider_validation_result.is_valid = True
         mock_provider_validation_result.warnings = []
-        mock_provider_selection.validate_template_requirements.return_value = mock_provider_validation_result
+        mock_provider_selection.validate_template_requirements.return_value = (
+            mock_provider_validation_result
+        )
 
         mock_provider_capability = Mock()
         mock_validation_result = Mock()
@@ -469,7 +471,9 @@ class TestCommandHandlerImplementation:
         )
 
         # Valid command
-        valid_command = CreateRequestCommand(template_id="test-template", requested_count=2, dry_run=True)
+        valid_command = CreateRequestCommand(
+            template_id="test-template", requested_count=2, dry_run=True
+        )
 
         # Mock template exists
         mock_template = Mock()
@@ -488,7 +492,9 @@ class TestCommandHandlerImplementation:
         mock_provider_validation_result = Mock()
         mock_provider_validation_result.is_valid = True
         mock_provider_validation_result.warnings = []
-        mock_provider_selection.validate_template_requirements.return_value = mock_provider_validation_result
+        mock_provider_selection.validate_template_requirements.return_value = (
+            mock_provider_validation_result
+        )
 
         mock_validation_result = Mock()
         mock_validation_result.is_valid = True
@@ -550,7 +556,9 @@ class TestCommandHandlerImplementation:
         mock_provider_validation_result = Mock()
         mock_provider_validation_result.is_valid = True
         mock_provider_validation_result.warnings = []
-        mock_provider_selection.validate_template_requirements.return_value = mock_provider_validation_result
+        mock_provider_selection.validate_template_requirements.return_value = (
+            mock_provider_validation_result
+        )
 
         mock_provider_capability = Mock()
         mock_validation_result = Mock()

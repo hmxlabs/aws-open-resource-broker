@@ -184,7 +184,6 @@ class TestSOLIDCompliance:
         except ImportError as e:
             pytest.skip(f"Could not import ProviderPort: {e}")
 
-
         # ProviderPort should be abstract/protocol
         assert hasattr(ProviderPort, "__abstractmethods__") or hasattr(
             ProviderPort, "_abc_registry"
