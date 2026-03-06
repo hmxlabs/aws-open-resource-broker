@@ -80,12 +80,16 @@ class TestHandleRequestMachines:
 
         args = _make_namespace(template_id="t1", machine_count=3, metadata={})
 
-        with patch("orb.interface.request_command_handlers.get_container", return_value=container), patch(
-            "orb.api.utils.request_id_generator.generate_request_id",
-            return_value="req-fixed",
-        ), patch(
-            "orb.infrastructure.mocking.dry_run_context.is_dry_run_active",
-            return_value=False,
+        with (
+            patch("orb.interface.request_command_handlers.get_container", return_value=container),
+            patch(
+                "orb.api.utils.request_id_generator.generate_request_id",
+                return_value="req-fixed",
+            ),
+            patch(
+                "orb.infrastructure.mocking.dry_run_context.is_dry_run_active",
+                return_value=False,
+            ),
         ):
             result = await handle_request_machines(args)
 
@@ -124,12 +128,16 @@ class TestHandleRequestMachines:
             metadata={},
         )
 
-        with patch("orb.interface.request_command_handlers.get_container", return_value=container), patch(
-            "orb.api.utils.request_id_generator.generate_request_id",
-            return_value="req-fixed",
-        ), patch(
-            "orb.infrastructure.mocking.dry_run_context.is_dry_run_active",
-            return_value=False,
+        with (
+            patch("orb.interface.request_command_handlers.get_container", return_value=container),
+            patch(
+                "orb.api.utils.request_id_generator.generate_request_id",
+                return_value="req-fixed",
+            ),
+            patch(
+                "orb.infrastructure.mocking.dry_run_context.is_dry_run_active",
+                return_value=False,
+            ),
         ):
             result = await handle_request_machines(args)
 
@@ -146,9 +154,12 @@ class TestHandleRequestMachines:
 
         args = _make_namespace(machine_count=3, metadata={})
 
-        with patch("orb.interface.request_command_handlers.get_container", return_value=container), patch(
-            "orb.infrastructure.mocking.dry_run_context.is_dry_run_active",
-            return_value=False,
+        with (
+            patch("orb.interface.request_command_handlers.get_container", return_value=container),
+            patch(
+                "orb.infrastructure.mocking.dry_run_context.is_dry_run_active",
+                return_value=False,
+            ),
         ):
             result = await handle_request_machines(args)
 
@@ -167,9 +178,12 @@ class TestHandleRequestMachines:
 
         args = _make_namespace(template_id="t1", metadata={})
 
-        with patch("orb.interface.request_command_handlers.get_container", return_value=container), patch(
-            "orb.infrastructure.mocking.dry_run_context.is_dry_run_active",
-            return_value=False,
+        with (
+            patch("orb.interface.request_command_handlers.get_container", return_value=container),
+            patch(
+                "orb.infrastructure.mocking.dry_run_context.is_dry_run_active",
+                return_value=False,
+            ),
         ):
             result = await handle_request_machines(args)
 
@@ -191,12 +205,16 @@ class TestHandleRequestMachines:
 
         args = _make_namespace(template_id="t1", machine_count=2, metadata={})
 
-        with patch("orb.interface.request_command_handlers.get_container", return_value=container), patch(
-            "orb.api.utils.request_id_generator.generate_request_id",
-            return_value="req-fixed",
-        ), patch(
-            "orb.infrastructure.mocking.dry_run_context.is_dry_run_active",
-            return_value=False,
+        with (
+            patch("orb.interface.request_command_handlers.get_container", return_value=container),
+            patch(
+                "orb.api.utils.request_id_generator.generate_request_id",
+                return_value="req-fixed",
+            ),
+            patch(
+                "orb.infrastructure.mocking.dry_run_context.is_dry_run_active",
+                return_value=False,
+            ),
         ):
             result = await handle_request_machines(args)
 

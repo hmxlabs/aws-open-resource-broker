@@ -54,7 +54,9 @@ def requests_app():
 class TestMachinesRouter:
     """Tests for the /machines router."""
 
-    def _make_client(self, app, mock_query_bus=None, mock_request_handler=None, mock_return_handler=None):
+    def _make_client(
+        self, app, mock_query_bus=None, mock_request_handler=None, mock_return_handler=None
+    ):
         if mock_query_bus is not None:
             app.dependency_overrides[get_query_bus] = lambda: mock_query_bus
         if mock_request_handler is not None:
@@ -225,7 +227,9 @@ class TestMachinesRouter:
 class TestRequestsRouter:
     """Tests for the /requests router."""
 
-    def _make_client(self, app, mock_query_bus=None, mock_command_bus=None, mock_status_handler=None):
+    def _make_client(
+        self, app, mock_query_bus=None, mock_command_bus=None, mock_status_handler=None
+    ):
         if mock_query_bus is not None:
             app.dependency_overrides[get_query_bus] = lambda: mock_query_bus
         if mock_command_bus is not None:
