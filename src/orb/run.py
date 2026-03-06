@@ -6,7 +6,6 @@ import os
 import sys
 
 # Add project root to Python path to enable absolute imports
-# This allows src/run.py to import using src.module.submodule pattern
 current_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.dirname(current_dir)  # Go up one level from src/ to project root
 if project_root not in sys.path:

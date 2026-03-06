@@ -180,7 +180,7 @@ class TestOCPComplianceIntegration:
     def test_no_hard_coded_conditionals(self):
         """Test that no hard-coded provider conditionals exist in key files."""
         files_to_check = [
-            "src/application/commands/provider_handlers.py",
+            "src/orb/application/commands/provider_handlers.py",
         ]
 
         for file_path in files_to_check:
