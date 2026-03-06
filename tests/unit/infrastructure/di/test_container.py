@@ -448,11 +448,11 @@ class TestDIContainer:
 
         # Mock injectable decorator
         with patch(
-            "src.infrastructure.di.components.dependency_resolver.is_injectable",
+            "orb.infrastructure.di.components.dependency_resolver.is_injectable",
             return_value=True,
         ):
             with patch(
-                "src.infrastructure.di.components.dependency_resolver.get_injectable_metadata",
+                "orb.infrastructure.di.components.dependency_resolver.get_injectable_metadata",
                 return_value=None,
             ):
                 self.container.register_injectable_class(InjectableService)

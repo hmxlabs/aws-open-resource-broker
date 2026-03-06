@@ -222,11 +222,11 @@ class TestDependencyResolver:
                 self.value = "injectable"
 
         with patch(
-            "infrastructure.di.components.dependency_resolver.is_injectable",
+            "orb.infrastructure.di.components.dependency_resolver.is_injectable",
             return_value=True,
         ):
             with patch(
-                "infrastructure.di.components.dependency_resolver.get_injectable_metadata",
+                "orb.infrastructure.di.components.dependency_resolver.get_injectable_metadata",
                 return_value=None,
             ):
                 instance = self.resolver.resolve(InjectableClass)
