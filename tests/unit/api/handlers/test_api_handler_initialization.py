@@ -150,7 +150,9 @@ class TestAPIHandlerRegistration:
         config_manager.get_typed.return_value = server_config
         container.get.return_value = config_manager
 
-        with patch("orb.infrastructure.di.server_services._register_fastapi_services") as mock_fastapi:
+        with patch(
+            "orb.infrastructure.di.server_services._register_fastapi_services"
+        ) as mock_fastapi:
             mock_fastapi.side_effect = ImportError("No module named 'fastapi'")
 
             # Act - should not raise exception

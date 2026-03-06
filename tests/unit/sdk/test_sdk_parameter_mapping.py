@@ -267,9 +267,12 @@ class TestDiscoverCQRSMethods:
         fake_command_handlers = {FakeCreateCommand: MagicMock()}
 
         with (
-            patch("orb.sdk.discovery.get_registered_query_handlers", return_value=fake_query_handlers),
             patch(
-                "orb.sdk.discovery.get_registered_command_handlers", return_value=fake_command_handlers
+                "orb.sdk.discovery.get_registered_query_handlers", return_value=fake_query_handlers
+            ),
+            patch(
+                "orb.sdk.discovery.get_registered_command_handlers",
+                return_value=fake_command_handlers,
             ),
         ):
             methods = await disc.discover_cqrs_methods(query_bus, command_bus)
@@ -285,7 +288,9 @@ class TestDiscoverCQRSMethods:
 
         disc = SDKMethodDiscovery()
 
-        with patch("orb.sdk.discovery.get_registered_query_handlers", side_effect=RuntimeError("boom")):
+        with patch(
+            "orb.sdk.discovery.get_registered_query_handlers", side_effect=RuntimeError("boom")
+        ):
             with pytest.raises(HandlerDiscoveryError):
                 await disc.discover_cqrs_methods(AsyncMock(), AsyncMock())
 
