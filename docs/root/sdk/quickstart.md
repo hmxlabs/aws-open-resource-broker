@@ -13,11 +13,8 @@ The Open Resource Broker SDK provides a clean, async-first programmatic interfac
 ## Installation
 
 ```bash
-# Install the base package
-pip install open-resource-broker
-
-# Or install with SDK support
-pip install open-resource-broker[sdk]
+# Install the base package (SDK is included)
+pip install orb-py
 ```
 
 ## Basic Usage
@@ -35,13 +32,13 @@ async with orb(provider="aws") as sdk:
     # Create machines using CLI-style convenience method
     if templates:
         request = await sdk.request_machines(
-            template_id=templates[0].template_id,
+            template_id=templates[0]["template_id"],
             count=5
         )
-        print(f"Created request: {request.id}")
+        print(f"Created request: {request['created_request_id']}")
 
         # Check status
-        status = await sdk.get_request_status(request_id=request.id)
+        status = await sdk.get_request_status(request_id=request["created_request_id"])
         print(f"Request status: {status}")
 ```
 
@@ -62,7 +59,7 @@ async with orb(provider="aws") as sdk:
 ```
 
 These convenience methods map to the underlying CQRS methods:
-- `request_machines(template_id, count)` → `create_request(template_id=template_id, machine_count=count)`
+- `request_machines(template_id, count)` → `create_request(template_id=template_id, count=count)`
 - `show_template(template_id)` → `get_template(template_id=template_id)`
 - `health_check()` → `get_provider_health()`
 
@@ -123,7 +120,7 @@ For users familiar with the CLI, the SDK provides both convenience methods and d
 
 | CLI Command | SDK Convenience Method | SDK CQRS Method |
 |-------------|----------------------|-----------------|
-| `orb machines request <template_id> <count>` | `sdk.request_machines(template_id, count)` | `sdk.create_request(template_id=template_id, machine_count=count)` |
+| `orb machines request <template_id> <count>` | `sdk.request_machines(template_id, count)` | `sdk.create_request(template_id=template_id, count=count)` |
 | `orb templates show <template_id>` | `sdk.show_template(template_id)` | `sdk.get_template(template_id=template_id)` |
 | `orb providers health` | `sdk.health_check()` | `sdk.get_provider_health()` |
 | `orb templates list` | N/A | `sdk.list_templates()` |
@@ -142,10 +139,9 @@ async with orb(provider="aws") as sdk:
 async with orb(provider="aws") as sdk:
     template = await sdk.get_template(template_id="my-template")
     request = await sdk.create_request(
-        template_id="my-template", 
-        machine_count=3,
-        timeout=1800,
-        priority="high"
+        template_id="my-template",
+        count=3,
+        timeout=1800
     )
     health = await sdk.get_provider_health()
 ```
@@ -218,18 +214,15 @@ async with orb(provider="aws") as sdk:
     # Create machine request
     request = await sdk.create_request(
         template_id="basic-template",
-        machine_count=3,
+        count=3,
         timeout=1800
     )
 
     # Monitor request status
-    status = await sdk.get_request_status(request_id=request.id)
+    status = await sdk.get_request_status(request_id=request["created_request_id"])
 
-    # List machines
-    machines = await sdk.list_machines(status="running")
-
-    # Get machine details
-    machine = await sdk.get_machine(machine_id="i-1234567890abcdef0")
+    # List active requests
+    requests = await sdk.list_active_requests()
 
     # Return machines when done
     return_request = await sdk.create_return_request(
@@ -241,14 +234,11 @@ async with orb(provider="aws") as sdk:
 
 ```python
 async with orb(provider="aws") as sdk:
-    # List requests
-    requests = await sdk.list_requests(status="pending")
+    # List active requests
+    requests = await sdk.list_active_requests()
 
-    # Get request details
-    request = await sdk.get_request(request_id="req-12345678")
-
-    # Cancel request
-    await sdk.cancel_request(request_id="req-12345678")
+    # Get request status
+    status = await sdk.get_request_status(request_id="req-12345678")
 ```
 
 ### Provider Operations
@@ -259,7 +249,7 @@ async with orb(provider="aws") as sdk:
     health = await sdk.get_provider_health()
 
     # List available providers
-    providers = await sdk.list_providers()
+    providers = await sdk.list_available_providers()
 
     # Get provider configuration
     config = await sdk.get_provider_config()
@@ -285,7 +275,8 @@ async with orb(provider="aws") as sdk:
 ## Error Handling
 
 ```python
-from orb import ORBClient as orb, SDKError, ConfigurationError, ProviderError
+from orb import ORBClient as orb
+from orb.sdk.exceptions import SDKError, ConfigurationError, ProviderError
 
 try:
     async with orb(provider="aws") as sdk:
@@ -301,12 +292,10 @@ except SDKError as e:
 ### Error Types
 
 - **SDKError**: Base class for all SDK errors
-- **ConfigurationError**: Configuration-related errors
-- **ProviderError**: Cloud provider-related errors
-- **ValidationError**: Input validation errors
-- **ResourceNotFoundError**: Resource not found errors
-- **AuthenticationError**: Authentication-related errors
-- **NetworkError**: Network-related errors
+- **ConfigurationError**: Configuration-related errors (invalid config, missing files)
+- **ProviderError**: Cloud provider initialization or operation errors
+- **HandlerDiscoveryError**: CQRS handler discovery failures
+- **MethodExecutionError**: SDK method execution failures
 
 ## Advanced Usage
 
@@ -339,7 +328,7 @@ async with orb(provider="aws") as sdk:
     ])
 
     for result in results:
-        print(f"Request ID: {result.id}")
+        print(f"Request ID: {result['created_request_id']}")
 ```
 
 ### Custom Serialization

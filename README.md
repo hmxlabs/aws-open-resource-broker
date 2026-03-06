@@ -220,12 +220,12 @@ async with orb(provider="aws") as sdk:
 
     # Request machines
     request = await sdk.request_machines(
-        template_id=templates[0].template_id,
+        template_id=templates[0]["template_id"],
         count=3
     )
 
     # Check status
-    status = await sdk.get_request_status(request_id=request.id)
+    status = await sdk.get_request_status(request_id=request["created_request_id"])
 ```
 
 See the [SDK Quickstart](docs/root/sdk/quickstart.md) for the full guide.

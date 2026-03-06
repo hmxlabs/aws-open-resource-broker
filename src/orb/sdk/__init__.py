@@ -44,12 +44,18 @@ Usage:
         # Both parameter styles work:
         request1 = await client.create_request(template_id="basic", count=5)
         request2 = await client.create_request(template_id="basic", requested_count=5)
-        status = await client.get_request_status(request_id=request1.id)
+        status = await client.get_request_status(request_id=request1["request_id"])
 """
 
 from .client import ORB, OpenResourceBroker, ORBClient
 from .config import SDKConfig
-from .exceptions import ConfigurationError, ProviderError, SDKError
+from .exceptions import (
+    ConfigurationError,
+    HandlerDiscoveryError,
+    MethodExecutionError,
+    ProviderError,
+    SDKError,
+)
 
 # Convenient alias
 orb = ORBClient
@@ -60,6 +66,8 @@ __all__: list[str] = [
     "orb",
     "OpenResourceBroker",
     "ConfigurationError",
+    "HandlerDiscoveryError",
+    "MethodExecutionError",
     "ProviderError",
     "SDKConfig",
     "SDKError",
