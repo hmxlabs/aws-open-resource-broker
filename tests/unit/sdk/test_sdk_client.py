@@ -289,7 +289,9 @@ class TestRegionProfileOverrides:
 
     @pytest.mark.asyncio
     async def test_region_and_profile_both_applied(self):
-        sdk = OpenResourceBroker(config={"provider": "aws", "region": "eu-west-1", "profile": "staging"})
+        sdk = OpenResourceBroker(
+            config={"provider": "aws", "region": "eu-west-1", "profile": "staging"}
+        )
         mock_app, mock_disc = self._make_init_mocks()
         mock_config_port = MagicMock()
 

@@ -105,9 +105,7 @@ class ORBClient:
                 )
 
             # skip_validation=True bypasses StartupValidator (sys.exit) in Application.__init__
-            self._app = Application(
-                config_path=self._config.config_path, skip_validation=True
-            )
+            self._app = Application(config_path=self._config.config_path, skip_validation=True)
 
             if not await self._app.initialize():
                 raise ProviderError(
@@ -148,9 +146,7 @@ class ORBClient:
         except SystemExit as e:
             # Defensive catch: if any downstream code calls sys.exit, convert it so
             # the SDK never kills the caller's process.
-            raise ConfigurationError(
-                f"Configuration validation failed (exit code {e.code})"
-            ) from e
+            raise ConfigurationError(f"Configuration validation failed (exit code {e.code})") from e
         except Exception as e:
             if isinstance(e, (SDKError, ConfigurationError, ProviderError)):
                 raise
