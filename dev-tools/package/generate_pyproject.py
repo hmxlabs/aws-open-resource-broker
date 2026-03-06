@@ -198,7 +198,7 @@ def update_pyproject_selective(pyproject_path: Path) -> None:
             new_lines.extend(
                 [
                     "[project.scripts]",
-                    f'{package_name_short} = "run:cli_main"',
+                    f'{package_name_short} = "orb.run:cli_main"',
                     "",
                 ]
             )
