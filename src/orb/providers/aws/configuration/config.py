@@ -111,12 +111,12 @@ class AWSProviderConfig(BaseSettings, BaseProviderConfig):  # type: ignore[misc]
     aws_max_retries: int = Field(
         3,
         description="Maximum number of retries for AWS API calls",
-        alias="max_retries",
+        validation_alias="max_retries",
     )
     aws_read_timeout: int = Field(
         30,
         description="Read timeout for AWS API calls in seconds",
-        alias="timeout",
+        validation_alias="timeout",
     )
 
     # AWS Services

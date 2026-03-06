@@ -414,17 +414,15 @@ known-first-party = ["orb"]
 combine-as-imports = true
 
 [tool.pyright]
-pythonVersion = "3.9"
+pythonVersion = "3.12"
 pythonPlatform = "Linux"
 include = ["src/orb"]  # keep in sync with .project.yml build.package_root
-exclude = ["tests", ".venv", "build", "dist"]
+exclude = [".venv", "build", "dist"]
 typeCheckingMode = "basic"
 reportMissingImports = true
 reportMissingTypeStubs = false
-reportUnusedImports = true
 reportUnusedVariable = true
 reportPrivateUsage = false
-useLibraryCodeForTypes = true
 venvPath = "."
 venv = ".venv"
 
