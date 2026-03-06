@@ -54,7 +54,7 @@ def _patched_validation_result(**kwargs):
     return ValidationResult(**kwargs)
 
 
-PATCH_TARGET = "domain.services.template_validation_domain_service.ValidationResult"
+PATCH_TARGET = "orb.domain.services.template_validation_domain_service.ValidationResult"
 
 
 class TestTemplateValidationDomainService:
