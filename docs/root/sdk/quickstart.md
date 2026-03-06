@@ -38,7 +38,7 @@ async with orb(provider="aws") as sdk:
         print(f"Created request: {request['created_request_id']}")
 
         # Check status
-        status = await sdk.get_request_status(request_id=request["created_request_id"])
+        status = await sdk.get_request(request_id=request["created_request_id"])
         print(f"Request status: {status}")
 ```
 
@@ -81,35 +81,73 @@ finally:
 
 ## Configuration
 
+There are five ways to configure `ORBClient`. They are not mutually exclusive — `config=` and `app_config=` can be combined, and environment variables are always read as the baseline when neither `config=` nor `config_path=` is passed.
+
+| Parameter | Controls | Use when |
+|-----------|----------|----------|
+| _(none)_ | SDK settings from env vars | Local dev with env vars set |
+| `config=` | SDK-level settings (timeout, log_level, region, etc.) | Programmatic SDK tuning |
+| `config_path=` | Path to app config JSON on disk | Standard on-disk deployment |
+| `app_config=` | Full application config as dict | Lambda, notebooks, CI — no filesystem |
+| env vars only | SDK settings via `ORB_*` variables | Container / shell environments |
+
+### Default (no arguments)
+
+When no config arguments are passed, the SDK reads `ORB_*` environment variables and falls back to built-in defaults:
+
+```python
+async with orb() as sdk:
+    # provider=aws, timeout=300, log_level=INFO (or whatever ORB_* vars are set)
+    templates = await sdk.list_templates()
+```
+
 ### Environment Variables
+
+All SDK-level settings can be set via environment variables:
 
 ```bash
 export ORB_PROVIDER=aws
 export ORB_REGION=us-east-1
 export ORB_PROFILE=default
 export ORB_TIMEOUT=300
+export ORB_RETRY_ATTEMPTS=3
 export ORB_LOG_LEVEL=INFO
+export ORB_CONFIG_FILE=/path/to/config.json   # app config file path
 ```
 
-### Configuration Dictionary
+`ORB_CONFIG_FILE` points to the application config JSON (equivalent to `config_path=`). The other variables map directly to `SDKConfig` fields.
+
+### SDK Config Dictionary (`config=`)
+
+Pass SDK-level settings as a dict. These control the SDK's own behaviour — timeout, log level, region override, etc. — not the application config structure.
 
 ```python
 config = {
     "provider": "aws",
     "region": "us-west-2",
     "timeout": 600,
-    "log_level": "DEBUG"
+    "log_level": "DEBUG",
+    "retry_attempts": 5,
 }
 
 async with orb(config=config) as sdk:
-    # Use SDK with custom configuration
     pass
 ```
 
-### Application Config (No Filesystem Required)
+### Config File on Disk (`config_path=`)
 
-For environments without config.json on disk (Lambda, notebooks, CI), pass the
-full application config as a dict:
+Load the full application config from a JSON file. This is the standard mode for deployed services that have a config.json on disk.
+
+```python
+async with orb(config_path="/etc/orb/config.json") as sdk:
+    pass
+```
+
+The file must follow the same structure as the platform's `config.json`. A `ConfigurationError` is raised if the file does not exist.
+
+### In-Memory Application Config (`app_config=`)
+
+For environments without a config file on disk (Lambda functions, Jupyter notebooks, CI pipelines), pass the full application config as a dict. This is equivalent to what would normally be in `config.json`.
 
 ```python
 app_config = {
@@ -128,11 +166,10 @@ async with orb(app_config=app_config) as sdk:
     templates = await sdk.list_templates()
 ```
 
-### Configuration File
+`app_config=` and `config=` can be combined — `app_config` sets the application config structure while `config` tunes SDK behaviour:
 
 ```python
-# Load from JSON file
-async with orb(config_path="config.json") as sdk:
+async with orb(app_config=app_config, config={"timeout": 600, "log_level": "DEBUG"}) as sdk:
     pass
 ```
 
@@ -159,7 +196,7 @@ For users familiar with the CLI, the SDK provides both convenience methods and d
 | `orb templates show <template_id>` | `sdk.show_template(template_id)` | `sdk.get_template(template_id=template_id)` |
 | `orb providers health` | `sdk.health_check()` | `sdk.get_provider_health()` |
 | `orb templates list` | N/A | `sdk.list_templates()` |
-| `orb requests status <request_id>` | N/A | `sdk.get_request_status(request_id=request_id)` |
+| `orb requests status <request_id>` | N/A | `sdk.get_request(request_id=request_id)` |
 
 ### Example Usage Comparison
 
@@ -214,7 +251,7 @@ from orb.sdk import ORBClientProtocol
 async def provision_machines(client: ORBClientProtocol, template_id: str, count: int):
     """Type-safe function accepting any ORBClient-compatible object."""
     request = await client.create_request(template_id=template_id, count=count)
-    return await client.get_request_status(request_id=request["created_request_id"])
+    return await client.get_request(request_id=request["created_request_id"])
 ```
 
 ## Common Operations
@@ -267,7 +304,7 @@ async with orb(provider="aws") as sdk:
     )
 
     # Monitor request status
-    status = await sdk.get_request_status(request_id=request["created_request_id"])
+    status = await sdk.get_request(request_id=request["created_request_id"])
 
     # List active requests
     requests = await sdk.list_active_requests()
@@ -286,7 +323,7 @@ async with orb(provider="aws") as sdk:
     requests = await sdk.list_active_requests()
 
     # Get request status
-    status = await sdk.get_request_status(request_id="req-12345678")
+    status = await sdk.get_request(request_id="req-12345678")
 ```
 
 ### Provider Operations
