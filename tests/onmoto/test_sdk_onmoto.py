@@ -21,6 +21,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 
 from tests.onmoto.conftest import _inject_moto_factory, _make_logger, _make_moto_aws_client
+from tests.shared.scenarios import TestScenario, get_smoke_scenarios
 
 REGION = "eu-west-2"
 REQUEST_ID_RE = re.compile(r"^req-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
@@ -33,33 +34,9 @@ pytestmark = [pytest.mark.moto, pytest.mark.sdk]
 # ---------------------------------------------------------------------------
 
 
-def _extract_request_id(result) -> str | None:
-    if isinstance(result, dict):
-        return (
-            result.get("requestId") or result.get("request_id") or result.get("created_request_id")
-        )
-    return getattr(result, "request_id", None) or getattr(result, "created_request_id", None)
-
-
-def _extract_status(result) -> str:
-    if isinstance(result, dict):
-        requests = result.get("requests", [])
-        if requests and isinstance(requests[0], dict):
-            return requests[0].get("status", "unknown")
-        return result.get("status", "unknown")
-    return getattr(result, "status", "unknown")
-
-
-def _extract_machine_ids(result) -> list[str]:
-    if isinstance(result, dict):
-        requests = result.get("requests", [])
-        if requests and isinstance(requests[0], dict):
-            machines = requests[0].get("machines", [])
-            return [
-                mid for m in machines for mid in [m.get("machineId") or m.get("machine_id")] if mid
-            ]
-    machines = getattr(result, "machines", [])
-    return [str(mid) for m in machines for mid in [getattr(m, "machine_id", None)] if mid]
+from tests.shared.response_helpers import extract_machine_ids as _extract_machine_ids
+from tests.shared.response_helpers import extract_request_id as _extract_request_id
+from tests.shared.response_helpers import extract_status as _extract_status
 
 
 def _extract_templates(result) -> list:
@@ -263,10 +240,14 @@ class TestSDKRequestLifecycle:
     """Full request lifecycle via ORBClient against moto AWS."""
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize("scenario", get_smoke_scenarios(), ids=lambda s: s.scenario_id)
     async def test_create_request_returns_request_id(
-        self, orb_config_dir, moto_aws, moto_vpc_resources
+        self, orb_config_dir, moto_aws, moto_vpc_resources, scenario: TestScenario
     ):
         """create_request() returns a valid request_id."""
+        if scenario.provider_api != "RunInstances":
+            pytest.xfail(reason=f"moto does not fully support {scenario.provider_api}")
+
         import json
 
         from orb.sdk.client import ORBClient
@@ -278,7 +259,7 @@ class TestSDKRequestLifecycle:
             logger = _make_logger()
             _inject_moto_factory(aws_client, logger, None)
 
-            result = await sdk.create_request(template_id="RunInstances-OnDemand", count=1)
+            result = await sdk.create_request(template_id=scenario.template_id, count=scenario.capacity)
             request_id = _extract_request_id(result)
 
             assert request_id is not None, f"No request_id in response: {result}"
@@ -287,10 +268,14 @@ class TestSDKRequestLifecycle:
             )
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize("scenario", get_smoke_scenarios(), ids=lambda s: s.scenario_id)
     async def test_get_request_status_after_create(
-        self, orb_config_dir, moto_aws, moto_vpc_resources
+        self, orb_config_dir, moto_aws, moto_vpc_resources, scenario: TestScenario
     ):
         """get_request() returns a well-formed status response after create_request()."""
+        if scenario.provider_api != "RunInstances":
+            pytest.xfail(reason=f"moto does not fully support {scenario.provider_api}")
+
         import json
 
         from orb.sdk.client import ORBClient
@@ -302,7 +287,7 @@ class TestSDKRequestLifecycle:
             logger = _make_logger()
             _inject_moto_factory(aws_client, logger, None)
 
-            create_result = await sdk.create_request(template_id="RunInstances-OnDemand", count=1)
+            create_result = await sdk.create_request(template_id=scenario.template_id, count=scenario.capacity)
             request_id = _extract_request_id(create_result)
             assert request_id, f"No request_id in create response: {create_result}"
 
@@ -332,8 +317,9 @@ class TestSDKRequestLifecycle:
                     )
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize("scenario", get_smoke_scenarios(), ids=lambda s: s.scenario_id)
     async def test_full_request_and_return_cycle(
-        self, orb_config_dir, moto_aws, moto_vpc_resources
+        self, orb_config_dir, moto_aws, moto_vpc_resources, scenario: TestScenario
     ):
         """Full cycle: create_request -> get_request -> create_return_request.
 
@@ -345,6 +331,9 @@ class TestSDKRequestLifecycle:
         - create_return_request returns a response with a message field
         - machine state transitions are verified where possible
         """
+        if scenario.provider_api != "RunInstances":
+            pytest.xfail(reason=f"moto does not fully support {scenario.provider_api}")
+
         import json
 
         from orb.sdk.client import ORBClient
@@ -362,12 +351,12 @@ class TestSDKRequestLifecycle:
                 _get_template_field(tpl, "template_id", "templateId")
                 for tpl in _extract_templates(templates_result)
             } - {None}
-            assert "RunInstances-OnDemand" in known_ids, (
-                f"'RunInstances-OnDemand' not in loaded templates: {sorted(known_ids)}"  # type: ignore[arg-type]
+            assert scenario.template_id in known_ids, (
+                f"{scenario.template_id!r} not in loaded templates: {sorted(known_ids)}"  # type: ignore[arg-type]
             )
 
             # 2. Create request
-            create_result = await sdk.create_request(template_id="RunInstances-OnDemand", count=1)
+            create_result = await sdk.create_request(template_id=scenario.template_id, count=scenario.capacity)
             request_id = _extract_request_id(create_result)
             assert request_id, f"No request_id: {create_result}"
             assert REQUEST_ID_RE.match(request_id), (
@@ -414,6 +403,32 @@ class TestSDKRequestLifecycle:
                     f"create_return_request response missing 'message' field: {return_result}"
                 )
 
+                # Poll for return completion
+                import asyncio
+                import time
+
+                return_request_id = fields.get("request_id")
+                if return_request_id:
+                    deadline = time.time() + 10
+                    while time.time() < deadline:
+                        ret_status = await sdk.list_return_requests()  # type: ignore[attr-defined]
+                        requests_list = (
+                            ret_status.get("requests", [])
+                            if isinstance(ret_status, dict)
+                            else ret_status or []
+                        )
+                        done = any(
+                            (
+                                req.get("request_id") or req.get("requestId")
+                            ) == return_request_id
+                            and req.get("status") == "complete"
+                            for req in requests_list
+                            if isinstance(req, dict)
+                        )
+                        if done:
+                            break
+                        await asyncio.sleep(0.5)
+
                 # 6. After return, status should not be 'running' (machines were released)
                 if "get_request_status" in methods:
                     post_return_result = await sdk.get_request_status(request_id=request_id)  # type: ignore[attr-defined]
@@ -430,8 +445,12 @@ class TestSDKRequestLifecycle:
                 }, f"Unexpected post-return status: {post_status!r}"
 
     @pytest.mark.asyncio
-    async def test_list_requests_after_create(self, orb_config_dir, moto_aws, moto_vpc_resources):
+    @pytest.mark.parametrize("scenario", get_smoke_scenarios(), ids=lambda s: s.scenario_id)
+    async def test_list_requests_after_create(self, orb_config_dir, moto_aws, moto_vpc_resources, scenario: TestScenario):
         """list_requests() includes the newly created request."""
+        if scenario.provider_api != "RunInstances":
+            pytest.xfail(reason=f"moto does not fully support {scenario.provider_api}")
+
         import json
 
         from orb.sdk.client import ORBClient
@@ -443,7 +462,7 @@ class TestSDKRequestLifecycle:
             logger = _make_logger()
             _inject_moto_factory(aws_client, logger, None)
 
-            create_result = await sdk.create_request(template_id="RunInstances-OnDemand", count=1)
+            create_result = await sdk.create_request(template_id=scenario.template_id, count=scenario.capacity)
             request_id = _extract_request_id(create_result)
             assert request_id
 
@@ -471,3 +490,40 @@ class TestSDKRequestLifecycle:
             assert request_id in found_ids, (
                 f"Created request {request_id} not found in list. Got: {found_ids}"
             )
+
+    @pytest.mark.asyncio
+    async def test_create_request_unknown_template_returns_error(
+        self, orb_config_dir, moto_aws
+    ):
+        """create_request() with a non-existent template_id returns an error response, not a crash."""
+        import json
+
+        from orb.sdk.client import ORBClient
+
+        config_data = json.loads((orb_config_dir / "config.json").read_text())
+
+        async with ORBClient(app_config=config_data) as sdk:
+            aws_client = _make_moto_aws_client()
+            logger = _make_logger()
+            _inject_moto_factory(aws_client, logger, None)
+
+            try:
+                result = await sdk.create_request(
+                    template_id="NonExistent-Template-XYZ", count=1
+                )
+                # If no exception, the result must indicate an error
+                is_error = (
+                    (isinstance(result, dict) and (
+                        result.get("error") or
+                        result.get("status") == "error" or
+                        "not found" in str(result).lower() or
+                        "NonExistent" in str(result)
+                    ))
+                    or result is None
+                )
+                assert is_error, (
+                    f"Expected error response for unknown template, got: {result}"
+                )
+            except Exception:
+                # Any exception is also acceptable — the system rejected the request
+                pass

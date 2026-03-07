@@ -304,6 +304,13 @@ async def _run_full_cycle_mcp(
     tracked_request_ids.append(request_id)
     log.info("Got request_id: %s", request_id)
 
+    # 1a. Verify request is visible via get_request_status
+    status_check = await _call_tool(mcp_server, "get_request_status", {"request_id": request_id})
+    assert _extract_request_status(status_check) not in ("", "unknown"), (
+        f"request_id {request_id!r} not found or has unknown status after creation: {status_check}"
+    )
+    log.info("get_request_status confirmed request_id: %s", request_id)
+
     # 2. Poll until complete
     deadline = time.time() + MCP_TIMEOUTS["request_completion"]
     terminal = {"complete", "complete_with_error", "failed", "cancelled", "timeout"}
@@ -324,6 +331,12 @@ async def _run_full_cycle_mcp(
         await asyncio.sleep(MCP_TIMEOUTS["poll_interval"])
 
     # 3. Assert ORB status + AWS-side instance state
+    returned_id = (
+        status_result.get("requests", [{}])[0].get("request_id")
+        or status_result.get("requests", [{}])[0].get("requestId")
+    )
+    assert returned_id == request_id, f"Status response echoed {returned_id!r}, expected {request_id!r}"
+
     machine_ids = _extract_machine_ids(status_result)
     assert len(machine_ids) == capacity, (
         f"Expected {capacity} machine(s), got {len(machine_ids)}: {machine_ids}"
@@ -442,3 +455,40 @@ async def test_mcp_smoke(setup_mcp_test):
     test_case["capacity_to_request"] = 1
 
     await _run_full_cycle_mcp(mcp_server, test_case, tracked_request_ids)
+
+
+@pytest.mark.asyncio
+async def test_mcp_unknown_template_returns_error(setup_mcp_test):
+    """MCP request_machines with a non-existent template_id returns an error, not a crash."""
+    mcp_server, _config_path, _tracked = setup_mcp_test
+
+    message = json.dumps({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "tools/call",
+        "params": {"name": "request_machines", "arguments": {"template_id": "NonExistent-Template-XYZ", "machine_count": 1}},
+    })
+    raw = await mcp_server.handle_message(message)
+    envelope = json.loads(raw)
+
+    assert envelope.get("jsonrpc") == "2.0", f"Bad jsonrpc version: {envelope}"
+
+    # Either the envelope carries an error, or the tool result payload indicates one
+    if envelope.get("error"):
+        return
+
+    content = envelope.get("result", {}).get("content", [])
+    assert content, f"Expected content in response: {envelope}"
+    inner = json.loads(content[0]["text"])
+    if isinstance(inner, list) and inner and isinstance(inner[0], dict):
+        inner = inner[0]
+
+    has_error = (
+        isinstance(inner, dict) and (
+            inner.get("error") or
+            inner.get("status") == "error" or
+            "not found" in str(inner).lower() or
+            "NonExistent" in str(inner)
+        )
+    )
+    assert has_error, f"Expected error payload for unknown template, got: {inner}"

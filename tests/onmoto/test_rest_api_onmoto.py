@@ -21,6 +21,7 @@ import pytest_asyncio
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 
 from tests.onmoto.conftest import _inject_moto_factory, _make_logger, _make_moto_aws_client
+from tests.shared.scenarios import TestScenario, get_smoke_scenarios
 
 REGION = "eu-west-2"
 REQUEST_ID_RE = re.compile(r"^req-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
@@ -146,11 +147,15 @@ class TestTemplates:
 
 class TestRequestMachines:
     @pytest.mark.asyncio
-    async def test_request_machines_returns_request_id(self, rest_client):
+    @pytest.mark.parametrize("scenario", get_smoke_scenarios(), ids=lambda s: s.scenario_id)
+    async def test_request_machines_returns_request_id(self, rest_client, scenario: TestScenario):
         """POST /api/v1/machines/request returns 202 with a valid request_id."""
+        if scenario.provider_api != "RunInstances":
+            pytest.xfail(reason=f"moto does not fully support {scenario.provider_api}")
+
         resp = await rest_client.post(
             "/api/v1/machines/request",
-            json={"template_id": "RunInstances-OnDemand", "count": 1},
+            json={"template_id": scenario.template_id, "count": scenario.capacity},
         )
         assert resp.status_code == 202, f"Unexpected status: {resp.status_code} — {resp.text}"
         body = resp.json()
@@ -184,12 +189,16 @@ class TestRequestMachines:
 
 class TestRequestStatus:
     @pytest.mark.asyncio
-    async def test_get_status_after_request(self, rest_client):
+    @pytest.mark.parametrize("scenario", get_smoke_scenarios(), ids=lambda s: s.scenario_id)
+    async def test_get_status_after_request(self, rest_client, scenario: TestScenario):
         """GET /api/v1/requests/{request_id}/status returns 200 with known status."""
+        if scenario.provider_api != "RunInstances":
+            pytest.xfail(reason=f"moto does not fully support {scenario.provider_api}")
+
         # Create a request first
         create_resp = await rest_client.post(
             "/api/v1/machines/request",
-            json={"template_id": "RunInstances-OnDemand", "count": 1},
+            json={"template_id": scenario.template_id, "count": scenario.capacity},
         )
         assert create_resp.status_code == 202
         body = create_resp.json()
@@ -223,12 +232,16 @@ class TestRequestStatus:
 
 class TestListRequests:
     @pytest.mark.asyncio
-    async def test_list_requests_includes_created_request(self, rest_client):
+    @pytest.mark.parametrize("scenario", get_smoke_scenarios(), ids=lambda s: s.scenario_id)
+    async def test_list_requests_includes_created_request(self, rest_client, scenario: TestScenario):
         """GET /api/v1/requests includes the previously created request_id."""
+        if scenario.provider_api != "RunInstances":
+            pytest.xfail(reason=f"moto does not fully support {scenario.provider_api}")
+
         # Create a request
         create_resp = await rest_client.post(
             "/api/v1/machines/request",
-            json={"template_id": "RunInstances-OnDemand", "count": 1},
+            json={"template_id": scenario.template_id, "count": scenario.capacity},
         )
         assert create_resp.status_code == 202
         body = create_resp.json()
@@ -266,12 +279,16 @@ class TestListRequests:
 
 class TestReturnMachines:
     @pytest.mark.asyncio
-    async def test_return_machines_returns_message(self, rest_client):
+    @pytest.mark.parametrize("scenario", get_smoke_scenarios(), ids=lambda s: s.scenario_id)
+    async def test_return_machines_returns_message(self, rest_client, scenario: TestScenario):
         """POST /api/v1/machines/return with valid machine_ids returns 2xx with message."""
+        if scenario.provider_api != "RunInstances":
+            pytest.xfail(reason=f"moto does not fully support {scenario.provider_api}")
+
         # Create a request and get machine IDs from status
         create_resp = await rest_client.post(
             "/api/v1/machines/request",
-            json={"template_id": "RunInstances-OnDemand", "count": 1},
+            json={"template_id": scenario.template_id, "count": scenario.capacity},
         )
         assert create_resp.status_code == 202
         request_id = (
@@ -310,22 +327,50 @@ class TestReturnMachines:
             f"Return response missing 'message': {return_body}"
         )
 
+        # Poll for return completion
+        import time
+
+        return_request_id = return_body.get("request_id") or return_body.get("requestId")
+        if return_request_id:
+            deadline = time.time() + 10
+            while time.time() < deadline:
+                list_resp = await rest_client.get("/api/v1/requests/return")
+                if list_resp.status_code == 200:
+                    body = list_resp.json()
+                    requests = body if isinstance(body, list) else body.get("requests", [])
+                    done = any(
+                        (r.get("request_id") or r.get("requestId")) == return_request_id
+                        and r.get("status") == "complete"
+                        for r in requests
+                        if isinstance(r, dict)
+                    )
+                    if done:
+                        break
+                import asyncio
+                await asyncio.sleep(0.5)
+
 
 class TestFullLifecycle:
     @pytest.mark.asyncio
-    async def test_full_request_lifecycle(self, rest_client):
+    @pytest.mark.parametrize("scenario", get_smoke_scenarios(), ids=lambda s: s.scenario_id)
+    async def test_full_request_lifecycle(self, rest_client, scenario: TestScenario):
         """Full lifecycle: request -> status -> list -> return (if machines available)."""
+        if scenario.provider_api != "RunInstances":
+            pytest.xfail(reason=f"moto does not fully support {scenario.provider_api}")
+
         # 1. Verify templates are available
         templates_resp = await rest_client.get("/api/v1/templates/")
         assert templates_resp.status_code == 200
         templates = templates_resp.json()["templates"]
         ids = {tpl.get("template_id") or tpl.get("templateId") for tpl in templates}
-        assert "RunInstances-OnDemand" in ids
+        assert scenario.template_id in ids, (
+            f"{scenario.template_id!r} not found in templates. Got: {sorted(ids - {None})}"
+        )
 
         # 2. Create request
         create_resp = await rest_client.post(
             "/api/v1/machines/request",
-            json={"template_id": "RunInstances-OnDemand", "count": 1},
+            json={"template_id": scenario.template_id, "count": scenario.capacity},
         )
         assert create_resp.status_code == 202
         request_id = (
@@ -381,3 +426,26 @@ class TestFullLifecycle:
                 f"Return failed: {return_resp.status_code} — {return_resp.text}"
             )
             assert "message" in return_resp.json()
+
+            # Poll for return completion
+            import time
+
+            return_body = return_resp.json()
+            return_request_id = return_body.get("request_id") or return_body.get("requestId")
+            if return_request_id:
+                deadline = time.time() + 10
+                while time.time() < deadline:
+                    list_resp = await rest_client.get("/api/v1/requests/return")
+                    if list_resp.status_code == 200:
+                        body = list_resp.json()
+                        requests = body if isinstance(body, list) else body.get("requests", [])
+                        done = any(
+                            (r.get("request_id") or r.get("requestId")) == return_request_id
+                            and r.get("status") == "complete"
+                            for r in requests
+                            if isinstance(r, dict)
+                        )
+                        if done:
+                            break
+                    import asyncio
+                    await asyncio.sleep(0.5)
