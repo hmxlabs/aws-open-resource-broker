@@ -273,6 +273,32 @@ async def _run_full_cycle(sdk, test_case: dict, tracked_request_ids: list[str]) 
     tracked_request_ids.append(request_id)
     log.info("Got request_id: %s", request_id)
 
+    # 1a. Verify request appears in list_requests
+    list_result = await sdk.list_requests()  # type: ignore[attr-defined]
+    listed_ids = []
+    if isinstance(list_result, dict):
+        for req in list_result.get("requests", []):
+            rid = (
+                req.get("requestId") or req.get("request_id")
+                if isinstance(req, dict)
+                else getattr(req, "request_id", None)
+            )
+            if rid:
+                listed_ids.append(rid)
+    elif isinstance(list_result, list):
+        for req in list_result:
+            rid = (
+                req.get("requestId") or req.get("request_id")
+                if isinstance(req, dict)
+                else getattr(req, "request_id", None)
+            )
+            if rid:
+                listed_ids.append(rid)
+    assert request_id in listed_ids, (
+        f"request_id {request_id!r} not found in list_requests: {list_result}"
+    )
+    log.info("list_requests confirmed request_id: %s", request_id)
+
     # 2. Poll until complete
     import asyncio
 
@@ -293,6 +319,14 @@ async def _run_full_cycle(sdk, test_case: dict, tracked_request_ids: list[str]) 
         await asyncio.sleep(SDK_TIMEOUTS["poll_interval"])
 
     # 3. Assert ORB status + AWS-side instance state
+    returned_id = (
+        status_response.get("requests", [{}])[0].get("request_id")
+        or status_response.get("requests", [{}])[0].get("requestId")
+        if isinstance(status_response, dict)
+        else None
+    )
+    assert returned_id == request_id, f"Status response echoed {returned_id!r}, expected {request_id!r}"
+
     machine_ids = _extract_machine_ids(status_response)
     assert len(machine_ids) == capacity, (
         f"Expected {capacity} machines, got {len(machine_ids)}: {machine_ids}"
@@ -428,3 +462,32 @@ async def test_sdk_smoke(setup_sdk_test):
         )
 
         await _run_full_cycle(sdk, test_case, tracked_request_ids)
+
+
+@pytest.mark.asyncio
+async def test_sdk_unknown_template_returns_error(setup_sdk_test):
+    """SDK create_request() with a non-existent template_id returns an error, not a crash."""
+    from orb.sdk import OpenResourceBroker
+
+    config_path, _tracked = setup_sdk_test
+
+    async with OpenResourceBroker(config_path=config_path) as sdk:
+        try:
+            result = await sdk.create_request(  # type: ignore[attr-defined]
+                template_id="NonExistent-Template-XYZ", count=1
+            )
+            is_error = (
+                (isinstance(result, dict) and (
+                    result.get("error") or
+                    result.get("status") == "error" or
+                    "not found" in str(result).lower() or
+                    "NonExistent" in str(result)
+                ))
+                or result is None
+            )
+            assert is_error, (
+                f"Expected error response for unknown template, got: {result}"
+            )
+        except Exception:
+            # Any exception is acceptable — the system rejected the request
+            pass

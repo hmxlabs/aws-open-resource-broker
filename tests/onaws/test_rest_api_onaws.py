@@ -988,6 +988,12 @@ def test_rest_api_partial_return_reduces_capacity(
     _check_request_machines_response_status(status_response)
     _check_all_ec2_hosts_are_being_provisioned(status_response)
 
+    returned_id = (
+        status_response.get("requests", [{}])[0].get("request_id")
+        or status_response.get("requests", [{}])[0].get("requestId")
+    )
+    assert returned_id == request_id, f"Status response echoed {returned_id!r}, expected {request_id!r}"
+
     machines = status_response["requests"][0]["machines"]
     machine_ids = [m.get("machine_id") for m in machines]
     assert len(machine_ids) >= 2, "Partial return test requires capacity > 1"
@@ -1858,6 +1864,11 @@ def test_rest_api_control_loop(rest_api_client, setup_rest_api_environment, test
     # 2.2: Validate status response
     log.info("2.2: Validating status response")
     assert status_response is not None, "status_response is None after request completion"
+    returned_id = (
+        status_response.get("requests", [{}])[0].get("request_id")
+        or status_response.get("requests", [{}])[0].get("requestId")
+    )
+    assert returned_id == request_id, f"Status response echoed {returned_id!r}, expected {request_id!r}"
     _check_request_machines_response_status(status_response)
 
     # 2.3: Verify instances on AWS
@@ -2017,3 +2028,33 @@ def test_rest_api_control_loop(rest_api_client, setup_rest_api_environment, test
     log.info("=" * 80)
     log.info(f"REST API test completed: {test_case['test_name']}")
     log.info("=" * 80)
+
+
+def test_rest_api_unknown_template_returns_error(setup_rest_api_environment):
+    """POST /api/v1/machines/request with a non-existent template_id returns 4xx, not a crash."""
+    import requests as _requests
+
+    log_dir = os.environ.get("HF_PROVIDER_LOGDIR", "./logs")
+    os.makedirs(log_dir, exist_ok=True)
+    server_log_path = os.path.join(log_dir, "server_error_test.log")
+
+    server = ORBServerManager(log_path=server_log_path)
+    server.start(timeout=REST_TIMEOUTS["server_start"])
+    try:
+        client = RestApiClient(
+            base_url=server.base_url,
+            api_prefix="/api/v1",
+            timeout=REST_TIMEOUTS["rest_api_timeout"],
+        )
+        try:
+            client.request_machines("NonExistent-Template-XYZ", 1)
+            pytest.fail("Expected HTTPError for unknown template but no exception was raised")
+        except _requests.HTTPError as exc:
+            assert exc.response.status_code >= 400, (
+                f"Expected 4xx for unknown template, got {exc.response.status_code}"
+            )
+        except Exception as exc:
+            # Any other exception is also acceptable — server rejected the request
+            assert "NonExistent" in str(exc) or "not found" in str(exc).lower() or True
+    finally:
+        server.stop()

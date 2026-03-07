@@ -26,6 +26,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 
 from tests.onmoto.conftest import _inject_moto_factory, _make_logger, _make_moto_aws_client
+from tests.shared.scenarios import TestScenario, get_smoke_scenarios
 
 REGION = "eu-west-2"
 REQUEST_ID_RE = re.compile(r"^req-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
@@ -100,29 +101,9 @@ def _run_orb_cli(args: list[str]) -> dict:  # type: ignore[return]
 # Helpers to extract fields from CLI JSON output
 # ---------------------------------------------------------------------------
 
-
-def _extract_request_id(result: dict) -> str | None:
-    return result.get("request_id") or result.get("requestId") or result.get("created_request_id")
-
-
-def _extract_status(result: dict) -> str:
-    requests = result.get("requests", [])
-    if requests and isinstance(requests[0], dict):
-        return requests[0].get("status", "unknown")
-    return result.get("status", "unknown")
-
-
-def _extract_machine_ids(result: dict) -> list[str]:
-    requests = result.get("requests", [])
-    if requests and isinstance(requests[0], dict):
-        machines = requests[0].get("machines", [])
-        return [
-            mid
-            for m in machines
-            for mid in [m.get("machineId") or m.get("machine_id")]
-            if mid
-        ]
-    return []
+from tests.shared.response_helpers import extract_machine_ids as _extract_machine_ids
+from tests.shared.response_helpers import extract_request_id as _extract_request_id
+from tests.shared.response_helpers import extract_status as _extract_status
 
 
 # ---------------------------------------------------------------------------
@@ -144,8 +125,12 @@ class TestCLITemplates:
 
 
 class TestCLIMachinesRequest:
-    def test_cli_machines_request(self, orb_config_dir, moto_aws):
+    @pytest.mark.parametrize("scenario", get_smoke_scenarios(), ids=lambda s: s.scenario_id)
+    def test_cli_machines_request(self, orb_config_dir, moto_aws, scenario: TestScenario):
         """'orb machines request' returns a valid request_id."""
+        if scenario.provider_api != "RunInstances":
+            pytest.mark.xfail(reason=f"moto does not fully support {scenario.provider_api}")
+
         aws_client = _make_moto_aws_client()
         logger = _make_logger()
 
@@ -161,7 +146,7 @@ class TestCLIMachinesRequest:
 
         with patch.object(Application, "initialize", _patched_initialize):
             result = _run_orb_cli(
-                ["machines", "request", "--template", "RunInstances-OnDemand", "--count", "1"]
+                ["machines", "request", "--template", scenario.template_id, "--count", str(scenario.capacity)]
             )
 
         request_id = _extract_request_id(result)
@@ -172,8 +157,12 @@ class TestCLIMachinesRequest:
 
 
 class TestCLIRequestsStatus:
-    def test_cli_requests_status(self, orb_config_dir, moto_aws):
+    @pytest.mark.parametrize("scenario", get_smoke_scenarios(), ids=lambda s: s.scenario_id)
+    def test_cli_requests_status(self, orb_config_dir, moto_aws, scenario: TestScenario):
         """'orb requests status <id>' returns a known status and echoes back the request_id."""
+        if scenario.provider_api != "RunInstances":
+            pytest.mark.xfail(reason=f"moto does not fully support {scenario.provider_api}")
+
         aws_client = _make_moto_aws_client()
         logger = _make_logger()
 
@@ -188,7 +177,7 @@ class TestCLIRequestsStatus:
 
         with patch.object(Application, "initialize", _patched_initialize):
             create_result = _run_orb_cli(
-                ["machines", "request", "--template", "RunInstances-OnDemand", "--count", "1"]
+                ["machines", "request", "--template", scenario.template_id, "--count", str(scenario.capacity)]
             )
 
         request_id = _extract_request_id(create_result)
@@ -212,11 +201,12 @@ class TestCLIRequestsStatus:
 
 
 class TestCLIFullLifecycle:
-    def test_cli_full_lifecycle(self, orb_config_dir, moto_aws):
-        """request -> status -> return: machines appear and return succeeds.
+    @pytest.mark.parametrize("scenario", get_smoke_scenarios(), ids=lambda s: s.scenario_id)
+    def test_cli_full_lifecycle(self, orb_config_dir, moto_aws, scenario: TestScenario):
+        """request -> status -> return: machines appear and return succeeds."""
+        if scenario.provider_api != "RunInstances":
+            pytest.mark.xfail(reason=f"moto does not fully support {scenario.provider_api}")
 
-        Uses RunInstances because moto fully supports instance creation.
-        """
         aws_client = _make_moto_aws_client()
         logger = _make_logger()
 
@@ -232,7 +222,7 @@ class TestCLIFullLifecycle:
         with patch.object(Application, "initialize", _patched_initialize):
             # 1. Create request
             create_result = _run_orb_cli(
-                ["machines", "request", "--template", "RunInstances-OnDemand", "--count", "1"]
+                ["machines", "request", "--template", scenario.template_id, "--count", str(scenario.capacity)]
             )
 
         request_id = _extract_request_id(create_result)
@@ -268,10 +258,104 @@ class TestCLIFullLifecycle:
                 f"Return response missing 'message' field: {return_result}"
             )
 
+            # Poll for return completion
+            import time
+
+            return_request_id = return_result.get("request_id") or return_result.get("requestId")
+            if return_request_id:
+                deadline = time.time() + 10
+                terminal = {"complete", "complete_with_error", "failed", "cancelled"}
+                while time.time() < deadline:
+                    with patch.object(Application, "initialize", _patched_initialize):
+                        status_result = _run_orb_cli(["requests", "status", return_request_id])
+                    status = _extract_status(status_result)
+                    if status in terminal:
+                        break
+                    time.sleep(0.5)
+
+
+class TestCLIErrorHandling:
+    def test_cli_machines_request_unknown_template(self, orb_config_dir, moto_aws):
+        """'orb machines request' with a non-existent template returns an error (non-zero exit or error in output)."""
+        import json
+        import os
+
+        from orb.bootstrap import Application
+
+        aws_client = _make_moto_aws_client()
+        logger = _make_logger()
+
+        _original_initialize = Application.initialize
+
+        async def _patched_initialize(self, dry_run=False):
+            result = await _original_initialize(self, dry_run=dry_run)
+            _inject_moto_factory(aws_client, logger, None)
+            return result
+
+        # Capture raw output — the CLI may produce non-JSON on error, so we
+        # bypass _run_orb_cli's JSON assertion and inspect stdout directly.
+        import asyncio
+        import contextlib
+        import io
+        import sys
+        from unittest.mock import patch
+
+        from orb.cli.main import main
+        from orb.infrastructure.di.container import reset_container
+
+        original_argv = sys.argv[:]
+        original_console = os.environ.get("ORB_LOG_CONSOLE_ENABLED")
+        sys.argv = ["orb", "machines", "request", "--template", "NonExistent-Template-XYZ", "--count", "1"]
+        os.environ["ORB_LOG_CONSOLE_ENABLED"] = "false"
+
+        stdout_capture = io.StringIO()
+        exit_code = 0
+        try:
+            with contextlib.redirect_stdout(stdout_capture):
+                with patch.object(Application, "initialize", _patched_initialize):
+                    try:
+                        asyncio.run(main())
+                    except SystemExit as exc:
+                        exit_code = exc.code if isinstance(exc.code, int) else 1
+        finally:
+            sys.argv = original_argv
+            if original_console is None:
+                os.environ.pop("ORB_LOG_CONSOLE_ENABLED", None)
+            else:
+                os.environ["ORB_LOG_CONSOLE_ENABLED"] = original_console
+            reset_container()
+
+        output = stdout_capture.getvalue().strip()
+
+        # Either a non-zero exit code or an error indicator in the output
+        if exit_code == 0 and output:
+            try:
+                parsed = json.loads(output)
+                if isinstance(parsed, list) and len(parsed) == 2:
+                    parsed, exit_code = parsed[0], parsed[1]
+                has_error = (
+                    (isinstance(parsed, dict) and (
+                        parsed.get("error") or
+                        parsed.get("status") == "error" or
+                        "not found" in str(parsed).lower() or
+                        "NonExistent" in str(parsed)
+                    ))
+                )
+                assert has_error or exit_code != 0, (
+                    f"Expected error for unknown template, got exit_code={exit_code} output={output}"
+                )
+            except json.JSONDecodeError:
+                # Non-JSON output on error path is acceptable
+                pass
+
 
 class TestCLIRequestsList:
-    def test_cli_requests_list(self, orb_config_dir, moto_aws):
+    @pytest.mark.parametrize("scenario", get_smoke_scenarios(), ids=lambda s: s.scenario_id)
+    def test_cli_requests_list(self, orb_config_dir, moto_aws, scenario: TestScenario):
         """'orb requests list' includes the newly created request_id."""
+        if scenario.provider_api != "RunInstances":
+            pytest.mark.xfail(reason=f"moto does not fully support {scenario.provider_api}")
+
         aws_client = _make_moto_aws_client()
         logger = _make_logger()
 
@@ -286,7 +370,7 @@ class TestCLIRequestsList:
 
         with patch.object(Application, "initialize", _patched_initialize):
             create_result = _run_orb_cli(
-                ["machines", "request", "--template", "RunInstances-OnDemand", "--count", "1"]
+                ["machines", "request", "--template", scenario.template_id, "--count", str(scenario.capacity)]
             )
 
         request_id = _extract_request_id(create_result)

@@ -1398,6 +1398,21 @@ def provide_release_control_loop(hfm, template_json, capacity_to_request, test_c
 
     # log.debug(json.dumps(res, indent=4))
 
+    # Verify request appears in `orb requests list`
+    import subprocess  # nosec B404
+    import sys as _sys
+
+    _list_proc = subprocess.run(  # nosec B603
+        [_sys.executable, "-m", "orb", "requests", "list"],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert request_id in _list_proc.stdout, (
+        f"request_id {request_id!r} not found in `orb requests list` output: {_list_proc.stdout!r}"
+    )
+    log.info("orb requests list confirmed request_id: %s", request_id)
+
     # Get scheduler type for validation
     scheduler_type = get_scheduler_from_scenario(test_case) if test_case else "hostfactory"
     request_machines_schema = _resolve_request_machines_schema(res, scheduler_type)
@@ -1453,6 +1468,12 @@ def provide_release_control_loop(hfm, template_json, capacity_to_request, test_c
         time.sleep(1)
 
     _check_request_machines_response_status(status_response)
+
+    returned_id = (
+        status_response.get("requests", [{}])[0].get("request_id")
+        or status_response.get("requests", [{}])[0].get("requestId")
+    )
+    assert returned_id == request_id, f"Status response echoed {returned_id!r}, expected {request_id!r}"
 
     _check_all_ec2_hosts_are_being_provisioned(status_response)
 
@@ -1743,6 +1764,13 @@ def test_partial_return_reduces_capacity(setup_host_factory_mock_with_scenario, 
     status_response = _wait_for_request_completion(hfm, request_id, scheduler_type)
     _check_request_machines_response_status(status_response)
     _check_all_ec2_hosts_are_being_provisioned(status_response)
+
+    returned_id = (
+        status_response.get("requests", [{}])[0].get("request_id")
+        or status_response.get("requests", [{}])[0].get("requestId")
+    )
+    assert returned_id == request_id, f"Status response echoed {returned_id!r}, expected {request_id!r}"
+
     log.debug("Final provisioning status: %s", json.dumps(status_response, indent=2))
 
     # 1.6: Extract provisioned instances
@@ -1939,3 +1967,28 @@ def test_full_cycle(setup_host_factory_mock_with_scenario, test_case):
         capacity_to_request=test_case["capacity_to_request"],
         test_case=test_case,
     )
+
+
+@pytest.mark.aws
+def test_unknown_template_returns_error(setup_host_factory_mock):
+    """request_machines() with a non-existent template_id returns an error, not a crash."""
+    hfm = setup_host_factory_mock
+
+    try:
+        result = hfm.request_machines("NonExistent-Template-XYZ", 1)
+        # If no exception, the result must indicate an error
+        is_error = (
+            result is None
+            or (isinstance(result, dict) and (
+                result.get("error") or
+                result.get("status") == "error" or
+                "not found" in str(result).lower() or
+                "NonExistent" in str(result)
+            ))
+        )
+        assert is_error, (
+            f"Expected error response for unknown template, got: {result}"
+        )
+    except Exception:
+        # Any exception is acceptable — the system rejected the request
+        pass

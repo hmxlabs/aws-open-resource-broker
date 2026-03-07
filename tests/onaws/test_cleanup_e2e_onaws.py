@@ -506,6 +506,13 @@ async def _run_cleanup_verification(
     assert len(machine_ids) == capacity, (
         f"Expected {capacity} machines, got {len(machine_ids)}: {machine_ids}"
     )
+
+    returned_id = (
+        status_response.get("requests", [{}])[0].get("request_id")
+        or status_response.get("requests", [{}])[0].get("requestId")
+    )
+    assert returned_id == request_id, f"Status response echoed {returned_id!r}, expected {request_id!r}"
+
     for machine_id in machine_ids:
         state = get_instance_state(machine_id)
         assert state["exists"], f"Instance {machine_id} not found in AWS"

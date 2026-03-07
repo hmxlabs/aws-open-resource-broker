@@ -25,6 +25,7 @@ import pytest_asyncio
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 
 from tests.onmoto.conftest import _inject_moto_factory, _make_logger, _make_moto_aws_client
+from tests.shared.scenarios import TestScenario, get_smoke_scenarios
 
 REGION = "eu-west-2"
 REQUEST_ID_RE = re.compile(r"^req-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
@@ -178,11 +179,15 @@ class TestMCPTemplates:
 
 class TestMCPRequestLifecycle:
     @pytest.mark.asyncio
-    async def test_request_machines_returns_request_id(self, mcp_server):
+    @pytest.mark.parametrize("scenario", get_smoke_scenarios(), ids=lambda s: s.scenario_id)
+    async def test_request_machines_returns_request_id(self, mcp_server, scenario: TestScenario):
+        if scenario.provider_api != "RunInstances":
+            pytest.xfail(reason=f"moto does not fully support {scenario.provider_api}")
+
         resp = await _send(
             mcp_server,
             "tools/call",
-            {"name": "request_machines", "arguments": {"template_id": "RunInstances-OnDemand", "machine_count": 1}},
+            {"name": "request_machines", "arguments": {"template_id": scenario.template_id, "machine_count": scenario.capacity}},
         )
 
         assert not _has_error(resp), f"Unexpected error: {resp.get('error')}"
@@ -194,12 +199,16 @@ class TestMCPRequestLifecycle:
         )
 
     @pytest.mark.asyncio
-    async def test_get_request_status_after_request(self, mcp_server):
+    @pytest.mark.parametrize("scenario", get_smoke_scenarios(), ids=lambda s: s.scenario_id)
+    async def test_get_request_status_after_request(self, mcp_server, scenario: TestScenario):
+        if scenario.provider_api != "RunInstances":
+            pytest.xfail(reason=f"moto does not fully support {scenario.provider_api}")
+
         # Create a request first
         req_resp = await _send(
             mcp_server,
             "tools/call",
-            {"name": "request_machines", "arguments": {"template_id": "RunInstances-OnDemand", "machine_count": 1}},
+            {"name": "request_machines", "arguments": {"template_id": scenario.template_id, "machine_count": scenario.capacity}},
         )
         request_id = _tool_text(req_resp).get("requestId") or _tool_text(req_resp).get("request_id")
         assert request_id, f"No request_id from request_machines: {req_resp}"
@@ -227,12 +236,16 @@ class TestMCPRequestLifecycle:
             )
 
     @pytest.mark.asyncio
-    async def test_full_lifecycle_request_and_return(self, mcp_server):
+    @pytest.mark.parametrize("scenario", get_smoke_scenarios(), ids=lambda s: s.scenario_id)
+    async def test_full_lifecycle_request_and_return(self, mcp_server, scenario: TestScenario):
+        if scenario.provider_api != "RunInstances":
+            pytest.xfail(reason=f"moto does not fully support {scenario.provider_api}")
+
         # 1. Request machines
         req_resp = await _send(
             mcp_server,
             "tools/call",
-            {"name": "request_machines", "arguments": {"template_id": "RunInstances-OnDemand", "machine_count": 1}},
+            {"name": "request_machines", "arguments": {"template_id": scenario.template_id, "machine_count": scenario.capacity}},
         )
         req_payload = _tool_text(req_resp)
         request_id = req_payload.get("requestId") or req_payload.get("request_id")
@@ -277,13 +290,40 @@ class TestMCPRequestLifecycle:
             f"return_machines response missing request_id or message: {return_payload}"
         )
 
+        # Poll for return completion
+        import time
+
+        return_request_id = return_payload.get("request_id") or return_payload.get("requestId")
+        if return_request_id:
+            deadline = time.time() + 10
+            while time.time() < deadline:
+                list_resp = await _send(
+                    mcp_server, "tools/call", {"name": "list_return_requests", "arguments": {}}
+                )
+                if not _has_error(list_resp):
+                    requests = _tool_text(list_resp).get("requests", [])
+                    done = any(
+                        (r.get("request_id") or r.get("requestId")) == return_request_id
+                        and r.get("status") == "complete"
+                        for r in requests
+                        if isinstance(r, dict)
+                    )
+                    if done:
+                        break
+                import asyncio
+                await asyncio.sleep(0.5)
+
     @pytest.mark.asyncio
-    async def test_list_return_requests_after_return(self, mcp_server):
+    @pytest.mark.parametrize("scenario", get_smoke_scenarios(), ids=lambda s: s.scenario_id)
+    async def test_list_return_requests_after_return(self, mcp_server, scenario: TestScenario):
+        if scenario.provider_api != "RunInstances":
+            pytest.xfail(reason=f"moto does not fully support {scenario.provider_api}")
+
         # Create and return a request
         req_resp = await _send(
             mcp_server,
             "tools/call",
-            {"name": "request_machines", "arguments": {"template_id": "RunInstances-OnDemand", "machine_count": 1}},
+            {"name": "request_machines", "arguments": {"template_id": scenario.template_id, "machine_count": scenario.capacity}},
         )
         req_payload = _tool_text(req_resp)
         request_id = req_payload.get("requestId") or req_payload.get("request_id")
@@ -402,11 +442,35 @@ class TestMCPLaunchTemplateCleanup:
         if not machine_ids:
             pytest.skip("No machine_ids — cannot verify LT cleanup")
 
-        await _send(
+        return_resp_lt = await _send(
             mcp_server,
             "tools/call",
             {"name": "return_machines", "arguments": {"machine_ids": machine_ids}},
         )
+
+        # Poll for return completion
+        import asyncio
+        import time
+
+        lt_return_payload = _tool_text(return_resp_lt) if not _has_error(return_resp_lt) else {}
+        lt_return_request_id = lt_return_payload.get("request_id") or lt_return_payload.get("requestId")
+        if lt_return_request_id:
+            deadline = time.time() + 10
+            while time.time() < deadline:
+                list_resp = await _send(
+                    mcp_server, "tools/call", {"name": "list_return_requests", "arguments": {}}
+                )
+                if not _has_error(list_resp):
+                    requests = _tool_text(list_resp).get("requests", [])
+                    done = any(
+                        (r.get("request_id") or r.get("requestId")) == lt_return_request_id
+                        and r.get("status") == "complete"
+                        for r in requests
+                        if isinstance(r, dict)
+                    )
+                    if done:
+                        break
+                await asyncio.sleep(0.5)
 
         # LT must be gone from moto after return
         lts_after = ec2.describe_launch_templates(
@@ -471,3 +535,31 @@ class TestMCPErrorHandling:
 
         assert _has_error(resp), f"Expected error field in response: {resp}"
         assert resp["error"]["code"] == -32700
+
+    @pytest.mark.asyncio
+    async def test_request_machines_unknown_template_returns_error(self, mcp_server):
+        """request_machines with a non-existent template_id returns an error, not a crash."""
+        resp = await _send(
+            mcp_server,
+            "tools/call",
+            {"name": "request_machines", "arguments": {"template_id": "NonExistent-Template-XYZ", "machine_count": 1}},
+        )
+
+        # The server must return a well-formed JSON-RPC response (no Python exception).
+        # Either the envelope carries an error field, or the tool result payload
+        # indicates an error (error key, status==error, or error message text).
+        if _has_error(resp):
+            return
+
+        payload = _tool_text(resp)
+        has_error = (
+            isinstance(payload, dict) and (
+                payload.get("error") or
+                payload.get("status") == "error" or
+                "not found" in str(payload).lower() or
+                "NonExistent" in str(payload)
+            )
+        )
+        assert has_error, (
+            f"Expected error payload for unknown template, got: {payload}"
+        )
