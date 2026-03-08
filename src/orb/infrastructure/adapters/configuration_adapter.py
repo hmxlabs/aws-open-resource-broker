@@ -334,7 +334,8 @@ class ConfigurationAdapter(ConfigurationPort):
             if hasattr(resource_config.prefixes, resource_type):
                 return getattr(resource_config.prefixes, resource_type)
             return resource_config.default_prefix
-        except Exception:
+        except Exception as e:
+            _logger.warning("Failed to get resource prefix for '%s', using empty prefix: %s", resource_type, e)
             return ""
 
     def get_active_provider_override(self) -> str | None:

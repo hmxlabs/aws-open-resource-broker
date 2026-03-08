@@ -144,7 +144,8 @@ class EC2FleetHandler(AWSHandler, BaseContextMixin, FleetGroupingMixin):
             if not isinstance(fleet_type, AWSFleetType):
                 try:
                     fleet_type = AWSFleetType(str(fleet_type))
-                except Exception:
+                except ValueError as e:
+                    self._logger.warning("Unknown fleet type value, skipping: %s", e)
                     fleet_type = None
 
             if fleet_type is AWSFleetType.INSTANT:
