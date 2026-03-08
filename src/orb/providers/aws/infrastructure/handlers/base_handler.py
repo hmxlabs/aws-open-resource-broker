@@ -20,11 +20,11 @@ from orb.domain.request.aggregate import Request
 from orb.domain.template.template_aggregate import Template
 from orb.infrastructure.resilience import retry
 from orb.providers.aws.domain.template.aws_template_aggregate import AWSTemplate
+from orb.domain.base.exceptions import InfrastructureError
 from orb.providers.aws.exceptions.aws_exceptions import (
     AuthorizationError,
     AWSEntityNotFoundError,
     AWSValidationError,
-    InfrastructureError,
     NetworkError,
     QuotaExceededError,
     RateLimitError,
@@ -715,8 +715,8 @@ class AWSHandler(ABC):
                 defaults = provider_config.provider_defaults.get("aws")
                 if defaults and defaults.cleanup is not None:
                     return defaults.cleanup
-        except Exception:
-            pass
+        except Exception as e:
+            self._logger.warning("Failed to read cleanup config, using defaults: %s", e)
         return CleanupConfig()
 
     def _cleanup_on_zero_capacity(self, resource_type: str, request_id: str) -> None:
@@ -737,7 +737,8 @@ class AWSHandler(ABC):
 
         try:
             cleanup = self._get_cleanup_config()
-        except Exception:
+        except Exception as e:
+            self._logger.warning("Failed to read cleanup config, skipping cleanup: %s", e)
             return
 
         if not cleanup.enabled:
