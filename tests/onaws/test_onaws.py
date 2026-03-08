@@ -839,7 +839,10 @@ def setup_host_factory_mock(request, monkeypatch, test_session_id):
         if hasattr(request, "param") and isinstance(request.param, dict)
         else {}
     )
-    overrides["instanceTags"] = {**overrides.get("instanceTags", {}), "test-session": test_session_id}
+    overrides["instanceTags"] = {
+        **overrides.get("instanceTags", {}),
+        "test-session": test_session_id,
+    }
 
     # Clear and regenerate
     test_config_dir = processor.run_templates_dir / test_name
@@ -938,7 +941,10 @@ def setup_host_factory_mock_with_scenario(request, monkeypatch, test_session_id)
     test_case = scenarios.get_test_case_by_name(scenario_name) if scenario_name else {}
 
     overrides = test_case.get("overrides", {}) if test_case else {}
-    overrides["instanceTags"] = {**overrides.get("instanceTags", {}), "test-session": test_session_id}
+    overrides["instanceTags"] = {
+        **overrides.get("instanceTags", {}),
+        "test-session": test_session_id,
+    }
 
     # Clear and regenerate
     test_config_dir = processor.run_templates_dir / test_name
@@ -1393,7 +1399,9 @@ def provide_release_control_loop(hfm, template_json, capacity_to_request, test_c
         else:
             pytest.fail(f"AWS provider response missing requestId field. Response: {res}")
 
-    assert REQUEST_ID_RE.match(request_id), f"request_id {request_id!r} does not match expected format"
+    assert REQUEST_ID_RE.match(request_id), (
+        f"request_id {request_id!r} does not match expected format"
+    )
 
     # Get scheduler type for validation
     scheduler_type = get_scheduler_from_scenario(test_case) if test_case else "hostfactory"
@@ -1451,11 +1459,12 @@ def provide_release_control_loop(hfm, template_json, capacity_to_request, test_c
 
     _check_request_machines_response_status(status_response)
 
-    returned_id = (
-        status_response.get("requests", [{}])[0].get("request_id")
-        or status_response.get("requests", [{}])[0].get("requestId")
+    returned_id = status_response.get("requests", [{}])[0].get("request_id") or status_response.get(
+        "requests", [{}]
+    )[0].get("requestId")
+    assert returned_id == request_id, (
+        f"Status response echoed {returned_id!r}, expected {request_id!r}"
     )
-    assert returned_id == request_id, f"Status response echoed {returned_id!r}, expected {request_id!r}"
 
     _check_all_ec2_hosts_are_being_provisioned(status_response)
 
@@ -1732,7 +1741,9 @@ def test_partial_return_reduces_capacity(setup_host_factory_mock_with_scenario, 
         )
     if not request_id:
         pytest.fail(f"Request ID missing in response: {json.dumps(request_response, indent=2)}")
-    assert REQUEST_ID_RE.match(request_id), f"request_id {request_id!r} does not match expected format"
+    assert REQUEST_ID_RE.match(request_id), (
+        f"request_id {request_id!r} does not match expected format"
+    )
 
     # 1.5: Wait for provisioning completion
     log.info("1.5: Waiting for provisioning completion (request_id: %s)", request_id)
@@ -1747,11 +1758,12 @@ def test_partial_return_reduces_capacity(setup_host_factory_mock_with_scenario, 
     _check_request_machines_response_status(status_response)
     _check_all_ec2_hosts_are_being_provisioned(status_response)
 
-    returned_id = (
-        status_response.get("requests", [{}])[0].get("request_id")
-        or status_response.get("requests", [{}])[0].get("requestId")
+    returned_id = status_response.get("requests", [{}])[0].get("request_id") or status_response.get(
+        "requests", [{}]
+    )[0].get("requestId")
+    assert returned_id == request_id, (
+        f"Status response echoed {returned_id!r}, expected {request_id!r}"
     )
-    assert returned_id == request_id, f"Status response echoed {returned_id!r}, expected {request_id!r}"
 
     log.debug("Final provisioning status: %s", json.dumps(status_response, indent=2))
 
@@ -1959,18 +1971,16 @@ def test_unknown_template_returns_error(setup_host_factory_mock):
     try:
         result = hfm.request_machines("NonExistent-Template-XYZ", 1)
         # If no exception, the result must indicate an error
-        is_error = (
-            result is None
-            or (isinstance(result, dict) and (
-                result.get("error") or
-                result.get("status") == "error" or
-                "not found" in str(result).lower() or
-                "NonExistent" in str(result)
-            ))
+        is_error = result is None or (
+            isinstance(result, dict)
+            and (
+                result.get("error")
+                or result.get("status") == "error"
+                or "not found" in str(result).lower()
+                or "NonExistent" in str(result)
+            )
         )
-        assert is_error, (
-            f"Expected error response for unknown template, got: {result}"
-        )
+        assert is_error, f"Expected error response for unknown template, got: {result}"
     except Exception as exc:
         # Any exception is acceptable — verify it's related to the template lookup
         assert (

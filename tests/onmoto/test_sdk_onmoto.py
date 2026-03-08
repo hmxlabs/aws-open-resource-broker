@@ -257,7 +257,9 @@ class TestSDKRequestLifecycle:
             logger = _make_logger()
             _inject_moto_factory(aws_client, logger, None)
 
-            result = await sdk.create_request(template_id=scenario.template_id, count=scenario.capacity)
+            result = await sdk.create_request(
+                template_id=scenario.template_id, count=scenario.capacity
+            )
             request_id = _extract_request_id(result)
 
             assert request_id is not None, f"No request_id in response: {result}"
@@ -282,7 +284,9 @@ class TestSDKRequestLifecycle:
             logger = _make_logger()
             _inject_moto_factory(aws_client, logger, None)
 
-            create_result = await sdk.create_request(template_id=scenario.template_id, count=scenario.capacity)
+            create_result = await sdk.create_request(
+                template_id=scenario.template_id, count=scenario.capacity
+            )
             request_id = _extract_request_id(create_result)
             assert request_id, f"No request_id in create response: {create_result}"
 
@@ -348,7 +352,9 @@ class TestSDKRequestLifecycle:
             )
 
             # 2. Create request
-            create_result = await sdk.create_request(template_id=scenario.template_id, count=scenario.capacity)
+            create_result = await sdk.create_request(
+                template_id=scenario.template_id, count=scenario.capacity
+            )
             request_id = _extract_request_id(create_result)
             assert request_id, f"No request_id: {create_result}"
             assert REQUEST_ID_RE.match(request_id), (
@@ -410,9 +416,7 @@ class TestSDKRequestLifecycle:
                             else ret_status or []
                         )
                         done = any(
-                            (
-                                req.get("request_id") or req.get("requestId")
-                            ) == return_request_id
+                            (req.get("request_id") or req.get("requestId")) == return_request_id
                             and req.get("status") == "complete"
                             for req in requests_list
                             if isinstance(req, dict)
@@ -438,7 +442,9 @@ class TestSDKRequestLifecycle:
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize("scenario", get_smoke_scenarios(), ids=lambda s: s.scenario_id)
-    async def test_list_requests_after_create(self, orb_config_dir, moto_aws, moto_vpc_resources, scenario: TestScenario):
+    async def test_list_requests_after_create(
+        self, orb_config_dir, moto_aws, moto_vpc_resources, scenario: TestScenario
+    ):
         """list_requests() includes the newly created request."""
         import json
 
@@ -451,7 +457,9 @@ class TestSDKRequestLifecycle:
             logger = _make_logger()
             _inject_moto_factory(aws_client, logger, None)
 
-            create_result = await sdk.create_request(template_id=scenario.template_id, count=scenario.capacity)
+            create_result = await sdk.create_request(
+                template_id=scenario.template_id, count=scenario.capacity
+            )
             request_id = _extract_request_id(create_result)
             assert request_id
 
@@ -481,9 +489,7 @@ class TestSDKRequestLifecycle:
             )
 
     @pytest.mark.asyncio
-    async def test_create_request_unknown_template_returns_error(
-        self, orb_config_dir, moto_aws
-    ):
+    async def test_create_request_unknown_template_returns_error(self, orb_config_dir, moto_aws):
         """create_request() with a non-existent template_id returns an error response, not a crash."""
         import json
 
@@ -497,22 +503,18 @@ class TestSDKRequestLifecycle:
             _inject_moto_factory(aws_client, logger, None)
 
             try:
-                result = await sdk.create_request(
-                    template_id="NonExistent-Template-XYZ", count=1
-                )
+                result = await sdk.create_request(template_id="NonExistent-Template-XYZ", count=1)
                 # If no exception, the result must indicate an error
                 is_error = (
-                    (isinstance(result, dict) and (
-                        result.get("error") or
-                        result.get("status") == "error" or
-                        "not found" in str(result).lower() or
-                        "NonExistent" in str(result)
-                    ))
-                    or result is None
-                )
-                assert is_error, (
-                    f"Expected error response for unknown template, got: {result}"
-                )
+                    isinstance(result, dict)
+                    and (
+                        result.get("error")
+                        or result.get("status") == "error"
+                        or "not found" in str(result).lower()
+                        or "NonExistent" in str(result)
+                    )
+                ) or result is None
+                assert is_error, f"Expected error response for unknown template, got: {result}"
             except Exception:
                 # Any exception is also acceptable — the system rejected the request
                 pass

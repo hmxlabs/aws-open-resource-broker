@@ -97,6 +97,7 @@ REST_API_SERVER_CFG = scenarios_rest_api.REST_API_SERVER
 MAX_CONCURRENCY = int(os.environ.get("REST_API_MAX_CONCURRENCY", 2))
 LAUNCH_DELAY = float(os.environ.get("REST_API_LAUNCH_DELAY_SEC", 3.0))
 from tests.shared.constants import REQUEST_ID_RE
+
 WorkerResult = namedtuple("WorkerResult", "scenario status error traceback")
 
 
@@ -304,7 +305,10 @@ def setup_rest_api_environment(request, test_session_id):
     test_case = scenarios_rest_api.get_test_case_by_name(scenario_name) if scenario_name else {}
 
     overrides = test_case.get("overrides", {})
-    overrides["instanceTags"] = {**overrides.get("instanceTags", {}), "test-session": test_session_id}
+    overrides["instanceTags"] = {
+        **overrides.get("instanceTags", {}),
+        "test-session": test_session_id,
+    }
     metrics_config = test_case.get("metrics_config")
 
     # Generate templates
@@ -976,7 +980,9 @@ def test_rest_api_partial_return_reduces_capacity(
     request_id = request_response.get("request_id")
     if not request_id:
         pytest.fail(f"Request ID missing in response: {request_response}")
-    assert REQUEST_ID_RE.match(request_id), f"request_id {request_id!r} does not match expected format"
+    assert REQUEST_ID_RE.match(request_id), (
+        f"request_id {request_id!r} does not match expected format"
+    )
 
     status_response = _wait_for_request_completion_rest(
         rest_api_client,
@@ -988,11 +994,12 @@ def test_rest_api_partial_return_reduces_capacity(
     _check_request_machines_response_status(status_response)
     _check_all_ec2_hosts_are_being_provisioned(status_response)
 
-    returned_id = (
-        status_response.get("requests", [{}])[0].get("request_id")
-        or status_response.get("requests", [{}])[0].get("requestId")
+    returned_id = status_response.get("requests", [{}])[0].get("request_id") or status_response.get(
+        "requests", [{}]
+    )[0].get("requestId")
+    assert returned_id == request_id, (
+        f"Status response echoed {returned_id!r}, expected {request_id!r}"
     )
-    assert returned_id == request_id, f"Status response echoed {returned_id!r}, expected {request_id!r}"
 
     machines = status_response["requests"][0]["machines"]
     machine_ids = [m.get("machine_id") for m in machines]
@@ -1054,7 +1061,9 @@ def test_rest_api_partial_return_reduces_capacity(
             return_response = rest_api_client.return_machines(remaining_ids)
             rrid = return_response.get("request_id")
             if rrid:
-                _wait_for_return_completion_rest(rest_api_client, rrid, REST_TIMEOUTS["cleanup_wait_timeout"])
+                _wait_for_return_completion_rest(
+                    rest_api_client, rrid, REST_TIMEOUTS["cleanup_wait_timeout"]
+                )
         except Exception as exc:
             log.warning("Graceful return failed for remaining instances: %s", exc)
 
@@ -1808,7 +1817,9 @@ def test_rest_api_control_loop(rest_api_client, setup_rest_api_environment, test
     request_id = request_response.get("request_id")
     if not request_id:
         pytest.fail(f"Request ID missing in response: {request_response}")
-    assert REQUEST_ID_RE.match(request_id), f"request_id {request_id!r} does not match expected format"
+    assert REQUEST_ID_RE.match(request_id), (
+        f"request_id {request_id!r} does not match expected format"
+    )
 
     log.info(f"Request ID: {request_id}")
 
@@ -1864,11 +1875,12 @@ def test_rest_api_control_loop(rest_api_client, setup_rest_api_environment, test
     # 2.2: Validate status response
     log.info("2.2: Validating status response")
     assert status_response is not None, "status_response is None after request completion"
-    returned_id = (
-        status_response.get("requests", [{}])[0].get("request_id")
-        or status_response.get("requests", [{}])[0].get("requestId")
+    returned_id = status_response.get("requests", [{}])[0].get("request_id") or status_response.get(
+        "requests", [{}]
+    )[0].get("requestId")
+    assert returned_id == request_id, (
+        f"Status response echoed {returned_id!r}, expected {request_id!r}"
     )
-    assert returned_id == request_id, f"Status response echoed {returned_id!r}, expected {request_id!r}"
     _check_request_machines_response_status(status_response)
 
     # 2.3: Verify instances on AWS

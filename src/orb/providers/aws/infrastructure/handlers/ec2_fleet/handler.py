@@ -644,12 +644,13 @@ class EC2FleetHandler(AWSHandler, BaseContextMixin, FleetGroupingMixin):
 
                                 # AWS deletes instant fleet records; recover request_id from instance tags for cleanup.
                                 instance_tags = {
-                                    t.get("Key"): t.get("Value")
-                                    for t in instance.get("Tags", [])
+                                    t.get("Key"): t.get("Value") for t in instance.get("Tags", [])
                                 }
                                 if instance_tags.get("orb:fleet-type") == "instant":
                                     orb_request_id = instance_tags.get("orb:request-id", "")
-                                    if orb_request_id and not groups[ec2_fleet_id].get("request_id"):
+                                    if orb_request_id and not groups[ec2_fleet_id].get(
+                                        "request_id"
+                                    ):
                                         groups[ec2_fleet_id]["request_id"] = orb_request_id
 
                     non_ec2_fleet_instances = [

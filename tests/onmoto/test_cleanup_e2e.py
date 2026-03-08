@@ -74,11 +74,13 @@ def _make_cleanup_config_port(prefix: str = "") -> Any:
 
     config_port = MagicMock()
     config_port.get_resource_prefix.return_value = prefix
-    provider_defaults = ProviderDefaults(cleanup=CleanupConfig(
-        enabled=True,
-        delete_launch_template=True,
-        dry_run=False,
-    ))
+    provider_defaults = ProviderDefaults(
+        cleanup=CleanupConfig(
+            enabled=True,
+            delete_launch_template=True,
+            dry_run=False,
+        )
+    )
     provider_config = MagicMock()
     provider_config.provider_defaults = {"aws": provider_defaults}
     config_port.get_provider_config.return_value = provider_config
@@ -364,9 +366,7 @@ def test_asg_cleanup_deletes_asg_and_lt(aws_client, subnet_id, sg_id, autoscalin
 
     # Assert ASG gone
     resp = autoscaling.describe_auto_scaling_groups(AutoScalingGroupNames=[asg_name])
-    assert resp["AutoScalingGroups"] == [], (
-        f"ASG {asg_name!r} still exists after cancel_resource"
-    )
+    assert resp["AutoScalingGroups"] == [], f"ASG {asg_name!r} still exists after cancel_resource"
 
     # Assert LT gone
     _assert_no_lt_for_request(ec2, req_id)
@@ -377,9 +377,7 @@ def test_asg_cleanup_deletes_asg_and_lt(aws_client, subnet_id, sg_id, autoscalin
 # ---------------------------------------------------------------------------
 
 
-def test_ec2_fleet_maintain_cleanup_deletes_fleet_and_lt(
-    aws_client, subnet_id, sg_id, ec2
-):
+def test_ec2_fleet_maintain_cleanup_deletes_fleet_and_lt(aws_client, subnet_id, sg_id, ec2):
     """acquire + cancel_resource deletes a maintain-type EC2 Fleet and its LT."""
     req_id = "cleanup-fleet-maintain-001"
     logger = _make_logger()
@@ -426,9 +424,7 @@ def test_ec2_fleet_maintain_cleanup_deletes_fleet_and_lt(
 # ---------------------------------------------------------------------------
 
 
-def test_ec2_fleet_request_cleanup_deletes_fleet_and_lt(
-    aws_client, subnet_id, sg_id, ec2
-):
+def test_ec2_fleet_request_cleanup_deletes_fleet_and_lt(aws_client, subnet_id, sg_id, ec2):
     """acquire + cancel_resource deletes a request-type EC2 Fleet and its LT."""
     req_id = "cleanup-fleet-request-001"
     logger = _make_logger()
@@ -556,12 +552,10 @@ def test_spot_fleet_maintain_cleanup_cancels_fleet_and_deletes_lt(
 
     # Assert fleet cancelled
     resp = ec2.describe_spot_fleet_requests(SpotFleetRequestIds=[fleet_id])
-    fleet_states = [
-        c["SpotFleetRequestState"] for c in resp["SpotFleetRequestConfigs"]
-    ]
-    assert all(s in ("cancelled", "cancelled_running", "cancelled_terminating") for s in fleet_states), (
-        f"SpotFleet {fleet_id!r} not cancelled; states: {fleet_states}"
-    )
+    fleet_states = [c["SpotFleetRequestState"] for c in resp["SpotFleetRequestConfigs"]]
+    assert all(
+        s in ("cancelled", "cancelled_running", "cancelled_terminating") for s in fleet_states
+    ), f"SpotFleet {fleet_id!r} not cancelled; states: {fleet_states}"
 
     # Directly exercise the LT cleanup path (workaround for moto tag gap)
     handler._delete_orb_launch_template(req_id)
@@ -575,9 +569,7 @@ def test_spot_fleet_maintain_cleanup_cancels_fleet_and_deletes_lt(
 # ---------------------------------------------------------------------------
 
 
-def test_spot_fleet_request_cleanup_cancels_fleet_and_deletes_lt(
-    aws_client, subnet_id, sg_id, ec2
-):
+def test_spot_fleet_request_cleanup_cancels_fleet_and_deletes_lt(aws_client, subnet_id, sg_id, ec2):
     """acquire + cancel_resource + _delete_orb_launch_template cancels a request
     SpotFleet and deletes its LT.
 
@@ -614,12 +606,10 @@ def test_spot_fleet_request_cleanup_cancels_fleet_and_deletes_lt(
 
     # Assert fleet cancelled
     resp = ec2.describe_spot_fleet_requests(SpotFleetRequestIds=[fleet_id])
-    fleet_states = [
-        c["SpotFleetRequestState"] for c in resp["SpotFleetRequestConfigs"]
-    ]
-    assert all(s in ("cancelled", "cancelled_running", "cancelled_terminating") for s in fleet_states), (
-        f"SpotFleet {fleet_id!r} not cancelled; states: {fleet_states}"
-    )
+    fleet_states = [c["SpotFleetRequestState"] for c in resp["SpotFleetRequestConfigs"]]
+    assert all(
+        s in ("cancelled", "cancelled_running", "cancelled_terminating") for s in fleet_states
+    ), f"SpotFleet {fleet_id!r} not cancelled; states: {fleet_states}"
 
     # Directly exercise the LT cleanup path (workaround for moto tag gap)
     handler._delete_orb_launch_template(req_id)

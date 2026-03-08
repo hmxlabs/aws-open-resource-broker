@@ -181,9 +181,7 @@ def _assert_asg_deleted(asg_name: str, timeout: int = 120) -> None:
         except Exception as exc:
             log.warning("_assert_asg_deleted: describe failed for %s: %s", asg_name, exc)
         time.sleep(10)
-    pytest.fail(
-        f"ASG {asg_name} not deleted or zeroed within {timeout}s. Last state: {last_state}"
-    )
+    pytest.fail(f"ASG {asg_name} not deleted or zeroed within {timeout}s. Last state: {last_state}")
 
 
 def _assert_fleet_deleted(fleet_id: str, timeout: int = 120) -> None:
@@ -200,9 +198,7 @@ def _assert_fleet_deleted(fleet_id: str, timeout: int = 120) -> None:
                 return
             f = fleets[0]
             state = f.get("FleetState", "")
-            capacity = (
-                f.get("TargetCapacitySpecification", {}).get("TotalTargetCapacity", -1)
-            )
+            capacity = f.get("TargetCapacitySpecification", {}).get("TotalTargetCapacity", -1)
             last_state = f"state={state}, TotalTargetCapacity={capacity}"
             if state in deleted_states or capacity == 0:
                 log.info("EC2 Fleet %s: %s", fleet_id, last_state)
@@ -377,9 +373,7 @@ def setup_cleanup_e2e(request, test_session_id):
 
         try:
             all_machine_ids = [
-                mid
-                for req_id in _tracked_request_ids
-                for mid in _get_machine_ids_from_ec2(req_id)
+                mid for req_id in _tracked_request_ids for mid in _get_machine_ids_from_ec2(req_id)
             ]
             wait_for_instances_terminated(all_machine_ids, ec2_client)
         except Exception as exc:
@@ -434,7 +428,9 @@ async def _run_cleanup_verification(
 
     request_id = _extract_request_id(request_result)
     assert request_id, f"No request_id in response: {request_result}"
-    assert REQUEST_ID_RE.match(request_id), f"request_id {request_id!r} does not match expected format"
+    assert REQUEST_ID_RE.match(request_id), (
+        f"request_id {request_id!r} does not match expected format"
+    )
     tracked_request_ids.append(request_id)
     log.info("Got request_id: %s", request_id)
 
@@ -461,11 +457,12 @@ async def _run_cleanup_verification(
         f"Expected {capacity} machines, got {len(machine_ids)}: {machine_ids}"
     )
 
-    returned_id = (
-        status_response.get("requests", [{}])[0].get("request_id")
-        or status_response.get("requests", [{}])[0].get("requestId")
+    returned_id = status_response.get("requests", [{}])[0].get("request_id") or status_response.get(
+        "requests", [{}]
+    )[0].get("requestId")
+    assert returned_id == request_id, (
+        f"Status response echoed {returned_id!r}, expected {request_id!r}"
     )
-    assert returned_id == request_id, f"Status response echoed {returned_id!r}, expected {request_id!r}"
 
     for machine_id in machine_ids:
         state = get_instance_state(machine_id)

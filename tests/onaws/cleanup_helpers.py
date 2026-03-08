@@ -68,9 +68,7 @@ def wait_for_instances_terminated(
             time.sleep(10)
 
     if pending:
-        log.warning(
-            "Timed out waiting for %d instance(s) to terminate: %s", len(pending), pending
-        )
+        log.warning("Timed out waiting for %d instance(s) to terminate: %s", len(pending), pending)
     else:
         log.info("All instances reached terminal state")
 
@@ -105,7 +103,10 @@ def cleanup_launch_templates_for_request(request_id: str, ec2_client) -> None:
                 log.info("Deleted launch template %s", lt_id)
             except ClientError as exc:
                 code = exc.response.get("Error", {}).get("Code", "")
-                if code in ("InvalidLaunchTemplateId.NotFound", "InvalidLaunchTemplateId.Malformed"):
+                if code in (
+                    "InvalidLaunchTemplateId.NotFound",
+                    "InvalidLaunchTemplateId.Malformed",
+                ):
                     log.debug("Launch template %s already gone", lt_id)
                 else:
                     log.warning("Failed to delete launch template %s: %s", lt_id, exc)
@@ -113,9 +114,7 @@ def cleanup_launch_templates_for_request(request_id: str, ec2_client) -> None:
                 log.warning("Unexpected error deleting launch template %s: %s", lt_id, exc)
 
     except Exception as exc:
-        log.warning(
-            "Failed to list launch templates for request %s: %s", request_id, exc
-        )
+        log.warning("Failed to list launch templates for request %s: %s", request_id, exc)
 
 
 def get_machine_ids_from_ec2(request_id: str, ec2_client) -> List[str]:
@@ -128,7 +127,10 @@ def get_machine_ids_from_ec2(request_id: str, ec2_client) -> List[str]:
         response = ec2_client.describe_instances(
             Filters=[
                 {"Name": "tag:orb:request-id", "Values": [request_id]},
-                {"Name": "instance-state-name", "Values": ["pending", "running", "stopping", "stopped"]},
+                {
+                    "Name": "instance-state-name",
+                    "Values": ["pending", "running", "stopping", "stopped"],
+                },
             ]
         )
         ids = []
@@ -216,7 +218,10 @@ def cleanup_resources_by_session_tag(
         pages = paginator.paginate(
             Filters=[
                 tag_filter,
-                {"Name": "instance-state-name", "Values": ["pending", "running", "stopping", "stopped"]},
+                {
+                    "Name": "instance-state-name",
+                    "Values": ["pending", "running", "stopping", "stopped"],
+                },
             ]
         )
         instance_ids = []
@@ -226,7 +231,9 @@ def cleanup_resources_by_session_tag(
                     instance_ids.append(inst["InstanceId"])
 
         if instance_ids:
-            log.info("Session cleanup: terminating %d instance(s): %s", len(instance_ids), instance_ids)
+            log.info(
+                "Session cleanup: terminating %d instance(s): %s", len(instance_ids), instance_ids
+            )
             try:
                 ec2_client.terminate_instances(InstanceIds=instance_ids)
             except Exception as exc:
@@ -252,7 +259,9 @@ def cleanup_resources_by_session_tag(
                 try:
                     ec2_client.delete_launch_template(LaunchTemplateId=lt_id)
                 except Exception as exc:
-                    log.warning("Session cleanup: failed to delete launch template %s: %s", lt_id, exc)
+                    log.warning(
+                        "Session cleanup: failed to delete launch template %s: %s", lt_id, exc
+                    )
         else:
             log.info("Session cleanup: no tagged launch templates found")
 
@@ -263,7 +272,12 @@ def cleanup_resources_by_session_tag(
     if autoscaling_client is not None:
         try:
             paginator = autoscaling_client.get_paginator("describe_auto_scaling_groups")
-            pages = paginator.paginate(Filters=[{"Name": "tag-key", "Values": ["test-session"]}, {"Name": "tag-value", "Values": [session_id]}])
+            pages = paginator.paginate(
+                Filters=[
+                    {"Name": "tag-key", "Values": ["test-session"]},
+                    {"Name": "tag-value", "Values": [session_id]},
+                ]
+            )
             asg_names = []
             for page in pages:
                 for asg in page.get("AutoScalingGroups", []):
@@ -312,7 +326,10 @@ def cleanup_all_orb_resources(
         pages = paginator.paginate(
             Filters=[
                 {"Name": "tag-key", "Values": ["orb:managed-by"]},
-                {"Name": "instance-state-name", "Values": ["pending", "running", "stopping", "stopped"]},
+                {
+                    "Name": "instance-state-name",
+                    "Values": ["pending", "running", "stopping", "stopped"],
+                },
             ]
         )
         instance_ids = []
@@ -322,7 +339,9 @@ def cleanup_all_orb_resources(
                     instance_ids.append(inst["InstanceId"])
 
         if instance_ids:
-            log.info("Nuclear cleanup: terminating %d instance(s): %s", len(instance_ids), instance_ids)
+            log.info(
+                "Nuclear cleanup: terminating %d instance(s): %s", len(instance_ids), instance_ids
+            )
             try:
                 ec2_client.terminate_instances(InstanceIds=instance_ids)
             except Exception as exc:
@@ -336,9 +355,7 @@ def cleanup_all_orb_resources(
     # Delete tagged launch templates
     try:
         paginator = ec2_client.get_paginator("describe_launch_templates")
-        pages = paginator.paginate(
-            Filters=[{"Name": "tag-key", "Values": ["orb:managed-by"]}]
-        )
+        pages = paginator.paginate(Filters=[{"Name": "tag-key", "Values": ["orb:managed-by"]}])
         lt_ids = []
         for page in pages:
             for lt in page.get("LaunchTemplates", []):
@@ -350,7 +367,9 @@ def cleanup_all_orb_resources(
                 try:
                     ec2_client.delete_launch_template(LaunchTemplateId=lt_id)
                 except Exception as exc:
-                    log.warning("Nuclear cleanup: failed to delete launch template %s: %s", lt_id, exc)
+                    log.warning(
+                        "Nuclear cleanup: failed to delete launch template %s: %s", lt_id, exc
+                    )
         else:
             log.info("Nuclear cleanup: no tagged launch templates found")
 
@@ -361,9 +380,7 @@ def cleanup_all_orb_resources(
     if autoscaling_client is not None:
         try:
             paginator = autoscaling_client.get_paginator("describe_auto_scaling_groups")
-            pages = paginator.paginate(
-                Filters=[{"Name": "tag-key", "Values": ["orb:managed-by"]}]
-            )
+            pages = paginator.paginate(Filters=[{"Name": "tag-key", "Values": ["orb:managed-by"]}])
             asg_names = []
             for page in pages:
                 for asg in page.get("AutoScalingGroups", []):

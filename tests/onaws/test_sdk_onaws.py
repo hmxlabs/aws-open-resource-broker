@@ -92,7 +92,10 @@ def setup_sdk_test(request, test_session_id):
     overrides = {}
     if hasattr(request, "param") and isinstance(request.param, dict):
         overrides = request.param.get("overrides", {})
-    overrides["instanceTags"] = {**overrides.get("instanceTags", {}), "test-session": test_session_id}
+    overrides["instanceTags"] = {
+        **overrides.get("instanceTags", {}),
+        "test-session": test_session_id,
+    }
 
     test_config_dir = processor.run_templates_dir / test_name
     if test_config_dir.exists():
@@ -165,8 +168,11 @@ def setup_sdk_test(request, test_session_id):
 
         try:
             wait_for_instances_terminated(
-                [mid for req_id in _tracked_request_ids
-                 for mid in _get_machine_ids_from_ec2(req_id)],
+                [
+                    mid
+                    for req_id in _tracked_request_ids
+                    for mid in _get_machine_ids_from_ec2(req_id)
+                ],
                 ec2_client,
             )
         except Exception as exc:
@@ -227,7 +233,9 @@ async def _run_full_cycle(sdk, test_case: dict, tracked_request_ids: list[str]) 
         else getattr(request_result, "request_id", None)
     )
     assert request_id, f"No request_id in response: {request_result}"
-    assert REQUEST_ID_RE.match(request_id), f"request_id {request_id!r} does not match expected format"
+    assert REQUEST_ID_RE.match(request_id), (
+        f"request_id {request_id!r} does not match expected format"
+    )
     tracked_request_ids.append(request_id)
     log.info("Got request_id: %s", request_id)
 
@@ -283,7 +291,9 @@ async def _run_full_cycle(sdk, test_case: dict, tracked_request_ids: list[str]) 
         if isinstance(status_response, dict)
         else None
     )
-    assert returned_id == request_id, f"Status response echoed {returned_id!r}, expected {request_id!r}"
+    assert returned_id == request_id, (
+        f"Status response echoed {returned_id!r}, expected {request_id!r}"
+    )
 
     machine_ids = _extract_machine_ids(status_response)
     assert len(machine_ids) == capacity, (
@@ -435,17 +445,15 @@ async def test_sdk_unknown_template_returns_error(setup_sdk_test):
                 template_id="NonExistent-Template-XYZ", count=1
             )
             is_error = (
-                (isinstance(result, dict) and (
-                    result.get("error") or
-                    result.get("status") == "error" or
-                    "not found" in str(result).lower() or
-                    "NonExistent" in str(result)
-                ))
-                or result is None
-            )
-            assert is_error, (
-                f"Expected error response for unknown template, got: {result}"
-            )
+                isinstance(result, dict)
+                and (
+                    result.get("error")
+                    or result.get("status") == "error"
+                    or "not found" in str(result).lower()
+                    or "NonExistent" in str(result)
+                )
+            ) or result is None
+            assert is_error, f"Expected error response for unknown template, got: {result}"
         except Exception as exc:
             # Any exception is acceptable — verify it's related to the template lookup
             assert (

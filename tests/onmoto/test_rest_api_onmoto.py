@@ -179,9 +179,11 @@ class TestRequestMachines:
         except (httpx.HTTPStatusError, Exception) as exc:
             # An unhandled exception propagating out of the ASGI app also counts as
             # the server rejecting the request — verify it's template-related.
-            assert "NonExistent-Template-XYZ" in str(exc) or "not found" in str(exc).lower() or "Template" in str(exc), (
-                f"Unexpected exception for unknown template: {exc}"
-            )
+            assert (
+                "NonExistent-Template-XYZ" in str(exc)
+                or "not found" in str(exc).lower()
+                or "Template" in str(exc)
+            ), f"Unexpected exception for unknown template: {exc}"
 
 
 class TestRequestStatus:
@@ -227,7 +229,9 @@ class TestRequestStatus:
 class TestListRequests:
     @pytest.mark.asyncio
     @pytest.mark.parametrize("scenario", get_smoke_scenarios(), ids=lambda s: s.scenario_id)
-    async def test_list_requests_includes_created_request(self, rest_client, scenario: TestScenario):
+    async def test_list_requests_includes_created_request(
+        self, rest_client, scenario: TestScenario
+    ):
         """GET /api/v1/requests includes the previously created request_id."""
         # Create a request
         create_resp = await rest_client.post(
@@ -279,9 +283,7 @@ class TestReturnMachines:
             json={"template_id": scenario.template_id, "count": scenario.capacity},
         )
         assert create_resp.status_code == 202
-        request_id = (
-            create_resp.json().get("requestId") or create_resp.json().get("request_id")
-        )
+        request_id = create_resp.json().get("requestId") or create_resp.json().get("request_id")
         assert request_id
 
         # Get status to find machine IDs
@@ -311,9 +313,7 @@ class TestReturnMachines:
         )
         return_body = return_resp.json()
         # Response must carry a message field
-        assert "message" in return_body, (
-            f"Return response missing 'message': {return_body}"
-        )
+        assert "message" in return_body, f"Return response missing 'message': {return_body}"
 
         # Poll for return completion
         import time
@@ -335,6 +335,7 @@ class TestReturnMachines:
                     if done:
                         break
                 import asyncio
+
                 await asyncio.sleep(0.5)
 
 
@@ -358,9 +359,7 @@ class TestFullLifecycle:
             json={"template_id": scenario.template_id, "count": scenario.capacity},
         )
         assert create_resp.status_code == 202
-        request_id = (
-            create_resp.json().get("requestId") or create_resp.json().get("request_id")
-        )
+        request_id = create_resp.json().get("requestId") or create_resp.json().get("request_id")
         assert request_id
         assert REQUEST_ID_RE.match(request_id), (
             f"request_id {request_id!r} does not match expected pattern"
@@ -386,13 +385,9 @@ class TestFullLifecycle:
         else:
             all_requests = list_body.get("requests", [])
         found_ids = [
-            (r.get("requestId") or r.get("request_id"))
-            for r in all_requests
-            if isinstance(r, dict)
+            (r.get("requestId") or r.get("request_id")) for r in all_requests if isinstance(r, dict)
         ]
-        assert request_id in found_ids, (
-            f"Request {request_id!r} not in list. Got: {found_ids}"
-        )
+        assert request_id in found_ids, f"Request {request_id!r} not in list. Got: {found_ids}"
 
         # 5. Return machines if any were provisioned
         machine_ids: list[str] = []
@@ -433,4 +428,5 @@ class TestFullLifecycle:
                         if done:
                             break
                     import asyncio
+
                     await asyncio.sleep(0.5)

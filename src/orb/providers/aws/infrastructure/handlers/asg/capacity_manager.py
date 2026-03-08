@@ -151,9 +151,7 @@ class ASGCapacityManager:
                 if groups:
                     asg_details = groups[0]
             except Exception as exc:
-                self._logger.warning(
-                    "Retry describe for ASG %s also failed: %s", asg_name, exc
-                )
+                self._logger.warning("Retry describe for ASG %s also failed: %s", asg_name, exc)
 
         if not asg_details:
             self._logger.warning(

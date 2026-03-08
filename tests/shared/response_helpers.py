@@ -9,14 +9,9 @@ def extract_request_id(result) -> str | None:
     """Extract request_id from any interface response shape."""
     if isinstance(result, dict):
         return (
-            result.get("request_id")
-            or result.get("requestId")
-            or result.get("created_request_id")
+            result.get("request_id") or result.get("requestId") or result.get("created_request_id")
         )
-    return (
-        getattr(result, "request_id", None)
-        or getattr(result, "created_request_id", None)
-    )
+    return getattr(result, "request_id", None) or getattr(result, "created_request_id", None)
 
 
 def extract_status(result) -> str:
@@ -36,10 +31,7 @@ def extract_machine_ids(result) -> list[str]:
         if requests and isinstance(requests[0], dict):
             machines = requests[0].get("machines", [])
             return [
-                mid
-                for m in machines
-                for mid in [m.get("machineId") or m.get("machine_id")]
-                if mid
+                mid for m in machines for mid in [m.get("machineId") or m.get("machine_id")] if mid
             ]
         return []
     machines = getattr(result, "machines", [])
