@@ -75,7 +75,6 @@ log.addHandler(_console)
 
 from tests.shared.constants import REQUEST_ID_RE
 
-
 # ---------------------------------------------------------------------------
 # Fixture
 # ---------------------------------------------------------------------------
@@ -236,9 +235,11 @@ async def _call_tool(mcp_server, tool_name: str, arguments: dict, msg_id: int = 
     return dict(inner)
 
 
-from tests.shared.response_helpers import extract_machine_ids as _extract_machine_ids
-from tests.shared.response_helpers import extract_request_id as _extract_request_id
-from tests.shared.response_helpers import extract_status as _extract_request_status
+from tests.shared.response_helpers import (
+    extract_machine_ids as _extract_machine_ids,
+    extract_request_id as _extract_request_id,
+    extract_status as _extract_request_status,
+)
 
 # ---------------------------------------------------------------------------
 # Core test logic (shared by parametrised and single tests)

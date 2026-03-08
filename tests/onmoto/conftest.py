@@ -327,6 +327,8 @@ def _make_launch_template_manager(aws_client: AWSClient, logger) -> AWSLaunchTem
 
 def _inject_moto_factory(aws_client: AWSClient, logger, config_port) -> None:
     """Swap the DI-wired AWSProviderStrategy's internals for moto-backed ones."""
+    from orb.domain.base.ports import ConfigurationPort
+    from orb.infrastructure.di.container import get_container
     from orb.providers.aws.domain.template.value_objects import ProviderApi
     from orb.providers.aws.infrastructure.adapters.aws_provisioning_adapter import (
         AWSProvisioningAdapter,
@@ -335,9 +337,6 @@ def _inject_moto_factory(aws_client: AWSClient, logger, config_port) -> None:
     from orb.providers.aws.infrastructure.aws_handler_factory import AWSHandlerFactory
     from orb.providers.aws.services.instance_operation_service import AWSInstanceOperationService
     from orb.providers.registry import get_provider_registry
-
-    from orb.domain.base.ports import ConfigurationPort
-    from orb.infrastructure.di.container import get_container
 
     registry = get_provider_registry()
     registry._strategy_cache.pop("aws_moto_eu-west-2", None)

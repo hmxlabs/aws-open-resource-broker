@@ -14,9 +14,9 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 
 from orb.providers.aws.exceptions.aws_exceptions import AWSValidationError
 from tests.onmoto.conftest import (
-    _make_moto_aws_client as _make_aws_client,
     _make_config_port,
     _make_logger,
+    _make_moto_aws_client as _make_aws_client,
     make_asg_handler,
     make_aws_template,
     make_request,
