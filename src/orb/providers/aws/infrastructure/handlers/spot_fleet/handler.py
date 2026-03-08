@@ -509,7 +509,9 @@ class SpotFleetHandler(AWSHandler, BaseContextMixin, FleetGroupingMixin):
     ) -> None:
         """Release hosts for a single Spot Fleet."""
         request_id = fleet_details.get("request_id", "") if isinstance(fleet_details, dict) else ""
-        self._release_manager.release(fleet_id, fleet_instance_ids, fleet_details, request_id=request_id)
+        self._release_manager.release(
+            fleet_id, fleet_instance_ids, fleet_details, request_id=request_id
+        )
 
     @classmethod
     def get_example_templates(cls) -> list[Template]:

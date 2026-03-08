@@ -456,7 +456,9 @@ class TestSpotFleetHandlerEdgeCases:
         fleet_id = result["resource_ids"][0]  # type: ignore[index]
 
         fake_instance_ids = ["i-ccccccccccccccc01"]
-        resource_mapping: dict[str, tuple[str | None, int]] = {iid: (fleet_id, 1) for iid in fake_instance_ids}
+        resource_mapping: dict[str, tuple[str | None, int]] = {
+            iid: (fleet_id, 1) for iid in fake_instance_ids
+        }
 
         try:
             h.release_hosts(fake_instance_ids, resource_mapping=resource_mapping)

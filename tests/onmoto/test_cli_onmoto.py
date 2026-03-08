@@ -87,8 +87,7 @@ def _run_orb_cli(args: list[str]) -> dict:  # type: ignore[return]
         parsed = json.loads(output)
     except json.JSONDecodeError as exc:
         raise AssertionError(
-            f"CLI output is not valid JSON for args {args}.\n"
-            f"Output was:\n{output}"
+            f"CLI output is not valid JSON for args {args}.\nOutput was:\n{output}"
         ) from exc
 
     # machines request returns [result_dict, exit_code] — unwrap to the dict
@@ -151,7 +150,14 @@ class TestCLIMachinesRequest:
 
         with patch.object(Application, "initialize", _patched_initialize):
             result = _run_orb_cli(
-                ["machines", "request", "--template", scenario.template_id, "--count", str(scenario.capacity)]
+                [
+                    "machines",
+                    "request",
+                    "--template",
+                    scenario.template_id,
+                    "--count",
+                    str(scenario.capacity),
+                ]
             )
 
         request_id = _extract_request_id(result)
@@ -173,7 +179,14 @@ class TestCLIRequestsStatus:
 
         with patch.object(Application, "initialize", _patched_initialize):
             create_result = _run_orb_cli(
-                ["machines", "request", "--template", scenario.template_id, "--count", str(scenario.capacity)]
+                [
+                    "machines",
+                    "request",
+                    "--template",
+                    scenario.template_id,
+                    "--count",
+                    str(scenario.capacity),
+                ]
             )
 
         request_id = _extract_request_id(create_result)
@@ -209,7 +222,14 @@ class TestCLIFullLifecycle:
         with patch.object(Application, "initialize", _patched_initialize):
             # 1. Create request
             create_result = _run_orb_cli(
-                ["machines", "request", "--template", scenario.template_id, "--count", str(scenario.capacity)]
+                [
+                    "machines",
+                    "request",
+                    "--template",
+                    scenario.template_id,
+                    "--count",
+                    str(scenario.capacity),
+                ]
             )
 
         request_id = _extract_request_id(create_result)
@@ -241,9 +261,7 @@ class TestCLIFullLifecycle:
 
             assert return_result is not None
             message = return_result.get("message")
-            assert message is not None, (
-                f"Return response missing 'message' field: {return_result}"
-            )
+            assert message is not None, f"Return response missing 'message' field: {return_result}"
 
             # Poll for return completion
             import time
@@ -273,7 +291,14 @@ class TestCLIErrorHandling:
         with patch.object(Application, "initialize", _patched_initialize):
             try:
                 result = _run_orb_cli(
-                    ["machines", "request", "--template", "NonExistent-Template-XYZ", "--count", "1"]
+                    [
+                        "machines",
+                        "request",
+                        "--template",
+                        "NonExistent-Template-XYZ",
+                        "--count",
+                        "1",
+                    ]
                 )
             except AssertionError:
                 # _run_orb_cli raises AssertionError for non-JSON or empty output —
@@ -308,7 +333,14 @@ class TestCLIRequestsList:
 
         with patch.object(Application, "initialize", _patched_initialize):
             create_result = _run_orb_cli(
-                ["machines", "request", "--template", scenario.template_id, "--count", str(scenario.capacity)]
+                [
+                    "machines",
+                    "request",
+                    "--template",
+                    scenario.template_id,
+                    "--count",
+                    str(scenario.capacity),
+                ]
             )
 
         request_id = _extract_request_id(create_result)
@@ -318,9 +350,7 @@ class TestCLIRequestsList:
         # The short list view omits request_id from the formatted output, so we
         # verify presence by asserting the filtered result is non-empty.
         with patch.object(Application, "initialize", _patched_initialize):
-            list_result = _run_orb_cli(
-                ["requests", "list", "--filter", f"request_id={request_id}"]
-            )
+            list_result = _run_orb_cli(["requests", "list", "--filter", f"request_id={request_id}"])
 
         if isinstance(list_result, list):
             requests = list_result

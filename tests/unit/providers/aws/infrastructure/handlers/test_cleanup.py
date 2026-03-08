@@ -695,9 +695,7 @@ class TestCancelResourceLTCleanup:
     def test_spot_fleet_cancel_resource_returns_error_on_exception(self):
         config_port = _make_config_port()
         handler = _make_spot_fleet_handler(config_port=config_port)
-        with patch.object(
-            handler._release_manager, "release", side_effect=RuntimeError("boom")
-        ):
+        with patch.object(handler._release_manager, "release", side_effect=RuntimeError("boom")):
             result = handler.cancel_resource("sfr-cancel-3", "req-cancel-3")
         assert result["status"] == "error"
 

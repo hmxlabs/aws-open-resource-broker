@@ -66,8 +66,10 @@ async def mcp_server(orb_config_dir, moto_aws):
 
         sig = inspect.signature(fn)
         if len(sig.parameters) == 1:
+
             async def _wrap(args, _app, _fn=fn):
                 return await _fn(args)
+
             functools.update_wrapper(_wrap, fn)
             wrapped[name] = _wrap
         else:
@@ -147,9 +149,7 @@ class TestMCPServerInit:
 class TestMCPTemplates:
     @pytest.mark.asyncio
     async def test_list_templates_via_mcp(self, mcp_server):
-        resp = await _send(
-            mcp_server, "tools/call", {"name": "list_templates", "arguments": {}}
-        )
+        resp = await _send(mcp_server, "tools/call", {"name": "list_templates", "arguments": {}})
 
         assert not _has_error(resp), f"Unexpected error: {resp.get('error')}"
         payload = _tool_text(resp)
@@ -188,7 +188,13 @@ class TestMCPRequestLifecycle:
         resp = await _send(
             mcp_server,
             "tools/call",
-            {"name": "request_machines", "arguments": {"template_id": scenario.template_id, "machine_count": scenario.capacity}},
+            {
+                "name": "request_machines",
+                "arguments": {
+                    "template_id": scenario.template_id,
+                    "machine_count": scenario.capacity,
+                },
+            },
         )
 
         assert not _has_error(resp), f"Unexpected error: {resp.get('error')}"
@@ -206,7 +212,13 @@ class TestMCPRequestLifecycle:
         req_resp = await _send(
             mcp_server,
             "tools/call",
-            {"name": "request_machines", "arguments": {"template_id": scenario.template_id, "machine_count": scenario.capacity}},
+            {
+                "name": "request_machines",
+                "arguments": {
+                    "template_id": scenario.template_id,
+                    "machine_count": scenario.capacity,
+                },
+            },
         )
         request_id = _tool_text(req_resp).get("requestId") or _tool_text(req_resp).get("request_id")
         assert request_id, f"No request_id from request_machines: {req_resp}"
@@ -240,7 +252,13 @@ class TestMCPRequestLifecycle:
         req_resp = await _send(
             mcp_server,
             "tools/call",
-            {"name": "request_machines", "arguments": {"template_id": scenario.template_id, "machine_count": scenario.capacity}},
+            {
+                "name": "request_machines",
+                "arguments": {
+                    "template_id": scenario.template_id,
+                    "machine_count": scenario.capacity,
+                },
+            },
         )
         req_payload = _tool_text(req_resp)
         request_id = req_payload.get("requestId") or req_payload.get("request_id")
@@ -306,6 +324,7 @@ class TestMCPRequestLifecycle:
                     if done:
                         break
                 import asyncio
+
                 await asyncio.sleep(0.5)
 
     @pytest.mark.asyncio
@@ -315,7 +334,13 @@ class TestMCPRequestLifecycle:
         req_resp = await _send(
             mcp_server,
             "tools/call",
-            {"name": "request_machines", "arguments": {"template_id": scenario.template_id, "machine_count": scenario.capacity}},
+            {
+                "name": "request_machines",
+                "arguments": {
+                    "template_id": scenario.template_id,
+                    "machine_count": scenario.capacity,
+                },
+            },
         )
         req_payload = _tool_text(req_resp)
         request_id = req_payload.get("requestId") or req_payload.get("request_id")
@@ -385,7 +410,10 @@ class TestMCPLaunchTemplateCleanup:
         await _send(
             mcp_server,
             "tools/call",
-            {"name": "request_machines", "arguments": {"template_id": "RunInstances-OnDemand", "machine_count": 1}},
+            {
+                "name": "request_machines",
+                "arguments": {"template_id": "RunInstances-OnDemand", "machine_count": 1},
+            },
         )
 
         lt_manager.create_or_update_launch_template.assert_called()
@@ -401,7 +429,10 @@ class TestMCPLaunchTemplateCleanup:
         req_resp = await _send(
             mcp_server,
             "tools/call",
-            {"name": "request_machines", "arguments": {"template_id": "RunInstances-OnDemand", "machine_count": 1}},
+            {
+                "name": "request_machines",
+                "arguments": {"template_id": "RunInstances-OnDemand", "machine_count": 1},
+            },
         )
         req_payload = _tool_text(req_resp)
         request_id = req_payload.get("requestId") or req_payload.get("request_id")
@@ -445,7 +476,9 @@ class TestMCPLaunchTemplateCleanup:
         import time
 
         lt_return_payload = _tool_text(return_resp_lt) if not _has_error(return_resp_lt) else {}
-        lt_return_request_id = lt_return_payload.get("request_id") or lt_return_payload.get("requestId")
+        lt_return_request_id = lt_return_payload.get("request_id") or lt_return_payload.get(
+            "requestId"
+        )
         if lt_return_request_id:
             deadline = time.time() + 10
             while time.time() < deadline:
@@ -534,7 +567,10 @@ class TestMCPErrorHandling:
         resp = await _send(
             mcp_server,
             "tools/call",
-            {"name": "request_machines", "arguments": {"template_id": "NonExistent-Template-XYZ", "machine_count": 1}},
+            {
+                "name": "request_machines",
+                "arguments": {"template_id": "NonExistent-Template-XYZ", "machine_count": 1},
+            },
         )
 
         # The server must return a well-formed JSON-RPC response (no Python exception).
@@ -544,14 +580,10 @@ class TestMCPErrorHandling:
             return
 
         payload = _tool_text(resp)
-        has_error = (
-            isinstance(payload, dict) and (
-                payload.get("error") or
-                payload.get("status") == "error" or
-                "not found" in str(payload).lower() or
-                "NonExistent" in str(payload)
-            )
+        has_error = isinstance(payload, dict) and (
+            payload.get("error")
+            or payload.get("status") == "error"
+            or "not found" in str(payload).lower()
+            or "NonExistent" in str(payload)
         )
-        assert has_error, (
-            f"Expected error payload for unknown template, got: {payload}"
-        )
+        assert has_error, f"Expected error payload for unknown template, got: {payload}"

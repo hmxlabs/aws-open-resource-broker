@@ -92,7 +92,10 @@ def setup_mcp_test(request, test_session_id):
     overrides = {}
     if hasattr(request, "param") and isinstance(request.param, dict):
         overrides = request.param.get("overrides", {})
-    overrides["instanceTags"] = {**overrides.get("instanceTags", {}), "test-session": test_session_id}
+    overrides["instanceTags"] = {
+        **overrides.get("instanceTags", {}),
+        "test-session": test_session_id,
+    }
 
     test_config_dir = processor.run_templates_dir / test_name
     if test_config_dir.exists():
@@ -162,8 +165,11 @@ def setup_mcp_test(request, test_session_id):
 
         try:
             wait_for_instances_terminated(
-                [mid for req_id in _tracked_request_ids
-                 for mid in _get_machine_ids_from_ec2(req_id)],
+                [
+                    mid
+                    for req_id in _tracked_request_ids
+                    for mid in _get_machine_ids_from_ec2(req_id)
+                ],
                 ec2_client,
             )
         except Exception as exc:
@@ -204,12 +210,14 @@ async def _call_tool(mcp_server, tool_name: str, arguments: dict, msg_id: int = 
     and returns the parsed JSON from content[0].text.  Handles the [dict, int] tuple
     shape that some handlers return.
     """
-    message = json.dumps({
-        "jsonrpc": "2.0",
-        "id": msg_id,
-        "method": "tools/call",
-        "params": {"name": tool_name, "arguments": arguments},
-    })
+    message = json.dumps(
+        {
+            "jsonrpc": "2.0",
+            "id": msg_id,
+            "method": "tools/call",
+            "params": {"name": tool_name, "arguments": arguments},
+        }
+    )
     raw = await mcp_server.handle_message(message)
     envelope = json.loads(raw)
 
@@ -237,9 +245,7 @@ from tests.shared.response_helpers import extract_status as _extract_request_sta
 # ---------------------------------------------------------------------------
 
 
-async def _run_full_cycle_mcp(
-    mcp_server, test_case: dict, tracked_request_ids: list[str]
-) -> None:
+async def _run_full_cycle_mcp(mcp_server, test_case: dict, tracked_request_ids: list[str]) -> None:
     """Full acquire→return cycle via MCP server."""
     import asyncio
 
@@ -258,7 +264,9 @@ async def _run_full_cycle_mcp(
 
     request_id = _extract_request_id(request_result)
     assert request_id, f"No request_id in response: {request_result}"
-    assert REQUEST_ID_RE.match(request_id), f"request_id {request_id!r} does not match expected format"
+    assert REQUEST_ID_RE.match(request_id), (
+        f"request_id {request_id!r} does not match expected format"
+    )
     tracked_request_ids.append(request_id)
     log.info("Got request_id: %s", request_id)
 
@@ -301,11 +309,12 @@ async def _run_full_cycle_mcp(
         await asyncio.sleep(MCP_TIMEOUTS["poll_interval"])
 
     # 3. Assert ORB status + AWS-side instance state
-    returned_id = (
-        status_result.get("requests", [{}])[0].get("request_id")
-        or status_result.get("requests", [{}])[0].get("requestId")
+    returned_id = status_result.get("requests", [{}])[0].get("request_id") or status_result.get(
+        "requests", [{}]
+    )[0].get("requestId")
+    assert returned_id == request_id, (
+        f"Status response echoed {returned_id!r}, expected {request_id!r}"
     )
-    assert returned_id == request_id, f"Status response echoed {returned_id!r}, expected {request_id!r}"
 
     machine_ids = _extract_machine_ids(status_result)
     assert len(machine_ids) == capacity, (
@@ -321,9 +330,7 @@ async def _run_full_cycle_mcp(
     log.info("All %d instance(s) provisioned: %s", capacity, machine_ids)
 
     # 4. Return machines
-    return_result = await _call_tool(
-        mcp_server, "return_machines", {"machine_ids": machine_ids}
-    )
+    return_result = await _call_tool(mcp_server, "return_machines", {"machine_ids": machine_ids})
     log.debug("return_machines result: %s", return_result)
 
     return_request_id = _extract_request_id(return_result)
@@ -390,12 +397,14 @@ async def test_mcp_smoke(setup_mcp_test):
     mcp_server, _config_path, tracked_request_ids = setup_mcp_test
 
     # 1. Initialize MCP session
-    init_msg = json.dumps({
-        "jsonrpc": "2.0",
-        "id": 1,
-        "method": "initialize",
-        "params": {"clientInfo": {"name": "pytest-mcp-onaws", "version": "1.0"}},
-    })
+    init_msg = json.dumps(
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {"clientInfo": {"name": "pytest-mcp-onaws", "version": "1.0"}},
+        }
+    )
     init_raw = await mcp_server.handle_message(init_msg)
     init_resp = json.loads(init_raw)
     assert init_resp.get("jsonrpc") == "2.0"
@@ -410,7 +419,12 @@ async def test_mcp_smoke(setup_mcp_test):
     assert "error" not in list_resp or list_resp["error"] is None
 
     tool_names = {t["name"] for t in list_resp["result"]["tools"]}
-    for required in ("request_machines", "get_request_status", "list_return_requests", "return_machines"):
+    for required in (
+        "request_machines",
+        "get_request_status",
+        "list_return_requests",
+        "return_machines",
+    ):
         assert required in tool_names, f"Expected tool {required!r} not in tools/list: {tool_names}"
 
     # 3. Full lifecycle with the simplest scenario
@@ -432,12 +446,17 @@ async def test_mcp_unknown_template_returns_error(setup_mcp_test):
     """MCP request_machines with a non-existent template_id returns an error, not a crash."""
     mcp_server, _config_path, _tracked = setup_mcp_test
 
-    message = json.dumps({
-        "jsonrpc": "2.0",
-        "id": 1,
-        "method": "tools/call",
-        "params": {"name": "request_machines", "arguments": {"template_id": "NonExistent-Template-XYZ", "machine_count": 1}},
-    })
+    message = json.dumps(
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {
+                "name": "request_machines",
+                "arguments": {"template_id": "NonExistent-Template-XYZ", "machine_count": 1},
+            },
+        }
+    )
     raw = await mcp_server.handle_message(message)
     envelope = json.loads(raw)
 
@@ -453,12 +472,10 @@ async def test_mcp_unknown_template_returns_error(setup_mcp_test):
     if isinstance(inner, list) and inner and isinstance(inner[0], dict):
         inner = inner[0]
 
-    has_error = (
-        isinstance(inner, dict) and (
-            inner.get("error") or
-            inner.get("status") == "error" or
-            "not found" in str(inner).lower() or
-            "NonExistent" in str(inner)
-        )
+    has_error = isinstance(inner, dict) and (
+        inner.get("error")
+        or inner.get("status") == "error"
+        or "not found" in str(inner).lower()
+        or "NonExistent" in str(inner)
     )
     assert has_error, f"Expected error payload for unknown template, got: {inner}"
