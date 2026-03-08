@@ -26,9 +26,8 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 
 from tests.onmoto.conftest import _inject_moto_factory, _make_logger, _make_moto_aws_client
-from tests.shared.scenarios import TestScenario, get_smoke_scenarios
-
 from tests.shared.constants import REQUEST_ID_RE
+from tests.shared.scenarios import TestScenario, get_smoke_scenarios
 
 REGION = "eu-west-2"
 
@@ -101,9 +100,11 @@ def _run_orb_cli(args: list[str]) -> dict:  # type: ignore[return]
 # Helpers to extract fields from CLI JSON output
 # ---------------------------------------------------------------------------
 
-from tests.shared.response_helpers import extract_machine_ids as _extract_machine_ids
-from tests.shared.response_helpers import extract_request_id as _extract_request_id
-from tests.shared.response_helpers import extract_status as _extract_status
+from tests.shared.response_helpers import (
+    extract_machine_ids as _extract_machine_ids,
+    extract_request_id as _extract_request_id,
+    extract_status as _extract_status,
+)
 
 
 def _make_patched_initialize(aws_client, logger):

@@ -268,9 +268,11 @@ def _assert_launch_templates_deleted(request_id: str) -> None:
 # Response extraction helpers
 # ---------------------------------------------------------------------------
 
-from tests.shared.response_helpers import extract_machine_ids as _extract_machine_ids
-from tests.shared.response_helpers import extract_request_id as _extract_request_id
-from tests.shared.response_helpers import extract_status as _extract_request_status
+from tests.shared.response_helpers import (
+    extract_machine_ids as _extract_machine_ids,
+    extract_request_id as _extract_request_id,
+    extract_status as _extract_request_status,
+)
 
 
 def _extract_resource_ids(result) -> list[str]:

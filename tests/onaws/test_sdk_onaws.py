@@ -77,7 +77,6 @@ log.addHandler(_console)
 
 from tests.shared.constants import REQUEST_ID_RE
 
-
 # ---------------------------------------------------------------------------
 # Fixture
 # ---------------------------------------------------------------------------
@@ -206,8 +205,10 @@ def _get_machine_ids_from_ec2(request_id: str) -> list[str]:
     return _get_machine_ids_from_ec2_helper(request_id, ec2_client)
 
 
-from tests.shared.response_helpers import extract_machine_ids as _extract_machine_ids
-from tests.shared.response_helpers import extract_status as _extract_request_status
+from tests.shared.response_helpers import (
+    extract_machine_ids as _extract_machine_ids,
+    extract_status as _extract_request_status,
+)
 
 # ---------------------------------------------------------------------------
 # Core test logic (shared by parametrised and single tests)
