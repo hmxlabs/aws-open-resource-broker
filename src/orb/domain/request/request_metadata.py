@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from typing import Any, Dict, Optional
 
-from pydantic import field_validator, model_validator
+from pydantic import Field, field_validator, model_validator
 
 from orb.domain.base.value_objects import ValueObject
 
@@ -228,10 +228,10 @@ class RequestConfiguration(ValueObject):
     template_id: str
     machine_count: int
     timeout: int = 3600  # Default 1 hour (from domain.constants.DEFAULT_REQUEST_TIMEOUT_SECONDS)
-    tags: dict[str, str] = {}
-    provider_config: dict[str, Any] = {}
-    retry_config: dict[str, Any] = {}
-    notification_config: dict[str, Any] = {}
+    tags: dict[str, str] = Field(default_factory=dict)
+    provider_config: dict[str, Any] = Field(default_factory=dict)
+    retry_config: dict[str, Any] = Field(default_factory=dict)
+    notification_config: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("template_id")
     @classmethod
@@ -358,7 +358,7 @@ class LaunchTemplateInfo(ValueObject):
     template_id: str
     template_name: Optional[str] = None
     version: str = "$Latest"
-    configuration: dict[str, Any] = {}
+    configuration: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("template_id")
     @classmethod
@@ -407,7 +407,7 @@ class RequestHistoryEvent(ValueObject):
     event_type: str
     timestamp: str  # ISO format datetime string
     message: str
-    details: dict[str, Any] = {}
+    details: dict[str, Any] = Field(default_factory=dict)
     source: str = "system"
 
     @field_validator("event_type")

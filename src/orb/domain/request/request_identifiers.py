@@ -6,7 +6,7 @@ import re
 import uuid
 from typing import Optional
 
-from pydantic import field_serializer, field_validator
+from pydantic import Field, field_serializer, field_validator
 
 from orb.domain.base.value_objects import ValueObject
 from orb.domain.request.request_types import RequestType
@@ -169,7 +169,7 @@ class ResourceIdentifier(ValueObject):
     resource_id: str
     resource_arn: Optional[str] = None
     region: Optional[str] = None
-    tags: dict = {}
+    tags: dict = Field(default_factory=dict)
 
     @field_validator("resource_type")
     @classmethod
