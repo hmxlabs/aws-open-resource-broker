@@ -11,6 +11,7 @@ from orb.domain.base.events import (
     RequestCreatedEvent,
     RequestStatusChangedEvent,
 )
+from orb.domain.constants import REQUEST_ID_PREFIX_ACQUIRE, REQUEST_ID_PREFIX_RETURN
 from orb.domain.request.exceptions import InvalidRequestStateError, RequestValidationError
 from orb.domain.request.request_types import RequestStatus
 from orb.domain.request.value_objects import RequestId, RequestType
@@ -362,12 +363,12 @@ class Request(AggregateRoot):
         # Use provided request_id or generate one if not provided
         if request_id:
             # If request_id doesn't have prefix, add it based on request_type
-            if not request_id.startswith(("req-", "ret-")):
-                prefix = "req-" if request_type == RequestType.ACQUIRE else "ret-"
+            if not request_id.startswith((REQUEST_ID_PREFIX_ACQUIRE, REQUEST_ID_PREFIX_RETURN)):
+                prefix = REQUEST_ID_PREFIX_ACQUIRE if request_type == RequestType.ACQUIRE else REQUEST_ID_PREFIX_RETURN
                 request_id_obj = RequestId(value=f"{prefix}{request_id}")
             else:
                 # Validate that existing prefix matches request_type
-                expected_prefix = "req-" if request_type == RequestType.ACQUIRE else "ret-"
+                expected_prefix = REQUEST_ID_PREFIX_ACQUIRE if request_type == RequestType.ACQUIRE else REQUEST_ID_PREFIX_RETURN
                 if not request_id.startswith(expected_prefix):
                     raise RequestValidationError(
                         f"Request ID prefix mismatch: ID '{request_id}' has wrong prefix for "

@@ -90,12 +90,12 @@ class RequestMachinesRESTHandler(BaseAPIHandler[RequestMachinesModel, RequestMac
             )
 
         try:
-            # Generate prefixed request ID using centralized utility
-            from orb.api.utils.request_id_generator import generate_request_id
+            # Generate prefixed request ID using domain layer
+            from orb.domain.request.request_identifiers import RequestId
             from orb.domain.request.value_objects import RequestType
 
             # This is a machine request, so it's always ACQUIRE type
-            request_id = generate_request_id(RequestType.ACQUIRE)
+            request_id = str(RequestId.generate(RequestType.ACQUIRE))
 
             # Create CQRS command
             command = CreateRequestCommand(

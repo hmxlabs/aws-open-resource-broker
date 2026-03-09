@@ -8,6 +8,7 @@ from typing import Any, Dict, Optional
 from pydantic import Field, field_validator, model_validator
 
 from orb.domain.base.value_objects import ValueObject
+from orb.domain.constants import DEFAULT_REQUEST_TIMEOUT_SECONDS
 
 
 class RequestTimeout(ValueObject):
@@ -226,7 +227,7 @@ class RequestConfiguration(ValueObject):
 
     template_id: str
     machine_count: int
-    timeout: int = 3600  # Default 1 hour (from domain.constants.DEFAULT_REQUEST_TIMEOUT_SECONDS)
+    timeout: int = Field(default=DEFAULT_REQUEST_TIMEOUT_SECONDS)
     tags: dict[str, str] = Field(default_factory=dict)
     provider_config: dict[str, Any] = Field(default_factory=dict)
     retry_config: dict[str, Any] = Field(default_factory=dict)

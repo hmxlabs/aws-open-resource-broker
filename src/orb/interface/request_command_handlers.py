@@ -213,10 +213,10 @@ async def handle_request_machines(
     metadata = getattr(args, "metadata", {})
     metadata["dry_run"] = is_dry_run_active()
 
-    from orb.api.utils.request_id_generator import generate_request_id
+    from orb.domain.request.request_identifiers import RequestId
     from orb.domain.request.request_types import RequestType
 
-    request_id = generate_request_id(RequestType.ACQUIRE)
+    request_id = str(RequestId.generate(RequestType.ACQUIRE))
 
     command = CreateRequestCommand(
         request_id=request_id,

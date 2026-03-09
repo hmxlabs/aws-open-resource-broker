@@ -9,6 +9,11 @@ from typing import Optional
 from pydantic import Field, field_serializer, field_validator
 
 from orb.domain.base.value_objects import ValueObject
+from orb.domain.constants import (
+    REQUEST_ID_PATTERN,
+    REQUEST_ID_PREFIX_ACQUIRE,
+    REQUEST_ID_PREFIX_RETURN,
+)
 from orb.domain.request.request_types import RequestType
 
 
@@ -49,8 +54,7 @@ class RequestId(ValueObject):
     @property
     def request_type(self) -> RequestType:
         """Get the request type from the ID prefix."""
-        prefix = self.value.split("-")[0]
-        return RequestType.ACQUIRE if prefix == "req" else RequestType.RETURN
+        return RequestType.ACQUIRE if self.value.startswith(REQUEST_ID_PREFIX_ACQUIRE) else RequestType.RETURN
 
     @classmethod
     def generate(cls, request_type: RequestType, prefix: Optional[str] = None) -> RequestId:
@@ -65,14 +69,23 @@ class RequestId(ValueObject):
             New RequestId instance
         """
         if prefix is None:
-            prefix = "req-" if request_type == RequestType.ACQUIRE else "ret-"
+            prefix = REQUEST_ID_PREFIX_ACQUIRE if request_type == RequestType.ACQUIRE else REQUEST_ID_PREFIX_RETURN
         return cls(value=f"{prefix}{uuid.uuid4()!s}")
 
     @staticmethod
     def _is_valid_format(value: str) -> bool:
         """Check if value matches required format."""
-        pattern = r"^(req-|ret-)[a-f0-9\-]{36}$"
-        return bool(re.match(pattern, value))
+        return bool(re.match(REQUEST_ID_PATTERN, value))
+
+    @classmethod
+    def is_request_id(cls, value: str) -> bool:
+        """Check if value is an acquire request ID."""
+        return value.startswith(REQUEST_ID_PREFIX_ACQUIRE)
+
+    @classmethod
+    def is_return_id(cls, value: str) -> bool:
+        """Check if value is a return request ID."""
+        return value.startswith(REQUEST_ID_PREFIX_RETURN)
 
 
 class MachineReference(ValueObject):
