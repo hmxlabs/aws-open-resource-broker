@@ -54,8 +54,12 @@ class RequestCreationService:
             request_id=command.request_id,
         )
 
-        # Store provider API in domain field
-        request.provider_api = template.provider_api or "RunInstances"
+        # Store provider API in domain field — template must supply this value
+        if not template.provider_api:
+            raise ValueError(
+                f"Template {template.template_id} has no provider_api configured"
+            )
+        request.provider_api = template.provider_api
 
         self._logger.info(
             "Created request %s with provider API: %s",
