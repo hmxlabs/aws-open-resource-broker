@@ -196,6 +196,7 @@ class RequestConfig(BaseModel):
     fulfillment_fallback_template_id: Optional[str] = Field(
         None, description="Fallback template ID for provisioning"
     )
+    default_timeout: int = Field(3600, description="Default request timeout in seconds")
 
     @field_validator("max_machines_per_request")
     @classmethod

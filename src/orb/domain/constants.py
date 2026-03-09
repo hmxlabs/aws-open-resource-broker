@@ -40,11 +40,15 @@ MAX_RESOURCE_NAME_LENGTH = 255
 MIN_RESOURCE_NAME_LENGTH = 1
 RESOURCE_NAME_ALLOWED_CHARS = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_"
 
+# Request ID prefix constants
+REQUEST_ID_PREFIX_ACQUIRE = "req-"
+REQUEST_ID_PREFIX_RETURN = "ret-"
+REQUEST_ID_PATTERN = r"^(req-|ret-)[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+
 # Timeout constants (in seconds)
 MAX_REQUEST_TIMEOUT_SECONDS = 86400  # 1 day maximum
 DEFAULT_REQUEST_TIMEOUT_SECONDS = 3600  # 1 hour default
 MIN_REQUEST_TIMEOUT_SECONDS = 1  # Minimum 1 second
-FALLBACK_REQUEST_TIMEOUT_SECONDS = 300  # 5 minutes fallback
 
 # Default values
 DEFAULT_INSTANCE_COUNT = 1
