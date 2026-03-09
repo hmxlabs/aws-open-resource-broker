@@ -92,7 +92,5 @@ def test_metrics_config_old_aws_metrics_key_populates_provider_metrics():
 
 def test_metrics_config_new_provider_metrics_key_works():
     """provider_metrics (new name) must also be accepted directly."""
-    cfg = MetricsConfig.model_validate(
-        {"provider_metrics": {"provider_metrics_enabled": True}}
-    )
+    cfg = MetricsConfig.model_validate({"provider_metrics": {"provider_metrics_enabled": True}})
     assert cfg.provider_metrics.provider_metrics_enabled is True

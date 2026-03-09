@@ -278,7 +278,9 @@ def test_interactive_setup_raises_when_no_providers_registered():
     with (
         patch(
             "orb.interface.init_command_handler._get_available_schedulers",
-            return_value=[{"type": "default", "display_name": "default", "description": "Standalone usage"}],
+            return_value=[
+                {"type": "default", "display_name": "default", "description": "Standalone usage"}
+            ],
         ),
         patch(
             "orb.interface.init_command_handler._get_available_providers",
