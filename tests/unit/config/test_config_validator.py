@@ -17,13 +17,13 @@ class TestConfigValidatorNoAwsHardcoding:
     def test_source_has_no_provider_type_equals_aws(self):
         """config_validator.py must not contain provider_type == 'aws'."""
         source = inspect.getsource(config_validator_module)
-        assert "provider_type == \"aws\"" not in source
+        assert 'provider_type == "aws"' not in source
         assert "provider_type == 'aws'" not in source
 
     def test_source_has_no_provider_type_equals_aws_in_business_rules(self):
         """_validate_business_rules must not gate on provider.type == 'aws'."""
         source = inspect.getsource(config_validator_module)
-        assert "provider.type == \"aws\"" not in source
+        assert 'provider.type == "aws"' not in source
         assert "provider.type == 'aws'" not in source
 
 
