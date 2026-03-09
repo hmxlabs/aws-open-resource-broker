@@ -903,6 +903,8 @@ def setup_host_factory_mock(request, monkeypatch):
                     hfm.request_return_machines(machine_ids)
             except Exception as exc:
                 log.warning("Fixture teardown: cleanup failed for request %s: %s", req_id, exc)
+        os.environ.pop("ORB_CONFIG_DIR", None)
+        os.environ.pop("HF_LOGDIR", None)
 
     if not request.config.getoption("--keep-logs", default=False):
         processor.cleanup_test_templates(test_name)
@@ -998,6 +1000,8 @@ def setup_host_factory_mock_with_scenario(request, monkeypatch):
                     hfm.request_return_machines(machine_ids)
             except Exception as exc:
                 log.warning("Fixture teardown: cleanup failed for request %s: %s", req_id, exc)
+        os.environ.pop("ORB_CONFIG_DIR", None)
+        os.environ.pop("HF_LOGDIR", None)
 
     if not request.config.getoption("--keep-logs", default=False):
         processor.cleanup_test_templates(test_name)

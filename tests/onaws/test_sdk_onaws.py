@@ -96,6 +96,15 @@ def setup_sdk_test(request):
     (test_config_dir / "logs").mkdir(exist_ok=True)
     (test_config_dir / "work").mkdir(exist_ok=True)
 
+    _env_keys = [
+        "ORB_CONFIG_DIR",
+        "HF_PROVIDER_CONFDIR",
+        "HF_PROVIDER_LOGDIR",
+        "HF_PROVIDER_WORKDIR",
+        "DEFAULT_PROVIDER_WORKDIR",
+        "AWS_PROVIDER_LOG_DIR",
+        "HF_LOGDIR",
+    ]
     os.environ["ORB_CONFIG_DIR"] = str(test_config_dir)
     os.environ["HF_PROVIDER_CONFDIR"] = str(test_config_dir)
     os.environ["HF_PROVIDER_LOGDIR"] = str(test_config_dir / "logs")
@@ -108,7 +117,10 @@ def setup_sdk_test(request):
 
     yield config_path
 
-    # Teardown: reset DI container so next test gets a fresh one
+    # Teardown: clean up env vars and reset DI container
+    for key in _env_keys:
+        os.environ.pop(key, None)
+
     try:
         from orb.infrastructure.di import reset_container
 
