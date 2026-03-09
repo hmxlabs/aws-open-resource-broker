@@ -8,8 +8,6 @@ Covers:
 - providers/aws/validation/region_validator.py: validate_aws_region exists there
 """
 
-import ast
-import importlib
 import inspect
 from pathlib import Path
 

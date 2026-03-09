@@ -9,7 +9,7 @@ These tests enforce that:
 import ast
 import re
 from pathlib import Path
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
