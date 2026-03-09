@@ -297,6 +297,13 @@ python_classes = ["Test*"]
 python_functions = ["test_*"]
 addopts = "-v --cov --cov-report=term-missing --cov-report=html"
 markers = [
+    "unit: marks unit tests",
+    "integration: marks integration tests",
+    "e2e: marks end-to-end tests",
+    "slow: marks slow tests",
+    "db: marks tests requiring a database",
+    "api: marks API tests",
+    "security: marks security tests",
     "aws: marks tests that require real AWS credentials",
     "manual_aws: marks tests that must be run manually against AWS",
     "rest_api: marks REST API integration tests",
