@@ -1,5 +1,6 @@
 """Unit tests for RequestCreationService."""
 
+import pytest
 from unittest.mock import MagicMock, patch
 
 from orb.application.services.request_creation_service import RequestCreationService
@@ -22,7 +23,7 @@ def _make_command(
     return cmd
 
 
-def _make_template(provider_api="RunInstances"):
+def _make_template(provider_api="EC2Fleet"):
     t = MagicMock()
     t.provider_api = provider_api
     return t
@@ -102,9 +103,10 @@ class TestRequestCreationService:
 
         assert result.provider_api == "CreateFleet"
 
-    def test_provider_api_defaults_to_run_instances_when_none(self):
+    def test_raises_value_error_when_provider_api_is_none(self):
         cmd = _make_command()
         template = _make_template(provider_api=None)
+        template.template_id = "tmpl-no-api"
         selection = _make_selection_result()
 
         fake_request = MagicMock()
@@ -113,9 +115,8 @@ class TestRequestCreationService:
 
         with patch("orb.application.services.request_creation_service.Request") as MockRequest:
             MockRequest.create_new_request = MagicMock(return_value=fake_request)
-            result = self.svc.create_machine_request(cmd, template, selection)
-
-        assert result.provider_api == "RunInstances"
+            with pytest.raises(ValueError, match="tmpl-no-api"):
+                self.svc.create_machine_request(cmd, template, selection)
 
     def test_metadata_includes_dry_run(self):
         cmd = _make_command(dry_run=True)
