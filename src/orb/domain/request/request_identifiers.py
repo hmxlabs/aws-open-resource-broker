@@ -53,47 +53,25 @@ class RequestId(ValueObject):
         return RequestType.ACQUIRE if prefix == "req" else RequestType.RETURN
 
     @classmethod
-    def generate(cls, request_type: RequestType) -> RequestId:
+    def generate(cls, request_type: RequestType, prefix: Optional[str] = None) -> RequestId:
         """
         Generate a new request ID with appropriate prefix.
 
         Args:
             request_type: Type of request to generate ID for
+            prefix: Optional explicit prefix override
 
         Returns:
             New RequestId instance
         """
-        try:
-            from orb.domain.base.configuration_service import get_domain_config_service
-
-            config_service = get_domain_config_service()
-            if config_service:
-                prefix = config_service.get_request_id_prefix(request_type.value)
-            else:
-                # Fallback if service not available
-                prefix = "req-" if request_type == RequestType.ACQUIRE else "ret-"
-        except ImportError:
-            # Fallback if service not available
+        if prefix is None:
             prefix = "req-" if request_type == RequestType.ACQUIRE else "ret-"
-
         return cls(value=f"{prefix}{uuid.uuid4()!s}")
 
     @staticmethod
     def _is_valid_format(value: str) -> bool:
         """Check if value matches required format."""
-        try:
-            from orb.domain.base.configuration_service import get_domain_config_service
-
-            config_service = get_domain_config_service()
-            if config_service:
-                pattern = config_service.get_request_id_pattern()
-            else:
-                # Fallback pattern if service not available
-                pattern = r"^(req-|ret-)[a-f0-9\-]{36}$"
-        except ImportError:
-            # Fallback pattern if service not available
-            pattern = r"^(req-|ret-)[a-f0-9\-]{36}$"
-
+        pattern = r"^(req-|ret-)[a-f0-9\-]{36}$"
         return bool(re.match(pattern, value))
 
 
