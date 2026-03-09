@@ -199,6 +199,10 @@ class AWSProviderStrategy(ProviderStrategy):
             return await self._handle_describe_resource_instances(operation)
         elif operation.operation_type == ProviderOperationType.RESOLVE_IMAGE:
             return await self._handle_resolve_image(operation)
+        elif operation.operation_type == ProviderOperationType.START_INSTANCES:
+            return self._get_instance_service().start_instances(operation)
+        elif operation.operation_type == ProviderOperationType.STOP_INSTANCES:
+            return self._get_instance_service().stop_instances(operation)
         else:
             return ProviderResult.error_result(
                 f"Unsupported operation: {operation.operation_type}", "UNSUPPORTED_OPERATION"
@@ -466,6 +470,23 @@ class AWSProviderStrategy(ProviderStrategy):
     def get_credential_requirements(self) -> dict:
         """AWS requires region."""
         return self._get_health_service().get_credential_requirements()
+
+    def get_available_regions(self) -> list[tuple[str, str]]:
+        """Get common AWS regions as (region_id, display_name) tuples."""
+        return [
+            ("us-east-1", "N. Virginia"),
+            ("us-east-2", "Ohio"),
+            ("us-west-1", "N. California"),
+            ("us-west-2", "Oregon"),
+            ("eu-west-1", "Ireland"),
+            ("eu-west-2", "London"),
+            ("eu-central-1", "Frankfurt"),
+            ("ap-southeast-1", "Singapore"),
+            ("ap-southeast-2", "Sydney"),
+            ("ap-northeast-1", "Tokyo"),
+            ("ca-central-1", "Canada"),
+            ("sa-east-1", "São Paulo"),
+        ]
 
     def cleanup(self) -> None:
         """Clean up AWS provider resources."""

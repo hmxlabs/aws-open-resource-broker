@@ -26,6 +26,8 @@ class ProviderOperationType(str, Enum):
     GET_AVAILABLE_TEMPLATES = "get_available_templates"
     HEALTH_CHECK = "health_check"
     RESOLVE_IMAGE = "resolve_image"
+    START_INSTANCES = "start_instances"
+    STOP_INSTANCES = "stop_instances"
 
 
 @dataclass
@@ -311,6 +313,15 @@ class ProviderStrategy(ABC):
             Default implementation returns empty dict.
         """
         return {}
+
+    def get_available_regions(self) -> list[tuple[str, str]]:
+        """Get available regions as (region_id, display_name) tuples.
+
+        Returns:
+            List of (region_id, display_name) tuples.
+            Empty list means the provider accepts free-text region input.
+        """
+        return []
 
     @abstractmethod
     def cleanup(self) -> None:

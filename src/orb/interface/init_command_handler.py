@@ -138,13 +138,8 @@ def _get_available_providers() -> list[dict[str, str]]:
 
         providers = []
         for provider_type in sorted(registered_types):
-            # Get display name and description based on provider type
             display_name = provider_type
-            if provider_type == "aws":
-                description = "Amazon Web Services"
-            else:
-                description = f"{provider_type.upper()} Provider"
-
+            description = f"{provider_type.upper()} Provider"
             providers.append(
                 {"type": provider_type, "display_name": display_name, "description": description}
             )
@@ -215,19 +210,17 @@ def _interactive_setup() -> Dict[str, Any]:
         # Get credential requirements
         requirements = _get_credential_requirements(provider_type)
 
-        # Collect required parameters first (e.g., region for AWS)
+        # Collect required parameters first (e.g., region)
+        strategy = _get_provider_strategy(provider_type)
+        regions = strategy.get_available_regions() if strategy is not None else []
         provider_config = {"type": provider_type}
         for param, info in requirements.items():
             if info.get("required"):
                 if param == "region":
-                    provider_config[param] = _pick_region()
+                    provider_config[param] = _pick_region(regions)
                 else:
                     prompt = f"  {info['description']}: "
                     provider_config[param] = input(prompt).strip()
-
-        # Fallback for AWS if no requirements defined
-        if provider_type == "aws" and not requirements:
-            provider_config["region"] = _pick_region()
 
         # Get available credential sources
         credential_sources = _get_available_credential_sources(provider_type)
@@ -368,18 +361,16 @@ def _configure_additional_provider() -> Optional[Dict[str, Any]]:
         # Get credential requirements
         requirements = _get_credential_requirements(provider_type)
 
+        strategy = _get_provider_strategy(provider_type)
+        regions = strategy.get_available_regions() if strategy is not None else []
         provider_config = {"type": provider_type}
         for param, info in requirements.items():
             if info.get("required"):
                 if param == "region":
-                    provider_config[param] = _pick_region()
+                    provider_config[param] = _pick_region(regions)
                 else:
                     prompt = f"  {info['description']}: "
                     provider_config[param] = input(prompt).strip()
-
-        # Fallback for AWS
-        if provider_type == "aws" and not requirements:
-            provider_config["region"] = _pick_region()
 
         # Get available credential sources
         credential_sources = _get_available_credential_sources(provider_type)
@@ -436,38 +427,42 @@ def _configure_additional_provider() -> Optional[Dict[str, Any]]:
         return None
 
 
-_COMMON_AWS_REGIONS = [
-    ("us-east-1", "N. Virginia"),
-    ("us-east-2", "Ohio"),
-    ("us-west-1", "N. California"),
-    ("us-west-2", "Oregon"),
-    ("eu-west-1", "Ireland"),
-    ("eu-west-2", "London"),
-    ("eu-central-1", "Frankfurt"),
-    ("ap-southeast-1", "Singapore"),
-    ("ap-southeast-2", "Sydney"),
-    ("ap-northeast-1", "Tokyo"),
-    ("ca-central-1", "Canada"),
-    ("sa-east-1", "São Paulo"),
-]
+def _get_provider_strategy(provider_type: str) -> Optional[Any]:
+    """Get a lightweight provider strategy instance for credential/region queries."""
+    try:
+        from orb.providers.registry import get_provider_registry
+
+        registry = get_provider_registry()
+        registry.ensure_provider_type_registered(provider_type)
+        return registry.get_or_create_strategy(provider_type)
+    except Exception:
+        return None
 
 
-def _pick_region() -> str:
-    """Prompt user to select a region from a numbered list or type a custom one."""
+def _pick_region(regions: list[tuple[str, str]]) -> str:
+    """Prompt user to select a region.
+
+    If regions is non-empty, show a numbered list with an 'Other' option.
+    If regions is empty, prompt for free-text input.
+    """
     print_info("")
-    print_info("  Select AWS region:")
-    for i, (region_id, region_name) in enumerate(_COMMON_AWS_REGIONS, 1):
+    if not regions:
+        custom = input("  Enter region: ").strip()
+        return custom if custom else "us-east-1"
+
+    print_info("  Select region:")
+    for i, (region_id, region_name) in enumerate(regions, 1):
         print_info(f"  ({i:2}) {region_id:<20} {region_name}")
-    other_num = len(_COMMON_AWS_REGIONS) + 1
+    other_num = len(regions) + 1
     print_info(f"  ({other_num:2}) Other (type custom)")
     print_info("")
 
     choice = input("  Select region (1): ").strip() or "1"
     try:
         idx = int(choice) - 1
-        if 0 <= idx < len(_COMMON_AWS_REGIONS):
-            return _COMMON_AWS_REGIONS[idx][0]
-        elif idx == len(_COMMON_AWS_REGIONS):
+        if 0 <= idx < len(regions):
+            return regions[idx][0]
+        elif idx == len(regions):
             custom = input("  Enter custom region: ").strip()
             return custom if custom else "us-east-1"
         else:
@@ -477,44 +472,43 @@ def _pick_region() -> str:
 
 
 def _get_available_credential_sources(provider_type: str) -> list[dict]:
-    """Get available credential sources for provider."""
-    if provider_type == "aws":
+    """Get available credential sources for provider via strategy."""
+    strategy = _get_provider_strategy(provider_type)
+    if strategy is not None:
         try:
-            from orb.providers.aws.profile_discovery import get_available_profiles
-
-            return get_available_profiles()
+            sources = strategy.get_available_credential_sources()
+            if sources:
+                return sources
         except Exception:
-            return [{"name": None, "description": "Default credentials"}]
-    else:
-        return [{"name": None, "description": "Default credentials"}]
+            pass
+    return [{"name": None, "description": "Default credentials"}]
 
 
 def _test_provider_credentials(
     provider_type: str, credential_source: Optional[str], **kwargs
 ) -> tuple[bool, str]:
-    """Test provider credentials."""
-    if provider_type == "aws":
-        try:
-            from orb.providers.aws.session_factory import AWSSessionFactory
-
-            region = kwargs.get("region")
-            result = AWSSessionFactory.discover_credentials(credential_source, region)
-            if result.get("success", False):
-                return True, ""
-            else:
-                return False, result.get("error", "Unknown error")
-        except Exception as e:
-            return False, str(e)
-    else:
+    """Test provider credentials via strategy."""
+    strategy = _get_provider_strategy(provider_type)
+    if strategy is None:
         return False, "Provider type not supported"
+    try:
+        result = strategy.test_credentials(credential_source, **kwargs)
+        if result.get("success", False):
+            return True, ""
+        return False, result.get("error", "Unknown error")
+    except Exception as e:
+        return False, str(e)
 
 
 def _get_credential_requirements(provider_type: str) -> dict:
-    """Get credential requirements for provider."""
-    if provider_type == "aws":
-        return {"region": {"required": True, "description": "AWS region"}}
-    else:
-        return {}
+    """Get credential requirements for provider via strategy."""
+    strategy = _get_provider_strategy(provider_type)
+    if strategy is not None:
+        try:
+            return strategy.get_credential_requirements()
+        except Exception:
+            pass
+    return {}
 
 
 def _discover_infrastructure(
