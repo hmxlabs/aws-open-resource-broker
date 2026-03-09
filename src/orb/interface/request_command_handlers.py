@@ -2,7 +2,9 @@
 
 from typing import TYPE_CHECKING, Any, Union
 
+from orb.domain.base.ports.configuration_port import ConfigurationPort
 from orb.domain.base.ports.scheduler_port import SchedulerPort
+from orb.domain.constants import REQUEST_ID_PREFIX_ACQUIRE
 from orb.domain.request.exceptions import RequestNotFoundError
 from orb.infrastructure.di.buses import CommandBus, QueryBus
 from orb.infrastructure.di.container import get_container
@@ -216,7 +218,10 @@ async def handle_request_machines(
     from orb.domain.request.request_identifiers import RequestId
     from orb.domain.request.request_types import RequestType
 
-    request_id = str(RequestId.generate(RequestType.ACQUIRE))
+    config_port = container.get(ConfigurationPort)
+    naming_config = config_port.get_naming_config()
+    prefix = naming_config.get("prefixes", {}).get("request", REQUEST_ID_PREFIX_ACQUIRE)
+    request_id = str(RequestId.generate(RequestType.ACQUIRE, prefix=prefix))
 
     command = CreateRequestCommand(
         request_id=request_id,

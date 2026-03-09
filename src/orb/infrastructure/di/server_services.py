@@ -50,6 +50,7 @@ def _register_api_handlers(container: DIContainer) -> None:
     # Import shared dependencies once at the top so they are always bound
     try:
         from orb.domain.base.ports import ErrorHandlingPort, SchedulerPort
+        from orb.domain.base.ports.configuration_port import ConfigurationPort
         from orb.domain.base.ports.logging_port import LoggingPort
         from orb.infrastructure.di.buses import CommandBus, QueryBus
         from orb.monitoring.metrics import MetricsCollector
@@ -95,6 +96,9 @@ def _register_api_handlers(container: DIContainer) -> None:
                     ),
                     metrics=(
                         c.get(MetricsCollector) if c.is_registered(MetricsCollector) else None
+                    ),
+                    config_port=(
+                        c.get(ConfigurationPort) if c.is_registered(ConfigurationPort) else None
                     ),
                 ),
             )

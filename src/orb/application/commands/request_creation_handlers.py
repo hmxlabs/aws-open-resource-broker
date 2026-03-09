@@ -22,6 +22,9 @@ from orb.domain.base.ports import (
     ProviderConfigPort,
     ProviderSelectionPort,
 )
+from orb.domain.constants import REQUEST_ID_PREFIX_RETURN
+from orb.domain.request.request_identifiers import RequestId
+from orb.domain.request.value_objects import RequestType
 
 
 @command_handler(CreateRequestCommand)  # type: ignore[arg-type]
@@ -256,12 +259,18 @@ class CreateReturnRequestHandler(BaseCommandHandler[CreateReturnRequestCommand, 
 
             # Create separate return requests for each provider
             created_requests = []
+            config_port = self._container.get(ConfigurationPort)
+            naming_config = config_port.get_naming_config()
+            prefix = naming_config.get("prefixes", {}).get("return", REQUEST_ID_PREFIX_RETURN)
+
             for (provider_type, provider_name), machine_ids in provider_groups.items():
+                return_request_id = str(RequestId.generate(RequestType.RETURN, prefix=prefix))
                 request = Request.create_return_request(
                     machine_ids=machine_ids,
                     provider_type=provider_type,
                     provider_name=provider_name,
                     metadata=command.metadata or {},
+                    request_id=return_request_id,
                 )
 
                 # Persist request and update machines
