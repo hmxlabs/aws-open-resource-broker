@@ -64,7 +64,7 @@ import boto3
 
 from orb.config.manager import ConfigurationManager
 from orb.config.schemas.app_schema import AppConfig
-from orb.domain.base.value_objects import InstanceId, ResourceId
+from orb.domain.base.value_objects import InstanceId
 from orb.domain.machine.aggregate import Machine
 from orb.domain.request.aggregate import Request
 from orb.domain.template.template_aggregate import Template
@@ -74,7 +74,6 @@ from orb.infrastructure.template.services.template_storage_service import (
     TemplateStorageService as TemplatePersistenceService,
 )
 from orb.providers.aws.configuration.config import AWSProviderConfig as AWSConfig
-
 
 # Test utilities
 from tests.utilities.reset_singletons import reset_all_singletons
