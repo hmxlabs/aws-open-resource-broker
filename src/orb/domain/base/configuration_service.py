@@ -1,7 +1,5 @@
 """Domain configuration service using ConfigurationPort."""
 
-from typing import Optional
-
 from orb.domain.base.ports.configuration_port import ConfigurationPort
 
 
@@ -62,17 +60,3 @@ class DomainConfigurationService:
         tags = provider_config.get("default_instance_tags", {})
         return {str(k): str(v) for k, v in tags.items()}
 
-
-# Global service instance for easy access
-_domain_config_service: Optional[DomainConfigurationService] = None
-
-
-def set_domain_config_service(service: DomainConfigurationService) -> None:
-    """Set the global domain configuration service."""
-    global _domain_config_service
-    _domain_config_service = service
-
-
-def get_domain_config_service() -> Optional[DomainConfigurationService]:
-    """Get the global domain configuration service."""
-    return _domain_config_service
