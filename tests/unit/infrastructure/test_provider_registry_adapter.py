@@ -1,7 +1,5 @@
 """Tests for ProviderRegistryAdapter — no AWS branching."""
 
-import ast
-import inspect
 from pathlib import Path
 from unittest.mock import MagicMock
 
