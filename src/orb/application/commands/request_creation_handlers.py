@@ -12,6 +12,7 @@ from orb.application.dto.commands import (
 )
 from orb.application.ports.query_bus_port import QueryBusPort
 from orb.domain.base import UnitOfWorkFactory
+from orb.domain.base.configuration_service import DomainConfigurationService
 from orb.domain.base.exceptions import ApplicationError, EntityNotFoundError
 from orb.domain.base.ports import (
     ConfigurationPort,
@@ -22,6 +23,8 @@ from orb.domain.base.ports import (
     ProviderConfigPort,
     ProviderSelectionPort,
 )
+from orb.domain.request.request_identifiers import RequestId
+from orb.domain.request.value_objects import RequestType
 
 
 @command_handler(CreateRequestCommand)  # type: ignore[arg-type]
@@ -256,12 +259,17 @@ class CreateReturnRequestHandler(BaseCommandHandler[CreateReturnRequestCommand, 
 
             # Create separate return requests for each provider
             created_requests = []
+            domain_config = self._container.get(DomainConfigurationService)
+            prefix = domain_config.get_return_request_prefix()
+
             for (provider_type, provider_name), machine_ids in provider_groups.items():
+                return_request_id = str(RequestId.generate(RequestType.RETURN, prefix=prefix))
                 request = Request.create_return_request(
                     machine_ids=machine_ids,
                     provider_type=provider_type,
                     provider_name=provider_name,
                     metadata=command.metadata or {},
+                    request_id=return_request_id,
                 )
 
                 # Persist request and update machines

@@ -2,6 +2,7 @@
 
 from typing import TYPE_CHECKING, Any, Union
 
+from orb.domain.base.configuration_service import DomainConfigurationService
 from orb.domain.base.ports.scheduler_port import SchedulerPort
 from orb.domain.request.exceptions import RequestNotFoundError
 from orb.infrastructure.di.buses import CommandBus, QueryBus
@@ -213,10 +214,13 @@ async def handle_request_machines(
     metadata = getattr(args, "metadata", {})
     metadata["dry_run"] = is_dry_run_active()
 
-    from orb.api.utils.request_id_generator import generate_request_id
+    from orb.domain.request.request_identifiers import RequestId
     from orb.domain.request.request_types import RequestType
 
-    request_id = generate_request_id(RequestType.ACQUIRE)
+    domain_config = container.get(DomainConfigurationService)
+    request_id = str(
+        RequestId.generate(RequestType.ACQUIRE, prefix=domain_config.get_acquire_request_prefix())
+    )
 
     command = CreateRequestCommand(
         request_id=request_id,

@@ -11,6 +11,7 @@ from orb.domain.base.events import (
     RequestCreatedEvent,
     RequestStatusChangedEvent,
 )
+from orb.domain.constants import REQUEST_ID_PREFIX_ACQUIRE, REQUEST_ID_PREFIX_RETURN
 from orb.domain.request.exceptions import InvalidRequestStateError, RequestValidationError
 from orb.domain.request.request_types import RequestStatus
 from orb.domain.request.value_objects import RequestId, RequestType
@@ -362,12 +363,20 @@ class Request(AggregateRoot):
         # Use provided request_id or generate one if not provided
         if request_id:
             # If request_id doesn't have prefix, add it based on request_type
-            if not request_id.startswith(("req-", "ret-")):
-                prefix = "req-" if request_type == RequestType.ACQUIRE else "ret-"
+            if not request_id.startswith((REQUEST_ID_PREFIX_ACQUIRE, REQUEST_ID_PREFIX_RETURN)):
+                prefix = (
+                    REQUEST_ID_PREFIX_ACQUIRE
+                    if request_type == RequestType.ACQUIRE
+                    else REQUEST_ID_PREFIX_RETURN
+                )
                 request_id_obj = RequestId(value=f"{prefix}{request_id}")
             else:
                 # Validate that existing prefix matches request_type
-                expected_prefix = "req-" if request_type == RequestType.ACQUIRE else "ret-"
+                expected_prefix = (
+                    REQUEST_ID_PREFIX_ACQUIRE
+                    if request_type == RequestType.ACQUIRE
+                    else REQUEST_ID_PREFIX_RETURN
+                )
                 if not request_id.startswith(expected_prefix):
                     raise RequestValidationError(
                         f"Request ID prefix mismatch: ID '{request_id}' has wrong prefix for "
@@ -417,12 +426,16 @@ class Request(AggregateRoot):
         provider_type: str,
         provider_name: str,
         metadata: Optional[dict[str, Any]] = None,
+        request_id: Optional[str] = None,
     ) -> "Request":
         """Create a return/terminate request with machine IDs."""
-        request_id = RequestId.generate(RequestType.RETURN)
+        if request_id:
+            request_id_obj = RequestId(value=request_id)
+        else:
+            request_id_obj = RequestId.generate(RequestType.RETURN)
 
         request = cls(
-            request_id=request_id,
+            request_id=request_id_obj,
             request_type=RequestType.RETURN,
             template_id="return-request",
             requested_count=len(machine_ids),
@@ -438,9 +451,9 @@ class Request(AggregateRoot):
 
         # Add domain event
         creation_event = RequestCreatedEvent(
-            aggregate_id=str(request_id.value),
+            aggregate_id=str(request_id_obj.value),
             aggregate_type="Request",
-            request_id=str(request_id.value),
+            request_id=str(request_id_obj.value),
             request_type=RequestType.RETURN.value,
             template_id="return-request",
             machine_count=len(machine_ids),

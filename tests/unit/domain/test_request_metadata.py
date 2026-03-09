@@ -52,10 +52,6 @@ class TestRequestTimeout:
         t = RequestTimeout.from_seconds(120)
         assert t.seconds == 120
 
-    def test_default_creates_instance(self):
-        t = RequestTimeout.default()
-        assert t.seconds > 0
-
 
 class TestMachineCount:
     def test_valid_count(self):

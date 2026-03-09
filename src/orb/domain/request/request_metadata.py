@@ -5,9 +5,10 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from typing import Any, Dict, Optional
 
-from pydantic import field_validator, model_validator
+from pydantic import Field, field_validator, model_validator
 
 from orb.domain.base.value_objects import ValueObject
+from orb.domain.constants import DEFAULT_REQUEST_TIMEOUT_SECONDS
 
 
 class RequestTimeout(ValueObject):
@@ -67,28 +68,6 @@ class RequestTimeout(ValueObject):
         """Create timeout from seconds."""
         return cls(seconds=seconds)
 
-    @classmethod
-    def default(cls) -> RequestTimeout:
-        """Create default timeout from configuration."""
-        try:
-            from orb.domain.base.configuration_service import get_domain_config_service
-
-            config_service = get_domain_config_service()
-            if config_service:
-                timeout = config_service.get_default_timeout()
-            else:
-                # Fallback if service not available
-                from orb.domain.constants import FALLBACK_REQUEST_TIMEOUT_SECONDS
-
-                timeout = FALLBACK_REQUEST_TIMEOUT_SECONDS
-        except ImportError:
-            # Fallback if service not available
-            from orb.domain.constants import FALLBACK_REQUEST_TIMEOUT_SECONDS
-
-            timeout = FALLBACK_REQUEST_TIMEOUT_SECONDS
-
-        return cls(seconds=timeout)
-
 
 class MachineCount(ValueObject):
     """
@@ -121,20 +100,10 @@ class MachineCount(ValueObject):
         # Get max allowed from configuration if not provided
         max_allowed = self.max_allowed
         if max_allowed is None:
-            try:
-                from orb.domain.base.configuration_service import get_domain_config_service
+            from orb.domain.constants import MAX_INSTANCE_COUNT
 
-                config_service = get_domain_config_service()
-                if config_service:
-                    max_allowed = config_service.get_max_machines_per_request()
-                else:
-                    max_allowed = 100  # Fallback default
-
-                object.__setattr__(self, "max_allowed", max_allowed)
-            except Exception:
-                # Fallback if config not available
-                max_allowed = 100  # Default limit
-                object.__setattr__(self, "max_allowed", max_allowed)
+            max_allowed = MAX_INSTANCE_COUNT
+            object.__setattr__(self, "max_allowed", max_allowed)
 
         if self.value > max_allowed:
             raise ValueError(f"Machine count cannot exceed {max_allowed}")
@@ -258,11 +227,11 @@ class RequestConfiguration(ValueObject):
 
     template_id: str
     machine_count: int
-    timeout: int = 3600  # Default 1 hour (from domain.constants.DEFAULT_REQUEST_TIMEOUT_SECONDS)
-    tags: dict[str, str] = {}
-    provider_config: dict[str, Any] = {}
-    retry_config: dict[str, Any] = {}
-    notification_config: dict[str, Any] = {}
+    timeout: int = Field(default=DEFAULT_REQUEST_TIMEOUT_SECONDS)
+    tags: dict[str, str] = Field(default_factory=dict)
+    provider_config: dict[str, Any] = Field(default_factory=dict)
+    retry_config: dict[str, Any] = Field(default_factory=dict)
+    notification_config: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("template_id")
     @classmethod
@@ -389,7 +358,7 @@ class LaunchTemplateInfo(ValueObject):
     template_id: str
     template_name: Optional[str] = None
     version: str = "$Latest"
-    configuration: dict[str, Any] = {}
+    configuration: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("template_id")
     @classmethod
@@ -438,7 +407,7 @@ class RequestHistoryEvent(ValueObject):
     event_type: str
     timestamp: str  # ISO format datetime string
     message: str
-    details: dict[str, Any] = {}
+    details: dict[str, Any] = Field(default_factory=dict)
     source: str = "system"
 
     @field_validator("event_type")
