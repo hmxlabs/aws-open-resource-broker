@@ -1,5 +1,16 @@
 """Infrastructure events package - CQRS-aligned event system."""
 
+from orb.infrastructure.events.infrastructure_events import (
+    OperationCompletedEvent,
+    OperationFailedEvent,
+    OperationStartedEvent,
+    ResourceCreatedEvent,
+    ResourceDeletedEvent,
+    ResourceErrorEvent,
+    ResourceEvent,
+    ResourcesCleanedEvent,
+    ResourceUpdatedEvent,
+)
 from orb.infrastructure.events.publisher import (
     ConfigurableEventPublisher,
     create_event_publisher,
@@ -20,6 +31,20 @@ from orb.infrastructure.events.storage_events import (
     StorageStrategySelectedEvent,
     TransactionCommittedEvent,
     TransactionStartedEvent,
+)
+from orb.infrastructure.events.system_events import (
+    ApplicationErrorEvent,
+    ApplicationShutdownEvent,
+    ApplicationStartedEvent,
+    AuditTrailEvent,
+    ComplianceEvent,
+    ConfigurationChangedEvent,
+    ConfigurationErrorEvent,
+    ConfigurationLoadedEvent,
+    HealthCheckEvent,
+    PerformanceMetricEvent,
+    SecurityEvent,
+    SystemEvent,
 )
 
 # Import new EventBus system
@@ -54,6 +79,7 @@ def get_event_bus():
 
     try:
         from orb.infrastructure.di.container import get_container
+        from orb.infrastructure.logging.logger import get_logger
 
         container = get_container()
 
@@ -63,22 +89,46 @@ def get_event_bus():
             return event_bus
 
         # Create EventBus if not in container
-        from orb.infrastructure.logging.logger import get_logger
-
         logger = get_logger(__name__)
         return create_event_bus(logger)  # type: ignore[misc]
-    except Exception:
+    except Exception as e:
         # Final fallback to legacy system
+        from orb.infrastructure.logging.logger import get_logger
+
+        get_logger(__name__).warning(
+            "EventBus unavailable, falling back to legacy publisher: %s", e
+        )
         return get_event_publisher()
 
 
 __all__: list[str] = [
+    # Infrastructure events
+    "ApplicationErrorEvent",
+    "ApplicationShutdownEvent",
+    "ApplicationStartedEvent",
+    "AuditTrailEvent",
+    "ComplianceEvent",
     "ConfigurableEventPublisher",
+    "ConfigurationChangedEvent",
+    "ConfigurationErrorEvent",
+    "ConfigurationLoadedEvent",
     "ConnectionPoolEvent",
     "EventBus",
+    "HealthCheckEvent",
+    "OperationCompletedEvent",
+    "OperationFailedEvent",
+    "OperationStartedEvent",
+    "PerformanceMetricEvent",
     "RepositoryOperationCompletedEvent",
     "RepositoryOperationFailedEvent",
     "RepositoryOperationStartedEvent",
+    "ResourceCreatedEvent",
+    "ResourceDeletedEvent",
+    "ResourceErrorEvent",
+    "ResourceEvent",
+    "ResourceUpdatedEvent",
+    "ResourcesCleanedEvent",
+    "SecurityEvent",
     "SlowQueryDetectedEvent",
     "StorageEvent",
     "StorageHealthCheckEvent",
@@ -86,6 +136,7 @@ __all__: list[str] = [
     "StorageStrategyEvent",
     "StorageStrategyFailoverEvent",
     "StorageStrategySelectedEvent",
+    "SystemEvent",
     "TransactionCommittedEvent",
     "TransactionStartedEvent",
     "create_event_bus",

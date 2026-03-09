@@ -65,6 +65,26 @@ def _register_template_services(container: DIContainer):
 
     container.register_singleton(TemplateGenerationService, create_template_generation_service)
 
+    # Register TemplateFactory as a singleton so handlers can receive it via DI
+    def create_template_factory(c: DIContainer):
+        from orb.domain.template.factory import TemplateFactory
+
+        factory = TemplateFactory(logger=c.get(LoggingPort))
+        try:
+            from orb.providers.aws.registration import register_aws_template_factory
+
+            register_aws_template_factory(factory, c.get(LoggingPort))
+        except ImportError:
+            logger = c.get(LoggingPort)
+            logger.debug(
+                "AWS provider module not available; AWS-specific templates will not be registered."
+            )
+        return factory
+
+    from orb.domain.template.factory import TemplateFactory
+
+    container.register_singleton(TemplateFactory, create_template_factory)
+
     # Register template configuration manager with factory function
     def create_template_configuration_manager(
         c: DIContainer,
@@ -83,7 +103,7 @@ def _register_template_services(container: DIContainer):
             event_publisher=None,
             template_defaults_service=c.get(TemplateDefaultsPort),  # type: ignore[arg-type]
             provider_registry_service=c.get(ProviderRegistryService),
-            template_factory=TemplateFactory(logger=c.get(LoggingPort)),
+            template_factory=c.get(TemplateFactory),
         )
 
     container.register_singleton(
@@ -94,7 +114,7 @@ def _register_template_services(container: DIContainer):
     _register_ami_resolver_if_enabled(container)
 
 
-def _register_ami_resolver_if_enabled(container: DIContainer) -> None:
+def _register_ami_resolver_if_enabled(_container: DIContainer) -> None:
     """Register AMI resolver when implemented.
 
     TODO: CachingAMIResolver is not yet implemented. When ready, check

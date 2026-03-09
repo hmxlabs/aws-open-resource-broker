@@ -26,6 +26,10 @@ class TestProviderInstanceConfig:
             priority=1,
             weight=100,
             config={"region": "us-east-1", "profile": "default"},
+            handlers=None,
+            handler_overrides=None,
+            template_defaults=None,
+            extensions=None,
             capabilities=["instances", "spot_instances"],
         )
 
@@ -35,25 +39,69 @@ class TestProviderInstanceConfig:
         assert config.priority == 1
         assert config.weight == 100
         assert config.config["region"] == "us-east-1"
-        assert "instances" in config.capabilities
+        assert config.capabilities is not None and "instances" in config.capabilities
 
     def test_provider_name_validation(self):
         """Test provider name validation."""
         # Valid names
         valid_names = ["aws-primary", "aws_backup", "provider1", "test-provider"]
         for name in valid_names:
-            config = ProviderInstanceConfig(name=name, type="aws")
+            config = ProviderInstanceConfig(
+                name=name,
+                type="aws",
+                enabled=True,
+                priority=0,
+                weight=100,
+                handlers=None,
+                handler_overrides=None,
+                template_defaults=None,
+                extensions=None,
+                capabilities=None,
+            )
             assert config.name == name
 
         # Invalid names
         with pytest.raises(ValueError, match="Provider name cannot be empty"):
-            ProviderInstanceConfig(name="", type="aws")
+            ProviderInstanceConfig(
+                name="",
+                type="aws",
+                enabled=True,
+                priority=0,
+                weight=100,
+                handlers=None,
+                handler_overrides=None,
+                template_defaults=None,
+                extensions=None,
+                capabilities=None,
+            )
 
         with pytest.raises(ValueError, match="Provider name cannot be empty"):
-            ProviderInstanceConfig(name="   ", type="aws")
+            ProviderInstanceConfig(
+                name="   ",
+                type="aws",
+                enabled=True,
+                priority=0,
+                weight=100,
+                handlers=None,
+                handler_overrides=None,
+                template_defaults=None,
+                extensions=None,
+                capabilities=None,
+            )
 
         with pytest.raises(ValueError, match="must contain only alphanumeric"):
-            ProviderInstanceConfig(name="aws@primary", type="aws")
+            ProviderInstanceConfig(
+                name="aws@primary",
+                type="aws",
+                enabled=True,
+                priority=0,
+                weight=100,
+                handlers=None,
+                handler_overrides=None,
+                template_defaults=None,
+                extensions=None,
+                capabilities=None,
+            )
 
     def test_provider_type_validation(self):
         """Test provider type validation."""
@@ -70,25 +118,80 @@ class TestProviderInstanceConfig:
             )
 
         # Only registered provider types are valid; aws is the registered type
-        config = ProviderInstanceConfig(name="test", type="aws")
+        config = ProviderInstanceConfig(
+            name="test",
+            type="aws",
+            enabled=True,
+            priority=0,
+            weight=100,
+            handlers=None,
+            handler_overrides=None,
+            template_defaults=None,
+            extensions=None,
+            capabilities=None,
+        )
         assert config.type == "aws"
 
         # Unregistered types raise ValueError
         with pytest.raises(ValueError, match="is not registered"):
-            ProviderInstanceConfig(name="test", type="invalid_unregistered_type")
+            ProviderInstanceConfig(
+                name="test",
+                type="invalid_unregistered_type",
+                enabled=True,
+                priority=0,
+                weight=100,
+                handlers=None,
+                handler_overrides=None,
+                template_defaults=None,
+                extensions=None,
+                capabilities=None,
+            )
 
     def test_weight_validation(self):
         """Test provider weight validation."""
         # Valid weight
-        config = ProviderInstanceConfig(name="test", type="aws", weight=50)
+        config = ProviderInstanceConfig(
+            name="test",
+            type="aws",
+            enabled=True,
+            priority=0,
+            weight=50,
+            handlers=None,
+            handler_overrides=None,
+            template_defaults=None,
+            extensions=None,
+            capabilities=None,
+        )
         assert config.weight == 50
 
         # Invalid weight
         with pytest.raises(ValueError, match="Provider weight must be positive"):
-            ProviderInstanceConfig(name="test", type="aws", weight=0)
+            ProviderInstanceConfig(
+                name="test",
+                type="aws",
+                enabled=True,
+                priority=0,
+                weight=0,
+                handlers=None,
+                handler_overrides=None,
+                template_defaults=None,
+                extensions=None,
+                capabilities=None,
+            )
 
         with pytest.raises(ValueError, match="Provider weight must be positive"):
-            ProviderInstanceConfig(name="test", type="aws", weight=-10)
+            ProviderInstanceConfig(
+                name="test",
+                type="aws",
+                enabled=True,
+                priority=0,
+                weight=-10,
+                handlers=None,
+                handler_overrides=None,
+                template_defaults=None,
+                extensions=None,
+                capabilities=None,
+            )
 
 
 class TestHealthCheckConfig:
@@ -96,7 +199,7 @@ class TestHealthCheckConfig:
 
     def test_default_health_check_config(self):
         """Test default health check configuration."""
-        config = HealthCheckConfig()
+        config = HealthCheckConfig(enabled=True, interval=300, timeout=30, retry_count=3)
 
         assert config.enabled is True
         assert config.interval == 300
@@ -116,17 +219,17 @@ class TestHealthCheckConfig:
         """Test health check configuration validation."""
         # Invalid interval
         with pytest.raises(ValueError, match="Health check interval must be positive"):
-            HealthCheckConfig(interval=0)
+            HealthCheckConfig(enabled=True, interval=0, timeout=30, retry_count=3)
 
         with pytest.raises(ValueError, match="Health check interval must be positive"):
-            HealthCheckConfig(interval=-100)
+            HealthCheckConfig(enabled=True, interval=-100, timeout=30, retry_count=3)
 
         # Invalid timeout
         with pytest.raises(ValueError, match="Health check timeout must be positive"):
-            HealthCheckConfig(timeout=0)
+            HealthCheckConfig(enabled=True, interval=300, timeout=0, retry_count=3)
 
         with pytest.raises(ValueError, match="Health check timeout must be positive"):
-            HealthCheckConfig(timeout=-30)
+            HealthCheckConfig(enabled=True, interval=300, timeout=-30, retry_count=3)
 
 
 class TestCircuitBreakerConfig:
@@ -134,7 +237,9 @@ class TestCircuitBreakerConfig:
 
     def test_default_circuit_breaker_config(self):
         """Test default circuit breaker configuration."""
-        config = CircuitBreakerConfig()
+        config = CircuitBreakerConfig(
+            enabled=True, failure_threshold=5, recovery_timeout=60, half_open_max_calls=3
+        )
 
         assert config.enabled is True
         assert config.failure_threshold == 5
@@ -159,11 +264,15 @@ class TestCircuitBreakerConfig:
         """Test circuit breaker configuration validation."""
         # Invalid failure threshold
         with pytest.raises(ValueError, match="Failure threshold must be positive"):
-            CircuitBreakerConfig(failure_threshold=0)
+            CircuitBreakerConfig(
+                enabled=True, failure_threshold=0, recovery_timeout=60, half_open_max_calls=3
+            )
 
         # Invalid recovery timeout
         with pytest.raises(ValueError, match="Recovery timeout must be positive"):
-            CircuitBreakerConfig(recovery_timeout=-60)
+            CircuitBreakerConfig(
+                enabled=True, failure_threshold=5, recovery_timeout=-60, half_open_max_calls=3
+            )
 
 
 class TestProviderConfig:
@@ -172,10 +281,36 @@ class TestProviderConfig:
     def test_single_provider_mode_explicit(self):
         """Test single provider mode with explicit active_provider."""
         config = ProviderConfig(
+            selection_policy="FIRST_AVAILABLE",
             active_provider="aws-primary",
+            default_provider_type=None,
+            default_provider_instance=None,
+            health_check_interval=300,
             providers=[
-                ProviderInstanceConfig(name="aws-primary", type="aws"),
-                ProviderInstanceConfig(name="aws-backup", type="aws", enabled=False),
+                ProviderInstanceConfig(
+                    name="aws-primary",
+                    type="aws",
+                    enabled=True,
+                    priority=0,
+                    weight=100,
+                    handlers=None,
+                    handler_overrides=None,
+                    template_defaults=None,
+                    extensions=None,
+                    capabilities=None,
+                ),
+                ProviderInstanceConfig(
+                    name="aws-backup",
+                    type="aws",
+                    enabled=False,
+                    priority=0,
+                    weight=100,
+                    handlers=None,
+                    handler_overrides=None,
+                    template_defaults=None,
+                    extensions=None,
+                    capabilities=None,
+                ),
             ],
         )
 
@@ -190,9 +325,35 @@ class TestProviderConfig:
         """Test multi-provider mode."""
         config = ProviderConfig(
             selection_policy="ROUND_ROBIN",
+            active_provider=None,
+            default_provider_type=None,
+            default_provider_instance=None,
+            health_check_interval=300,
             providers=[
-                ProviderInstanceConfig(name="aws-primary", type="aws", enabled=True),
-                ProviderInstanceConfig(name="aws-backup", type="aws", enabled=True),
+                ProviderInstanceConfig(
+                    name="aws-primary",
+                    type="aws",
+                    enabled=True,
+                    priority=0,
+                    weight=100,
+                    handlers=None,
+                    handler_overrides=None,
+                    template_defaults=None,
+                    extensions=None,
+                    capabilities=None,
+                ),
+                ProviderInstanceConfig(
+                    name="aws-backup",
+                    type="aws",
+                    enabled=True,
+                    priority=0,
+                    weight=100,
+                    handlers=None,
+                    handler_overrides=None,
+                    template_defaults=None,
+                    extensions=None,
+                    capabilities=None,
+                ),
             ],
         )
 
@@ -205,7 +366,27 @@ class TestProviderConfig:
 
     def test_single_provider_mode_implicit(self):
         """Test single provider mode with one provider."""
-        config = ProviderConfig(providers=[ProviderInstanceConfig(name="aws-only", type="aws")])
+        config = ProviderConfig(
+            selection_policy="FIRST_AVAILABLE",
+            active_provider=None,
+            default_provider_type=None,
+            default_provider_instance=None,
+            health_check_interval=300,
+            providers=[
+                ProviderInstanceConfig(
+                    name="aws-only",
+                    type="aws",
+                    enabled=True,
+                    priority=0,
+                    weight=100,
+                    handlers=None,
+                    handler_overrides=None,
+                    template_defaults=None,
+                    extensions=None,
+                    capabilities=None,
+                ),
+            ],
+        )
 
         assert config.get_mode() == ProviderMode.SINGLE
         assert not config.is_multi_provider_mode()
@@ -217,14 +398,26 @@ class TestProviderConfig:
     def test_single_provider_mode(self):
         """Test single provider mode detection."""
         config = ProviderConfig(
+            selection_policy="FIRST_AVAILABLE",
+            active_provider=None,
+            default_provider_type=None,
+            default_provider_instance=None,
+            health_check_interval=300,
             providers=[
                 ProviderInstanceConfig(
                     name="aws-default",
                     type="aws",
                     enabled=True,
+                    priority=0,
+                    weight=100,
                     config={"region": "us-east-1", "profile": "default"},
+                    handlers=None,
+                    handler_overrides=None,
+                    template_defaults=None,
+                    extensions=None,
+                    capabilities=None,
                 )
-            ]
+            ],
         )
 
         assert config.get_mode() == ProviderMode.SINGLE
@@ -246,41 +439,137 @@ class TestProviderConfig:
         ]
 
         # Create a dummy provider for validation
-        dummy_provider = ProviderInstanceConfig(name="test", type="aws")
+        dummy_provider = ProviderInstanceConfig(
+            name="test",
+            type="aws",
+            enabled=True,
+            priority=0,
+            weight=100,
+            handlers=None,
+            handler_overrides=None,
+            template_defaults=None,
+            extensions=None,
+            capabilities=None,
+        )
 
         for policy in valid_policies:
-            config = ProviderConfig(selection_policy=policy, providers=[dummy_provider])
+            config = ProviderConfig(
+                selection_policy=policy,
+                active_provider=None,
+                default_provider_type=None,
+                default_provider_instance=None,
+                health_check_interval=300,
+                providers=[dummy_provider],
+            )
             assert config.selection_policy == policy
 
         # Invalid policy
         with pytest.raises(ValueError, match="Selection policy must be one of"):
-            ProviderConfig(selection_policy="INVALID_POLICY", providers=[dummy_provider])
+            ProviderConfig(
+                selection_policy="INVALID_POLICY",
+                active_provider=None,
+                default_provider_type=None,
+                default_provider_instance=None,
+                health_check_interval=300,
+                providers=[dummy_provider],
+            )
 
     def test_provider_name_uniqueness(self):
         """Test provider name uniqueness validation."""
         with pytest.raises(ValueError, match="Provider names must be unique"):
             ProviderConfig(
+                selection_policy="FIRST_AVAILABLE",
+                active_provider=None,
+                default_provider_type=None,
+                default_provider_instance=None,
+                health_check_interval=300,
                 providers=[
-                    ProviderInstanceConfig(name="aws-primary", type="aws"),
-                    ProviderInstanceConfig(name="aws-primary", type="aws"),  # Duplicate name
-                ]
+                    ProviderInstanceConfig(
+                        name="aws-primary",
+                        type="aws",
+                        enabled=True,
+                        priority=0,
+                        weight=100,
+                        handlers=None,
+                        handler_overrides=None,
+                        template_defaults=None,
+                        extensions=None,
+                        capabilities=None,
+                    ),
+                    ProviderInstanceConfig(
+                        name="aws-primary",
+                        type="aws",
+                        enabled=True,
+                        priority=0,
+                        weight=100,
+                        handlers=None,
+                        handler_overrides=None,
+                        template_defaults=None,
+                        extensions=None,
+                        capabilities=None,
+                    ),  # Duplicate name
+                ],
             )
 
     def test_active_provider_exists(self):
         """Test active provider exists validation."""
         with pytest.raises(ValueError, match="Active provider 'nonexistent' not found"):
             ProviderConfig(
+                selection_policy="FIRST_AVAILABLE",
                 active_provider="nonexistent",
-                providers=[ProviderInstanceConfig(name="aws-primary", type="aws")],
+                default_provider_type=None,
+                default_provider_instance=None,
+                health_check_interval=300,
+                providers=[
+                    ProviderInstanceConfig(
+                        name="aws-primary",
+                        type="aws",
+                        enabled=True,
+                        priority=0,
+                        weight=100,
+                        handlers=None,
+                        handler_overrides=None,
+                        template_defaults=None,
+                        extensions=None,
+                        capabilities=None,
+                    ),
+                ],
             )
 
     def test_get_provider_by_name(self):
         """Test getting provider by name."""
         config = ProviderConfig(
+            selection_policy="FIRST_AVAILABLE",
+            active_provider=None,
+            default_provider_type=None,
+            default_provider_instance=None,
+            health_check_interval=300,
             providers=[
-                ProviderInstanceConfig(name="aws-primary", type="aws"),
-                ProviderInstanceConfig(name="aws-backup", type="aws"),
-            ]
+                ProviderInstanceConfig(
+                    name="aws-primary",
+                    type="aws",
+                    enabled=True,
+                    priority=0,
+                    weight=100,
+                    handlers=None,
+                    handler_overrides=None,
+                    template_defaults=None,
+                    extensions=None,
+                    capabilities=None,
+                ),
+                ProviderInstanceConfig(
+                    name="aws-backup",
+                    type="aws",
+                    enabled=True,
+                    priority=0,
+                    weight=100,
+                    handlers=None,
+                    handler_overrides=None,
+                    template_defaults=None,
+                    extensions=None,
+                    capabilities=None,
+                ),
+            ],
         )
 
         # Existing provider
@@ -295,23 +584,61 @@ class TestProviderConfig:
     def test_health_check_interval_validation(self):
         """Test health check interval validation."""
         # Create a dummy provider for validation
-        dummy_provider = ProviderInstanceConfig(name="test", type="aws")
+        dummy_provider = ProviderInstanceConfig(
+            name="test",
+            type="aws",
+            enabled=True,
+            priority=0,
+            weight=100,
+            handlers=None,
+            handler_overrides=None,
+            template_defaults=None,
+            extensions=None,
+            capabilities=None,
+        )
 
         # Valid interval
-        config = ProviderConfig(health_check_interval=600, providers=[dummy_provider])
+        config = ProviderConfig(
+            selection_policy="FIRST_AVAILABLE",
+            active_provider=None,
+            default_provider_type=None,
+            default_provider_instance=None,
+            health_check_interval=600,
+            providers=[dummy_provider],
+        )
         assert config.health_check_interval == 600
 
         # Invalid interval
         with pytest.raises(ValueError, match="Health check interval must be positive"):
-            ProviderConfig(health_check_interval=0, providers=[dummy_provider])
+            ProviderConfig(
+                selection_policy="FIRST_AVAILABLE",
+                active_provider=None,
+                default_provider_type=None,
+                default_provider_instance=None,
+                health_check_interval=0,
+                providers=[dummy_provider],
+            )
 
         with pytest.raises(ValueError, match="Health check interval must be positive"):
-            ProviderConfig(health_check_interval=-300, providers=[dummy_provider])
+            ProviderConfig(
+                selection_policy="FIRST_AVAILABLE",
+                active_provider=None,
+                default_provider_type=None,
+                default_provider_instance=None,
+                health_check_interval=-300,
+                providers=[dummy_provider],
+            )
 
     def test_empty_configuration_validation(self):
         """Test validation with empty configuration."""
         with pytest.raises(ValueError, match="At least one provider must be configured"):
-            ProviderConfig()  # No providers and no legacy config
+            ProviderConfig(
+                selection_policy="FIRST_AVAILABLE",
+                active_provider=None,
+                default_provider_type=None,
+                default_provider_instance=None,
+                health_check_interval=300,
+            )
 
 
 class TestAWSProviderConfigBaseSettings:
@@ -333,7 +660,7 @@ class TestAWSProviderConfigBaseSettings:
             "extra": "allow",
         }
 
-        for concept, expected_value in config_concepts.items():
+        for _concept, expected_value in config_concepts.items():
             assert expected_value is not None
 
     def test_aws_provider_config_field_concepts(self):
@@ -413,7 +740,7 @@ class TestAWSProviderConfigBaseSettings:
         # Integer fields that should be converted from strings
         int_fields = ["aws_max_retries", "aws_read_timeout", "proxy_port", "aws_connect_timeout"]
 
-        for field in int_fields:
+        for _ in int_fields:
             # Should be convertible from string
             test_value = "123"
             converted = int(test_value)
@@ -432,7 +759,7 @@ class TestAWSProviderConfigBaseSettings:
             "aws_connect_timeout": 10,
         }
 
-        for field, default_value in defaults.items():
+        for _field, default_value in defaults.items():
             assert default_value is not None
             assert isinstance(default_value, (str, int))
 

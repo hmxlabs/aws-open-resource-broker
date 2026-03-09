@@ -10,6 +10,7 @@ from typing import Any, Optional, Union
 
 from orb.application.dto.base import BaseDTO, BaseResponse
 from orb.cli.formatters import format_output
+from orb.domain.request.request_identifiers import RequestId
 
 
 class CLIResponseFormatter:
@@ -307,7 +308,7 @@ class CLIResponseFormatter:
                 # For request operations (including machine requests), use format_request_response
                 if self._looks_like_single_request(data):
                     return self.scheduler_strategy.format_request_response(data)
-                elif isinstance(data, str) and data.startswith("ret-"):
+                elif isinstance(data, str) and RequestId.is_return_id(data):
                     # Handle return request ID strings
                     request_data = {
                         "request_id": data,

@@ -1,9 +1,10 @@
 """Request models for API handlers."""
 
-import re
 from typing import Any, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from orb.domain.request.request_identifiers import RequestId
 
 
 def to_camel(snake_str: str) -> str:
@@ -60,7 +61,7 @@ class RequestStatusModel(BaseRequestModel):
         """Validate that all request IDs have proper req-/ret- prefix."""
         for request_dict in v:
             request_id = request_dict.get("requestId", "")
-            if request_id and not re.match(r"^(req-|ret-)[a-f0-9\-]{36}$", request_id):
+            if request_id and not RequestId._is_valid_format(request_id):
                 raise ValueError(
                     f"Invalid request ID format: '{request_id}'. "
                     "Request IDs must start with 'req-' or 'ret-' followed by a UUID."

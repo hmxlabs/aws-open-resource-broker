@@ -83,8 +83,8 @@ class TestHandleRequestMachines:
         with (
             patch("orb.interface.request_command_handlers.get_container", return_value=container),
             patch(
-                "orb.api.utils.request_id_generator.generate_request_id",
-                return_value="req-fixed",
+                "orb.domain.request.request_identifiers.RequestId.generate",
+                return_value=MagicMock(__str__=lambda self: "req-fixed"),
             ),
             patch(
                 "orb.infrastructure.mocking.dry_run_context.is_dry_run_active",
@@ -131,8 +131,8 @@ class TestHandleRequestMachines:
         with (
             patch("orb.interface.request_command_handlers.get_container", return_value=container),
             patch(
-                "orb.api.utils.request_id_generator.generate_request_id",
-                return_value="req-fixed",
+                "orb.domain.request.request_identifiers.RequestId.generate",
+                return_value=MagicMock(__str__=lambda self: "req-fixed"),
             ),
             patch(
                 "orb.infrastructure.mocking.dry_run_context.is_dry_run_active",
@@ -208,8 +208,8 @@ class TestHandleRequestMachines:
         with (
             patch("orb.interface.request_command_handlers.get_container", return_value=container),
             patch(
-                "orb.api.utils.request_id_generator.generate_request_id",
-                return_value="req-fixed",
+                "orb.domain.request.request_identifiers.RequestId.generate",
+                return_value=MagicMock(__str__=lambda self: "req-fixed"),
             ),
             patch(
                 "orb.infrastructure.mocking.dry_run_context.is_dry_run_active",

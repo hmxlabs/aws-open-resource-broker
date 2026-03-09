@@ -4,6 +4,7 @@ import os
 import sys
 import unittest
 from typing import Any
+from unittest.mock import Mock
 
 # Add src directory to path
 sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
@@ -164,6 +165,10 @@ class MockConfigurationPort(ConfigurationPort):
         """Get per-API handler capabilities."""
         return {}
 
+    def get_cleanup_config(self) -> dict[str, Any]:
+        """Get cleanup configuration."""
+        return {}
+
 
 class TestInjectableMigration(unittest.TestCase):
     """Test case for verifying the injectable decorator migration."""
@@ -185,7 +190,7 @@ class TestInjectableMigration(unittest.TestCase):
         # Register AWS config with valid authentication
         from orb.providers.aws.configuration.config import AWSProviderConfig
 
-        aws_config = AWSProviderConfig(region="us-east-1", profile="default")
+        aws_config = Mock(spec=AWSProviderConfig)
         self.container.register_singleton(AWSProviderConfig, lambda c: aws_config)
 
         # Register AWS client manually
@@ -193,7 +198,7 @@ class TestInjectableMigration(unittest.TestCase):
 
         self.container.register_singleton(
             AWSClient,
-            lambda c: AWSClient(config=mock_config, logger=logger),
+            lambda c: AWSClient(config=mock_config, logger=Mock(spec=LoggingPort)),
         )
 
         # Register AWS handler factory manually
@@ -203,8 +208,8 @@ class TestInjectableMigration(unittest.TestCase):
             AWSHandlerFactory,
             lambda c: AWSHandlerFactory(
                 aws_client=c.get(AWSClient),
-                logger=logger,
-                config=aws_config,
+                logger=Mock(spec=LoggingPort),
+                config=Mock(spec=ConfigurationPort),
             ),
         )
 

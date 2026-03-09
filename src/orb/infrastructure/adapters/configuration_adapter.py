@@ -8,6 +8,7 @@ from orb.config.schemas.app_schema import AppConfig
 from orb.config.schemas.common_schema import NamingConfig, RequestConfig
 from orb.config.schemas.template_schema import TemplateConfig
 from orb.domain.base.ports import ConfigurationPort
+from orb.domain.constants import REQUEST_ID_PREFIX_ACQUIRE, REQUEST_ID_PREFIX_RETURN
 
 _logger = logging.getLogger(__name__)
 
@@ -49,12 +50,14 @@ class ConfigurationAdapter(ConfigurationPort):
                 },
                 "prefixes": {
                     "request": (
-                        config.prefixes.request if hasattr(config.prefixes, "request") else "req-"
+                        config.prefixes.request
+                        if hasattr(config.prefixes, "request")
+                        else REQUEST_ID_PREFIX_ACQUIRE
                     ),
                     "return": (
                         config.prefixes.return_prefix
                         if hasattr(config.prefixes, "return_prefix")
-                        else "ret-"
+                        else REQUEST_ID_PREFIX_RETURN
                     ),
                 },
             }
@@ -67,28 +70,10 @@ class ConfigurationAdapter(ConfigurationPort):
                     "instance_type": r"^[a-z0-9]+\.[a-z0-9]+$",
                     "cidr_block": r"^(\d{1,3}\.){3}\d{1,3}/\d{1,2}$",
                 },
-                "prefixes": {"request": "req-", "return": "ret-"},
-            }
-
-    def get_validation_config(self) -> dict[str, Any]:
-        """Get validation configuration for domain layer."""
-        try:
-            request_config = self._config_manager.get_typed(RequestConfig)
-            return {
-                "max_machines_per_request": getattr(
-                    request_config, "max_machines_per_request", 100
-                ),
-                "default_timeout": getattr(request_config, "default_timeout", 300),
-                "min_timeout": getattr(request_config, "min_timeout", 30),
-                "max_timeout": getattr(request_config, "max_timeout", 3600),
-            }
-        except Exception as e:
-            _logger.warning("Failed to load validation config, using defaults: %s", e)
-            return {
-                "max_machines_per_request": 100,
-                "default_timeout": 300,
-                "min_timeout": 30,
-                "max_timeout": 3600,
+                "prefixes": {
+                    "request": REQUEST_ID_PREFIX_ACQUIRE,
+                    "return": REQUEST_ID_PREFIX_RETURN,
+                },
             }
 
     def get_provider_config(self):
@@ -241,7 +226,7 @@ class ConfigurationAdapter(ConfigurationPort):
         """Get scheduler strategy - delegate to ConfigurationManager."""
         return self._config_manager.get_scheduler_strategy()
 
-    def get_typed(self, key, expected_type=None, default=None):  # type: ignore[override]
+    def get_typed(self, key, _expected_type=None, _default=None):  # type: ignore[override]
         """Get typed configuration for compatibility with ConfigurationManager."""
         return self._config_manager.get_typed(key)  # type: ignore[arg-type]
 

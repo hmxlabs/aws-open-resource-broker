@@ -6,9 +6,14 @@ import re
 import uuid
 from typing import Optional
 
-from pydantic import field_serializer, field_validator
+from pydantic import Field, field_serializer, field_validator
 
 from orb.domain.base.value_objects import ValueObject
+from orb.domain.constants import (
+    REQUEST_ID_PATTERN,
+    REQUEST_ID_PREFIX_ACQUIRE,
+    REQUEST_ID_PREFIX_RETURN,
+)
 from orb.domain.request.request_types import RequestType
 
 
@@ -49,52 +54,46 @@ class RequestId(ValueObject):
     @property
     def request_type(self) -> RequestType:
         """Get the request type from the ID prefix."""
-        prefix = self.value.split("-")[0]
-        return RequestType.ACQUIRE if prefix == "req" else RequestType.RETURN
+        return (
+            RequestType.ACQUIRE
+            if self.value.startswith(REQUEST_ID_PREFIX_ACQUIRE)
+            else RequestType.RETURN
+        )
 
     @classmethod
-    def generate(cls, request_type: RequestType) -> RequestId:
+    def generate(cls, request_type: RequestType, prefix: Optional[str] = None) -> RequestId:
         """
         Generate a new request ID with appropriate prefix.
 
         Args:
             request_type: Type of request to generate ID for
+            prefix: Optional explicit prefix override
 
         Returns:
             New RequestId instance
         """
-        try:
-            from orb.domain.base.configuration_service import get_domain_config_service
-
-            config_service = get_domain_config_service()
-            if config_service:
-                prefix = config_service.get_request_id_prefix(request_type.value)
-            else:
-                # Fallback if service not available
-                prefix = "req-" if request_type == RequestType.ACQUIRE else "ret-"
-        except ImportError:
-            # Fallback if service not available
-            prefix = "req-" if request_type == RequestType.ACQUIRE else "ret-"
-
+        if prefix is None:
+            prefix = (
+                REQUEST_ID_PREFIX_ACQUIRE
+                if request_type == RequestType.ACQUIRE
+                else REQUEST_ID_PREFIX_RETURN
+            )
         return cls(value=f"{prefix}{uuid.uuid4()!s}")
 
     @staticmethod
     def _is_valid_format(value: str) -> bool:
         """Check if value matches required format."""
-        try:
-            from orb.domain.base.configuration_service import get_domain_config_service
+        return bool(re.match(REQUEST_ID_PATTERN, value))
 
-            config_service = get_domain_config_service()
-            if config_service:
-                pattern = config_service.get_request_id_pattern()
-            else:
-                # Fallback pattern if service not available
-                pattern = r"^(req-|ret-)[a-f0-9\-]{36}$"
-        except ImportError:
-            # Fallback pattern if service not available
-            pattern = r"^(req-|ret-)[a-f0-9\-]{36}$"
+    @classmethod
+    def is_request_id(cls, value: str) -> bool:
+        """Check if value is an acquire request ID."""
+        return value.startswith(REQUEST_ID_PREFIX_ACQUIRE)
 
-        return bool(re.match(pattern, value))
+    @classmethod
+    def is_return_id(cls, value: str) -> bool:
+        """Check if value is a return request ID."""
+        return value.startswith(REQUEST_ID_PREFIX_RETURN)
 
 
 class MachineReference(ValueObject):
@@ -191,7 +190,7 @@ class ResourceIdentifier(ValueObject):
     resource_id: str
     resource_arn: Optional[str] = None
     region: Optional[str] = None
-    tags: dict = {}
+    tags: dict = Field(default_factory=dict)
 
     @field_validator("resource_type")
     @classmethod

@@ -8,8 +8,10 @@ from orb.api.validation import ValidationException
 from orb.application.base.infrastructure_handlers import BaseAsyncAPIHandler as BaseAPIHandler
 from orb.application.dto.commands import CreateRequestCommand
 from orb.application.request.dto import RequestMachinesResponse
+from orb.domain.base.configuration_service import DomainConfigurationService
 from orb.domain.base.dependency_injection import injectable
 from orb.domain.base.ports import ErrorHandlingPort, LoggingPort
+from orb.domain.constants import REQUEST_ID_PREFIX_ACQUIRE
 from orb.infrastructure.di.buses import CommandBus, QueryBus
 from orb.infrastructure.error.decorators import handle_interface_exceptions
 from orb.monitoring.metrics import MetricsCollector
@@ -26,6 +28,7 @@ class RequestMachinesRESTHandler(BaseAPIHandler[RequestMachinesModel, RequestMac
         logger: Optional[LoggingPort] = None,
         error_handler: Optional[ErrorHandlingPort] = None,
         metrics: Optional[MetricsCollector] = None,
+        domain_config_service: Optional[DomainConfigurationService] = None,
     ) -> None:
         """
         Initialize handler with pure CQRS dependencies.
@@ -36,11 +39,13 @@ class RequestMachinesRESTHandler(BaseAPIHandler[RequestMachinesModel, RequestMac
             logger: Logging port for operation logging
             error_handler: Error handling port for exception management
             metrics: Optional metrics collector
+            domain_config_service: Domain configuration service for naming config
         """
         super().__init__(logger, error_handler)
         self._query_bus = query_bus
         self._command_bus = command_bus
         self._metrics_collector = metrics
+        self._domain_config = domain_config_service
 
     async def validate_api_request(self, request: RequestMachinesModel, context) -> None:
         """
@@ -90,12 +95,14 @@ class RequestMachinesRESTHandler(BaseAPIHandler[RequestMachinesModel, RequestMac
             )
 
         try:
-            # Generate prefixed request ID using centralized utility
-            from orb.api.utils.request_id_generator import generate_request_id
+            # Generate prefixed request ID using domain layer
+            from orb.domain.request.request_identifiers import RequestId
             from orb.domain.request.value_objects import RequestType
 
-            # This is a machine request, so it's always ACQUIRE type
-            request_id = generate_request_id(RequestType.ACQUIRE)
+            prefix = REQUEST_ID_PREFIX_ACQUIRE
+            if self._domain_config:
+                prefix = self._domain_config.get_acquire_request_prefix()
+            request_id = str(RequestId.generate(RequestType.ACQUIRE, prefix=prefix))
 
             # Create CQRS command
             command = CreateRequestCommand(

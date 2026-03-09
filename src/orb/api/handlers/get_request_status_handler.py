@@ -15,6 +15,7 @@ from orb.domain.base.dependency_injection import injectable
 from orb.domain.base.ports import ErrorHandlingPort, LoggingPort
 from orb.domain.base.ports.scheduler_port import SchedulerPort
 from orb.domain.request.exceptions import RequestNotFoundError
+from orb.domain.request.request_identifiers import RequestId
 from orb.infrastructure.di.buses import CommandBus, QueryBus
 from orb.infrastructure.error.decorators import handle_interface_exceptions
 from orb.monitoring.metrics import MetricsCollector
@@ -151,7 +152,7 @@ class GetRequestStatusRESTHandler(BaseAPIHandler[dict[str, Any], RequestStatusRe
                 # Process each request ID
                 for request_id in request_ids:
                     # Validate that request_id has proper prefix (req-/ret-)
-                    if not str(request_id).startswith(("req-", "ret-")):
+                    if not RequestId._is_valid_format(str(request_id)):
                         raise ValueError(
                             f"Invalid request ID format: '{request_id}'. "
                             "Request IDs must start with 'req-' or 'ret-' prefix."
@@ -275,7 +276,7 @@ class GetRequestStatusRESTHandler(BaseAPIHandler[dict[str, Any], RequestStatusRe
             payload = {"request_id": request_id, "status": request_data}
 
         # Ensure request_type matches ID prefix for return requests
-        if str(request_id).startswith("ret-"):
+        if RequestId.is_return_id(str(request_id)):
             payload["request_type"] = "return"
 
         return payload
