@@ -1,7 +1,5 @@
 """Base domain layer - shared kernel for all bounded contexts."""
 
-from orb.infrastructure.base.exceptions import InfrastructureError
-
 from .domain_interfaces import (
     AggregateRepository,
     Repository,
@@ -38,6 +36,7 @@ from .exceptions import (
     ConfigurationError,
     DomainException,
     EntityNotFoundError,
+    InfrastructureError,
     InvariantViolationError,
     ValidationError,
 )
