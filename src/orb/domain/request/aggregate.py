@@ -426,12 +426,16 @@ class Request(AggregateRoot):
         provider_type: str,
         provider_name: str,
         metadata: Optional[dict[str, Any]] = None,
+        request_id: Optional[str] = None,
     ) -> "Request":
         """Create a return/terminate request with machine IDs."""
-        request_id = RequestId.generate(RequestType.RETURN)
+        if request_id:
+            request_id_obj = RequestId(value=request_id)
+        else:
+            request_id_obj = RequestId.generate(RequestType.RETURN)
 
         request = cls(
-            request_id=request_id,
+            request_id=request_id_obj,
             request_type=RequestType.RETURN,
             template_id="return-request",
             requested_count=len(machine_ids),
@@ -447,9 +451,9 @@ class Request(AggregateRoot):
 
         # Add domain event
         creation_event = RequestCreatedEvent(
-            aggregate_id=str(request_id.value),
+            aggregate_id=str(request_id_obj.value),
             aggregate_type="Request",
-            request_id=str(request_id.value),
+            request_id=str(request_id_obj.value),
             request_type=RequestType.RETURN.value,
             template_id="return-request",
             machine_count=len(machine_ids),
