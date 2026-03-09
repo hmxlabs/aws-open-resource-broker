@@ -216,11 +216,9 @@ def aws_config() -> AWSConfig:
 @pytest.fixture
 def aws_mocks():
     """Set up comprehensive AWS service mocks."""
-    if MOTO_AVAILABLE:
-        with mock_aws():
-            yield
-    else:
-        # Fallback if moto is not available
+    if not MOTO_AVAILABLE:
+        pytest.skip("moto not installed")
+    with mock_aws():
         yield
 
 
