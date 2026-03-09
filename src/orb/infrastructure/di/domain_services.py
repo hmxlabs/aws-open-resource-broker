@@ -1,6 +1,5 @@
 """Domain services registration for dependency injection container."""
 
-from orb.application.services.asg_metadata_service import ASGMetadataService
 from orb.application.services.deprovisioning_orchestrator import DeprovisioningOrchestrator
 from orb.application.services.machine_grouping_service import MachineGroupingService
 from orb.application.services.provider_validation_service import ProviderValidationService
@@ -84,18 +83,6 @@ def register_domain_services(container: DIContainer) -> None:
         )
 
     container.register_singleton(ProviderValidationService, create_provider_validation_service)
-
-    # ASG metadata service (SRP refactoring)
-    def create_asg_metadata_service(c):
-        from orb.domain.base.ports.asg_query_port import ASGQueryPort
-
-        return ASGMetadataService(
-            uow_factory=c.get(UnitOfWorkFactory),
-            asg_query_port=c.get(ASGQueryPort),
-            logger=c.get(LoggingPort),
-        )
-
-    container.register_singleton(ASGMetadataService, create_asg_metadata_service)
 
     # Domain configuration service — translates raw config dicts into typed domain values
     container.register_singleton(

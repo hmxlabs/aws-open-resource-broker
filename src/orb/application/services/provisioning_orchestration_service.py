@@ -197,10 +197,11 @@ class ProvisioningOrchestrationService:
 
     def _record_provider_success(self, provider_name: str) -> None:
         """Reset circuit breaker failure count after a successful dispatch."""
+        cb_key = f"provider:{provider_name}"
         try:
-            state = CircuitBreakerStrategy._circuit_states.get(provider_name)
-            if state is not None:
-                state["failure_count"] = 0
+            if CircuitBreakerStrategy.has_state(cb_key):
+                cb = CircuitBreakerStrategy(cb_key)
+                cb.record_success()
         except Exception as e:
             self._logger.warning(
                 "Failed to reset circuit breaker state for %s: %s", provider_name, e
@@ -210,27 +211,12 @@ class ProvisioningOrchestrationService:
         """Increment circuit breaker failure count and open circuit if threshold is reached."""
         import time
 
-        from orb.infrastructure.resilience.strategy.circuit_breaker import CircuitState
-
         cb_key = f"provider:{provider_name}"
         try:
-            state = CircuitBreakerStrategy._circuit_states.get(cb_key)
-            if state is None:
+            if not CircuitBreakerStrategy.has_state(cb_key):
                 return
-            state["failure_count"] += 1
-            state["last_failure_time"] = time.time()
-            # Use the default failure_threshold (5) — same default as CircuitBreakerStrategy
-            failure_threshold = 5
-            if (
-                state["state"] == CircuitState.CLOSED
-                and state["failure_count"] >= failure_threshold
-            ):
-                state["state"] = CircuitState.OPEN
-                self._logger.warning(
-                    "Circuit breaker opened for provider %s after %d failures",
-                    provider_name,
-                    state["failure_count"],
-                )
+            cb = CircuitBreakerStrategy(cb_key)
+            cb.record_failure(time.time())
         except Exception as e:
             self._logger.warning(
                 "Failed to record circuit breaker failure for %s: %s", provider_name, e
@@ -284,16 +270,8 @@ class ProvisioningOrchestrationService:
                 provider_data = result.data.get("provider_data", None) or (
                     result.metadata or {}
                 ).get("provider_data", {})
-                fleet_errors = provider_data.get("fleet_errors") or []
                 fulfillment_final = provider_data.get("fulfillment_final", False)
-                capacity_error_codes = {
-                    "InsufficientInstanceCapacity",
-                    "SpotMaxPriceTooLow",
-                    "MaxSpotInstanceCountExceeded",
-                }
-                has_capacity_error = any(
-                    e.get("error_code") in capacity_error_codes for e in fleet_errors
-                )
+                has_capacity_error = provider_data.get("capacity_constrained", False)
 
                 self._record_provider_success(selection_result.provider_name)
                 return ProvisioningResult(
