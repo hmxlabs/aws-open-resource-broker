@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any
 
 from orb.application.base.handlers import BaseQueryHandler
@@ -208,15 +209,13 @@ class GetMachineHealthHandler(BaseQueryHandler[GetMachineHealthQuery, MachineHea
                     health_details = {"error": str(health_error)}
 
                 # Create health DTO
-                from datetime import datetime
-
                 health_dto = MachineHealthDTO(
                     machine_id=str(machine.machine_id),
                     overall_status=health_status,
                     system_status=health_status,
                     instance_status=health_status,
                     metrics=[health_details] if health_details else [],
-                    last_check=last_health_check or datetime.utcnow(),
+                    last_check=last_health_check or datetime.now(timezone.utc),
                 )
 
                 self.logger.info(

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
 
 from pydantic import Field, field_validator, model_validator
@@ -57,11 +57,11 @@ class RequestTimeout(ValueObject):
     @property
     def expiry_time(self) -> datetime:
         """Get expiry time from now."""
-        return datetime.utcnow() + self.duration
+        return datetime.now(timezone.utc) + self.duration
 
     def is_expired(self, start_time: datetime) -> bool:
         """Check if timeout has expired."""
-        return (datetime.utcnow() - start_time) > self.duration
+        return (datetime.now(timezone.utc) - start_time) > self.duration
 
     @classmethod
     def from_seconds(cls, seconds: int) -> RequestTimeout:
@@ -458,7 +458,7 @@ class RequestHistoryEvent(ValueObject):
         """Create a new event with current timestamp."""
         return cls(
             event_type=event_type,
-            timestamp=datetime.utcnow().isoformat(),
+            timestamp=datetime.now(timezone.utc).isoformat(),
             message=message,
             details=details or {},
             source=source,

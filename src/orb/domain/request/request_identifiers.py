@@ -159,7 +159,7 @@ class MachineReference(ValueObject):
         self, new_status: str, result: str, error_message: Optional[str] = None
     ) -> MachineReference:
         """Create a new MachineReference with updated status."""
-        from datetime import datetime
+        from datetime import datetime, timezone
 
         return MachineReference(
             machine_id=self.machine_id,
@@ -167,7 +167,7 @@ class MachineReference(ValueObject):
             result=result,
             error_message=error_message,
             created_at=self.created_at,
-            updated_at=datetime.utcnow().isoformat(),
+            updated_at=datetime.now(timezone.utc).isoformat(),
         )
 
 

@@ -1,7 +1,7 @@
 """SQL serialization components for domain to database mapping."""
 
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Optional
 
@@ -62,7 +62,7 @@ class SQLSerializer(DataConverter):
                 serialized[key] = self._serialize_value(value)
 
             # Add timestamps
-            now = datetime.utcnow()
+            now = datetime.now(timezone.utc)
             if "created_at" not in serialized:
                 serialized["created_at"] = now  # type: ignore[assignment]
             serialized["updated_at"] = now  # type: ignore[assignment]
@@ -94,7 +94,7 @@ class SQLSerializer(DataConverter):
                 serialized[key] = self._serialize_value(value)
 
             # Update timestamp
-            serialized["updated_at"] = datetime.utcnow()
+            serialized["updated_at"] = datetime.now(timezone.utc)
 
             self.logger.debug("Serialized data for UPDATE")
             return serialized

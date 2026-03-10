@@ -18,7 +18,6 @@ from orb.infrastructure.di.container import DIContainer
 from orb.infrastructure.services.iso_timestamp_service import ISOTimestampService
 from orb.infrastructure.services.machine_filter_service import MachineFilterService
 
-
 def register_domain_services(container: DIContainer) -> None:
     """Register domain services in the DI container."""
 
@@ -74,8 +73,8 @@ def register_domain_services(container: DIContainer) -> None:
         validator = None
         try:
             validator = get_provider_registry().create_validator(PROVIDER_TYPE_AWS)
-        except Exception:
-            pass
+        except Exception as e:
+            c.get(LoggingPort).debug("Could not create AWS provider validator: %s", e)
         return ProviderValidationService(
             container=c.get(ContainerPort),
             logger=c.get(LoggingPort),

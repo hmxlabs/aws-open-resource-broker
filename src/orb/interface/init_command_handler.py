@@ -471,8 +471,8 @@ def _get_available_credential_sources(provider_type: str) -> list[dict]:
             sources = strategy.get_available_credential_sources()
             if sources:
                 return sources
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Could not get provider auth config sources from strategy: %s", e)
     return [{"name": None, "description": "Default credentials"}]
 
 
@@ -498,8 +498,8 @@ def _get_credential_requirements(provider_type: str) -> dict:
     if strategy is not None:
         try:
             return strategy.get_credential_requirements()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Could not get provider auth config requirements from strategy: %s", e)
     return {}
 
 

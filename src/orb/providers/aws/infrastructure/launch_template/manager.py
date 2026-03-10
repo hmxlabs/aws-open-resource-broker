@@ -270,8 +270,8 @@ class AWSLaunchTemplateManager:
             try:
                 package_info = self.config_port.get_package_info()
                 created_by = package_info.get("name", "open-resource-broker")
-            except Exception:
-                pass
+            except Exception as e:
+                self._logger.debug("Could not get package name from config port: %s", e)
 
         # Process custom tags
         custom_tags = []
