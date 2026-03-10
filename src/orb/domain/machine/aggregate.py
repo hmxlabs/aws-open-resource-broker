@@ -1,6 +1,6 @@
 """Machine aggregate - core machine domain logic."""
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Optional
 
 from pydantic import ConfigDict, Field
@@ -83,10 +83,8 @@ class Machine(AggregateRoot):
             data["id"] = data.get("machine_id", f"machine-{data.get('template_id', 'unknown')}")
 
         # Set default timestamps if not provided
-        from datetime import datetime
-
         if "created_at" not in data:
-            data["created_at"] = datetime.utcnow()
+            data["created_at"] = datetime.now(timezone.utc)
 
         super().__init__(**data)
 
@@ -97,7 +95,7 @@ class Machine(AggregateRoot):
 
         fields = self.model_dump()
         fields["status"] = MachineStatus.LAUNCHING
-        fields["launched_at"] = datetime.utcnow()
+        fields["launched_at"] = datetime.now(timezone.utc)
         fields["version"] = self.version + 1
 
         updated_machine = Machine.model_validate(fields)
@@ -133,7 +131,7 @@ class Machine(AggregateRoot):
         fields["version"] = self.version + 1
 
         # Update timestamps based on status
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         if new_status == MachineStatus.RUNNING and not self.launch_time:
             fields["launch_time"] = now
         elif new_status in [MachineStatus.TERMINATED, MachineStatus.FAILED]:
@@ -224,7 +222,7 @@ class Machine(AggregateRoot):
     def uptime(self) -> Optional[int]:
         """Get machine uptime in seconds."""
         if self.launch_time and self.status == MachineStatus.RUNNING:
-            return int((datetime.utcnow() - self.launch_time).total_seconds())
+            return int((datetime.now(timezone.utc) - self.launch_time).total_seconds())
         return None
 
     def to_provider_format(self, provider_type: str) -> dict[str, Any]:

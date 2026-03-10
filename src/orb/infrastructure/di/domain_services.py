@@ -74,8 +74,8 @@ def register_domain_services(container: DIContainer) -> None:
         validator = None
         try:
             validator = get_provider_registry().create_validator(PROVIDER_TYPE_AWS)
-        except Exception:
-            pass
+        except Exception as e:
+            c.get(LoggingPort).debug("Could not create AWS provider validator: %s", e)
         return ProviderValidationService(
             container=c.get(ContainerPort),
             logger=c.get(LoggingPort),

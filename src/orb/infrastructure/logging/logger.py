@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import logging.handlers
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, Optional
 
@@ -326,7 +326,7 @@ class AuditLogger:
                 "resource": resource,
                 "status": status,
                 "details": details or {},
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
             },
         )
 
@@ -357,7 +357,7 @@ class MetricsLogger:
                 "duration_ms": duration_ms,
                 "status": status,
                 "tags": tags,
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
             },
         )
 
@@ -377,7 +377,7 @@ class MetricsLogger:
                 "metric": metric,
                 "value": value,
                 "tags": tags,
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
             },
         )
 
@@ -397,6 +397,6 @@ class MetricsLogger:
                 "metric": metric,
                 "value": value,
                 "tags": tags,
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
             },
         )

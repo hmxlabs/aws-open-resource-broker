@@ -2,7 +2,7 @@
 
 import enum
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import (
     JSON,
@@ -76,8 +76,12 @@ class MachineModel(Base, JsonSerializableMixin):
     health_checks = Column(JSON, nullable=True)
     request_id = Column(String(36), ForeignKey("requests.request_id"), nullable=False)
     template_id = Column(String(36), ForeignKey("templates.template_id"), nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
     version = Column(Integer, default=0)
 
     # Relationships
@@ -97,8 +101,12 @@ class RequestModel(Base, JsonSerializableMixin):
     number_of_machines = Column(Integer, nullable=False)
     machine_ids = Column(JSON, nullable=True)  # List of machine IDs
     parameters = Column(JSON, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
     completed_at = Column(DateTime, nullable=True)
     version = Column(Integer, default=0)
 
@@ -121,8 +129,12 @@ class TemplateModel(Base, JsonSerializableMixin):
     max_number = Column(Integer, nullable=False)
     is_available = Column(Boolean, default=True)
     parameters = Column(JSON, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
     version = Column(Integer, default=0)
 
     # Relationships

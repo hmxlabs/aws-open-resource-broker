@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from orb.application.base.handlers import BaseCommandHandler
 from orb.application.decorators import command_handler
@@ -51,7 +51,7 @@ class CleanupOldRequestsHandler(BaseCommandHandler[CleanupOldRequestsCommand, No
         - command.request_ids_found: List of request IDs found (dry run)
         """
         self.logger.info("Cleaning up requests older than %s days", command.older_than_days)
-        cutoff_date = datetime.utcnow() - timedelta(days=command.older_than_days)
+        cutoff_date = datetime.now(timezone.utc) - timedelta(days=command.older_than_days)
 
         try:
             with self._uow_factory.create_unit_of_work() as uow:
@@ -139,7 +139,7 @@ class CleanupAllResourcesHandler(BaseCommandHandler[CleanupAllResourcesCommand, 
         - command.total_cleaned: Total resources cleaned
         """
         self.logger.info("Cleaning up all resources older than %s days", command.older_than_days)
-        cutoff_date = datetime.utcnow() - timedelta(days=command.older_than_days)
+        cutoff_date = datetime.now(timezone.utc) - timedelta(days=command.older_than_days)
 
         try:
             with self._uow_factory.create_unit_of_work() as uow:

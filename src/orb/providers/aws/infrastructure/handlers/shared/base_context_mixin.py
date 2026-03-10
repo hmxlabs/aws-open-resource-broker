@@ -1,9 +1,12 @@
 """Base context mixin for AWS handlers."""
 
-from datetime import datetime
+import logging
+from datetime import datetime, timezone
 from typing import Any
 
 from orb.providers.aws.domain.template.aws_template_aggregate import AWSTemplate
+
+_logger = logging.getLogger(__name__)
 
 
 class BaseContextMixin:
@@ -22,7 +25,7 @@ class BaseContextMixin:
             "min_count": 1,
             "max_count": requested_count,
             # Standard timestamps
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             # Standard package info
             "created_by": self._get_package_name(),
         }
@@ -33,8 +36,8 @@ class BaseContextMixin:
             try:
                 package_info = self.config_port.get_package_info()  # type: ignore[attr-defined]
                 return package_info.get("name", "open-resource-broker")
-            except Exception:
-                pass
+            except Exception as e:
+                _logger.debug("Could not get package name from config port: %s", e)
         return "open-resource-broker"
 
     def _calculate_capacity_distribution(
@@ -76,7 +79,7 @@ class BaseContextMixin:
             {"key": "RequestId", "value": str(request_id)},
             {"key": "TemplateId", "value": str(template.template_id)},
             {"key": "CreatedBy", "value": created_by},
-            {"key": "CreatedAt", "value": datetime.utcnow().isoformat()},
+            {"key": "CreatedAt", "value": datetime.now(timezone.utc).isoformat()},
         ]
 
         custom_tags = []

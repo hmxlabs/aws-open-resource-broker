@@ -1,6 +1,6 @@
 """Request status caching service using database storage."""
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from orb.application.dto.responses import RequestDTO
@@ -114,7 +114,7 @@ class RequestCacheService:
 
                 if request:
                     # Update the request's updated_at timestamp to mark cache time
-                    request.updated_at = datetime.utcnow()
+                    request.updated_at = datetime.now(timezone.utc)
                     uow.requests.save(request)
 
                     self.logger.debug("Cached request %s", request_dto.request_id)
@@ -127,7 +127,7 @@ class RequestCacheService:
         if not request.updated_at:
             return False
 
-        cache_age = datetime.utcnow() - request.updated_at
+        cache_age = datetime.now(timezone.utc) - request.updated_at
         return cache_age.total_seconds() < self._ttl_seconds
 
     def invalidate_cache(self, request_id: str) -> None:
@@ -141,7 +141,7 @@ class RequestCacheService:
 
                 if request:
                     # Set updated_at to a very old timestamp to invalidate cache
-                    request.updated_at = datetime.utcnow() - timedelta(days=1)
+                    request.updated_at = datetime.now(timezone.utc) - timedelta(days=1)
                     uow.requests.save(request)
 
                     self.logger.debug("Invalidated cache for request %s", request_id)

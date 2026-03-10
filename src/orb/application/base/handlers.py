@@ -9,7 +9,7 @@ Designed to support our CQRS architecture while providing common functionality.
 import asyncio
 import time
 from abc import ABC, abstractmethod
-from datetime import datetime
+from datetime import datetime, timezone
 from functools import wraps
 from typing import Any, Callable, Optional, TypeVar
 
@@ -136,7 +136,7 @@ class BaseHandler(ABC):
                     self._metrics[operation_id] = {
                         "duration": duration,
                         "status": "success",
-                        "timestamp": datetime.utcnow(),
+                        "timestamp": datetime.now(timezone.utc),
                     }
 
                     return result
@@ -156,7 +156,7 @@ class BaseHandler(ABC):
                         "duration": duration,
                         "status": "error",
                         "error": str(e),
-                        "timestamp": datetime.utcnow(),
+                        "timestamp": datetime.now(timezone.utc),
                     }
 
                     raise

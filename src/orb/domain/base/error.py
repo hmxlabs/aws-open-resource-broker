@@ -1,7 +1,7 @@
 """Domain error concepts - core error representation."""
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Optional
 
 
@@ -60,7 +60,7 @@ class ErrorContext:
     def create(cls, operation: str, layer: str, request_id: Optional[str] = None) -> "ErrorContext":
         """Create error context with current timestamp."""
         return cls(
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(timezone.utc),
             operation=operation,
             layer=layer,
             request_id=request_id,

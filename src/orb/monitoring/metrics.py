@@ -23,7 +23,7 @@ class Metric:
 
     name: str
     value: float
-    timestamp: datetime = field(default_factory=datetime.utcnow)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     labels: dict[str, str] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -43,7 +43,7 @@ class Counter(Metric):
     def increment(self, value: float = 1.0) -> None:
         """Increment counter value."""
         self.value += value
-        self.timestamp = datetime.utcnow()
+        self.timestamp = datetime.now(timezone.utc)
 
 
 @dataclass
@@ -53,7 +53,7 @@ class Gauge(Metric):
     def set(self, value: float) -> None:
         """Set gauge value."""
         self.value = value
-        self.timestamp = datetime.utcnow()
+        self.timestamp = datetime.now(timezone.utc)
 
 
 @dataclass
@@ -317,7 +317,7 @@ class MetricsCollector:
                                 "metric": name,
                                 "value": metric.value,
                                 "threshold": threshold,
-                                "timestamp": datetime.utcnow().isoformat(),
+                                "timestamp": datetime.now(timezone.utc).isoformat(),
                             }
                         )
 
@@ -335,7 +335,7 @@ class MetricsCollector:
 
     def cleanup_old_metrics(self, max_age: timedelta = DEFAULT_MAX_AGE) -> None:
         """Clean up old metrics data."""
-        cutoff = datetime.utcnow() - max_age
+        cutoff = datetime.now(timezone.utc) - max_age
 
         with self._lock:
             # Clean up timers

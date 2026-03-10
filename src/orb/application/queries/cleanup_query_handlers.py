@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 # Define query classes inline since they're not in dto/queries.py yet
@@ -49,7 +49,7 @@ class ListCleanableRequestsHandler(BaseQueryHandler[ListCleanableRequestsQuery, 
             "Listing requests eligible for cleanup (older than %d days)", query.older_than_days
         )
 
-        cutoff_date = datetime.utcnow() - timedelta(days=query.older_than_days)
+        cutoff_date = datetime.now(timezone.utc) - timedelta(days=query.older_than_days)
 
         try:
             with self._uow_factory.create_unit_of_work() as uow:
@@ -66,7 +66,9 @@ class ListCleanableRequestsHandler(BaseQueryHandler[ListCleanableRequestsQuery, 
                                     "request_id": str(request.request_id),
                                     "status": str(request.status),
                                     "created_at": request.created_at.isoformat(),
-                                    "age_days": (datetime.utcnow() - request.created_at).days,
+                                    "age_days": (
+                                        datetime.now(timezone.utc) - request.created_at
+                                    ).days,
                                 }
                             )
 

@@ -118,6 +118,6 @@ def test_no_new_circular_dependencies() -> None:
             new_cycles.append(" -> ".join(cycle))
 
     assert new_cycles == [], (
-        f"NEW circular dependencies detected between top-level packages:\n"
+        "NEW circular dependencies detected between top-level packages:\n"
         + "\n".join(f"  {c}" for c in new_cycles)
     )

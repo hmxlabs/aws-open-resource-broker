@@ -10,7 +10,7 @@ implementations and storage strategies:
 
 import json
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Optional
 
 from orb.domain.base.domain_interfaces import Repository
@@ -72,7 +72,7 @@ class RepositoryMigrator:
             }
 
         stats = {
-            "started_at": datetime.utcnow().isoformat(),
+            "started_at": datetime.now(timezone.utc).isoformat(),
             "source_type": source_type,
             "target_type": target_type,
             "batch_size": batch_size,
@@ -106,7 +106,7 @@ class RepositoryMigrator:
                 stats["total_failed"] += collection_stats["failed"]
 
             stats["status"] = "success"
-            stats["completed_at"] = datetime.utcnow().isoformat()
+            stats["completed_at"] = datetime.now(timezone.utc).isoformat()
 
             self.logger.info("Migration completed: %s items migrated", stats["total_migrated"])
 
@@ -114,7 +114,7 @@ class RepositoryMigrator:
             self.logger.error("Migration failed: %s", str(e))
             stats["status"] = "error"
             stats["error"] = str(e)
-            stats["completed_at"] = datetime.utcnow().isoformat()
+            stats["completed_at"] = datetime.now(timezone.utc).isoformat()
 
         return stats
 
