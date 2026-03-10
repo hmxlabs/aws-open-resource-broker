@@ -17,6 +17,7 @@ from orb.application.machine.queries import (
     ValidateProviderStateQuery,
 )
 from orb.application.ports.command_bus_port import CommandBusPort
+from orb.application.services.machine_sync_service import MachineSyncService
 from orb.domain.base import UnitOfWorkFactory
 from orb.domain.base.exceptions import EntityNotFoundError
 from orb.domain.base.ports import ContainerPort, ErrorHandlingPort, LoggingPort
@@ -100,6 +101,7 @@ class ListMachinesHandler(BaseQueryHandler[ListMachinesQuery, list[MachineDTO]])
         command_bus: CommandBusPort,
         timestamp_service: TimestampService,
         generic_filter_service: GenericFilterService,
+        machine_sync_service: MachineSyncService,
     ) -> None:
         super().__init__(logger, error_handler)
         self.uow_factory = uow_factory
@@ -107,10 +109,7 @@ class ListMachinesHandler(BaseQueryHandler[ListMachinesQuery, list[MachineDTO]])
         self.command_bus = command_bus
         self.timestamp_service = timestamp_service
         self._generic_filter_service = generic_filter_service
-
-        from orb.application.services.machine_sync_service import MachineSyncService
-
-        self._machine_sync_service = container.get(MachineSyncService)
+        self._machine_sync_service = machine_sync_service
 
     async def execute_query(self, query: ListMachinesQuery) -> list[MachineDTO]:
         """Execute list machines query."""
