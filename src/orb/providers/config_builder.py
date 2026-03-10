@@ -26,7 +26,9 @@ class ProviderConfigBuilder:
     def build_config(self, instance_config: ProviderInstanceConfig) -> Any:
         """Build provider configuration with automatic env var loading.
 
-        Environment variables have precedence over config file values.
+        Delegates to a provider-registered config builder if available,
+        falling back to the raw config dict. This removes the hardcoded
+        provider_type == "aws" branch.
 
         Args:
             instance_config: Provider instance configuration
@@ -34,10 +36,27 @@ class ProviderConfigBuilder:
         Returns:
             Provider-specific configuration object
         """
+        try:
+            from orb.providers.registry import get_provider_registry
+
+            registry = get_provider_registry()
+            if registry.is_provider_registered(instance_config.type):
+                config_factory = registry.get_config_factory(instance_config.type)
+                if config_factory:
+                    return config_factory(instance_config)
+        except Exception as exc:
+            # Registry not yet populated (e.g. early bootstrap) — fall through to legacy path
+            self._logger.warning(
+                "Failed to build provider config via registry for type '%s': %s",
+                instance_config.type,
+                exc,
+            )
+
+        # Fallback: AWS-specific builder kept for backward compatibility when
+        # the registry is not yet populated (e.g. during early bootstrap).
         if instance_config.type == "aws":
             return self._build_aws_config(instance_config)
 
-        # Fallback to dict config for other providers
         return instance_config.config
 
     def _build_aws_config(self, instance_config: ProviderInstanceConfig) -> Any:

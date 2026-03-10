@@ -6,13 +6,14 @@ from typing import Any, Callable, List, Optional
 
 from orb.domain.base.exceptions import ConfigurationError
 from orb.domain.base.ports.configuration_port import ConfigurationPort
+from orb.domain.base.ports.provider_registry_port import ProviderRegistryPort
 from orb.domain.base.results import ProviderSelectionResult
 from orb.infrastructure.registry.base_registry import BaseRegistration, BaseRegistry, RegistryMode
 from orb.infrastructure.utilities.common.string_utils import extract_provider_type
 from orb.providers.registry.types import ProviderRegistration, UnsupportedProviderError
 
 
-class ProviderRegistry(BaseRegistry):
+class ProviderRegistry(BaseRegistry, ProviderRegistryPort):
     """
     Registry for provider strategy factories.
 
@@ -439,6 +440,14 @@ class ProviderRegistry(BaseRegistry):
         """
         return self.get_registered_instances()
 
+    def get_config_factory(self, provider_type: str) -> Optional[Any]:
+        """Return the config_factory callable for the given provider type, or None if not registered."""
+        try:
+            registration = self._get_type_registration(provider_type)
+            return getattr(registration, "config_factory", None)
+        except (ValueError, KeyError):
+            return None
+
     def get_provider_instance_registration(
         self, instance_name: str
     ) -> Optional[ProviderRegistration]:
@@ -527,7 +536,7 @@ class ProviderRegistry(BaseRegistry):
         # Strategy 5: Fallback to default
         return self._select_default_provider(template, logger)
 
-    def select_active_provider(self, logger: Optional[Any] = None) -> Any:
+    def select_active_provider(self, logger: Optional[Any] = None) -> ProviderSelectionResult:
         """Select active provider instance from configuration."""
         if logger:
             logger.debug("Selecting active provider using selection policy")
