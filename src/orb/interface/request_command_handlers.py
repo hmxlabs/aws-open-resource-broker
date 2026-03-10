@@ -110,7 +110,7 @@ async def handle_get_request_status(
                 if request_dto:
                     request_dtos.append(request_dto)
             except RequestNotFoundError:
-                from datetime import datetime
+                from datetime import datetime, timezone
 
                 from orb.application.request.dto import RequestDTO
 
@@ -119,7 +119,7 @@ async def handle_get_request_status(
                         request_id=str(request_ids[0]),
                         status="pending",
                         requested_count=0,
-                        created_at=datetime.utcnow(),
+                        created_at=datetime.now(timezone.utc),
                     )
                 )
             except Exception:
@@ -135,7 +135,7 @@ async def handle_get_request_status(
                     if request_dto:
                         request_dtos.append(request_dto)
                 except RequestNotFoundError:
-                    from datetime import datetime
+                    from datetime import datetime, timezone
 
                     from orb.application.request.dto import RequestDTO
 
@@ -144,7 +144,7 @@ async def handle_get_request_status(
                             request_id=str(request_id),
                             status="pending",
                             requested_count=0,
-                            created_at=datetime.utcnow(),
+                            created_at=datetime.now(timezone.utc),
                         )
                     )
                 except Exception:

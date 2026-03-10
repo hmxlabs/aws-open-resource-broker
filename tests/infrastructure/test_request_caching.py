@@ -140,8 +140,8 @@ class TestRequestCacheService:
     def test_cache_validity_check(self, mock_datetime, cache_service):
         """Test cache validity checking logic."""
         # Mock current time
-        current_time = datetime(2023, 1, 1, 12, 0, 0)
-        mock_datetime.utcnow.return_value = current_time
+        current_time = datetime(2023, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+        mock_datetime.now.return_value = current_time
 
         # Create mock request with recent update time (within TTL)
         mock_request = Mock()

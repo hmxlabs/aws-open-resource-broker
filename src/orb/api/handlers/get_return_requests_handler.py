@@ -1,7 +1,7 @@
 """API handler for getting return requests."""
 
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Optional, cast
 
 from orb.application.base.infrastructure_handlers import (
@@ -272,7 +272,7 @@ class GetReturnRequestsRESTHandler(BaseAPIHandler[dict[str, Any], ReturnRequestR
         if cache_key in self._cache:
             cached_data = self._cache[cache_key]
             if (
-                datetime.utcnow() - cached_data["timestamp"]
+                datetime.now(timezone.utc) - cached_data["timestamp"]
             ).total_seconds() < self._cache_duration:
                 return cached_data["data"]
             else:
@@ -287,12 +287,12 @@ class GetReturnRequestsRESTHandler(BaseAPIHandler[dict[str, Any], ReturnRequestR
             cache_key: Cache key
             data: Data to cache
         """
-        self._cache[cache_key] = {"data": data, "timestamp": datetime.utcnow()}
+        self._cache[cache_key] = {"data": data, "timestamp": datetime.now(timezone.utc)}
         self._cleanup_cache()
 
     def _cleanup_cache(self) -> None:
         """Clean up expired cache entries."""
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         expired_keys = [
             key
             for key, value in self._cache.items()

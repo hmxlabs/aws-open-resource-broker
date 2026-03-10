@@ -1,6 +1,6 @@
 """DynamoDB conversion components for domain to DynamoDB mapping."""
 
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 from enum import Enum
 from typing import Any, Optional
@@ -70,7 +70,7 @@ class DynamoDBConverter(DataConverter):
                 item[key] = self._convert_to_dynamodb_type(value)
 
             # Add timestamps
-            now = datetime.utcnow().isoformat()
+            now = datetime.now(timezone.utc).isoformat()
             if "created_at" not in item:
                 item["created_at"] = now
             item["updated_at"] = now

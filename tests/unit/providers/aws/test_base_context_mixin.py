@@ -37,7 +37,7 @@ class TestBaseContextMixin:
         with patch(
             "orb.providers.aws.infrastructure.handlers.shared.base_context_mixin.datetime"
         ) as mock_dt:
-            mock_dt.utcnow.return_value.isoformat.return_value = "2025-01-15T10:30:00Z"
+            mock_dt.now.return_value.isoformat.return_value = "2025-01-15T10:30:00Z"
 
             context = self.mixin._prepare_base_context(
                 self.template, self.request_id, self.requested_count
@@ -150,7 +150,7 @@ class TestBaseContextMixin:
             with patch(
                 "orb.providers.aws.infrastructure.handlers.shared.base_context_mixin.datetime"
             ) as mock_dt:
-                mock_dt.utcnow.return_value.isoformat.return_value = "2025-01-15T10:30:00Z"
+                mock_dt.now.return_value.isoformat.return_value = "2025-01-15T10:30:00Z"
 
                 result = self.mixin._prepare_standard_tags(self.template, self.request_id)
 

@@ -101,7 +101,7 @@ class Request(AggregateRoot):
         old_status = self.status
         fields = self.model_dump()
         fields["status"] = RequestStatus.IN_PROGRESS
-        fields["started_at"] = datetime.utcnow()
+        fields["started_at"] = datetime.now(timezone.utc)
         fields["version"] = self.version + 1
 
         updated_request = Request.model_validate(fields)
@@ -133,7 +133,7 @@ class Request(AggregateRoot):
             current_errors[f"error_{self.failed_count}"] = {
                 "message": error_message,
                 "details": error_details,
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
             }
             fields["error_details"] = current_errors
 
@@ -142,7 +142,7 @@ class Request(AggregateRoot):
             fields["status"] = (
                 RequestStatus.PARTIAL if self.successful_count > 0 else RequestStatus.FAILED
             )
-            fields["completed_at"] = datetime.utcnow()
+            fields["completed_at"] = datetime.now(timezone.utc)
             fields["status_message"] = f"Request completed with {fields['failed_count']} failures"
 
         return Request.model_validate(fields)
@@ -159,7 +159,7 @@ class Request(AggregateRoot):
         fields = self.model_dump()
         fields["status"] = RequestStatus.CANCELLED
         fields["status_message"] = reason
-        fields["completed_at"] = datetime.utcnow()
+        fields["completed_at"] = datetime.now(timezone.utc)
         fields["version"] = self.version + 1
 
         return Request.model_validate(fields)
@@ -170,7 +170,7 @@ class Request(AggregateRoot):
         fields = self.model_dump()
         fields["status"] = RequestStatus.COMPLETED
         fields["status_message"] = message or "Request completed successfully"
-        fields["completed_at"] = datetime.utcnow()
+        fields["completed_at"] = datetime.now(timezone.utc)
         fields["version"] = self.version + 1
 
         updated_request = Request.model_validate(fields)
@@ -203,7 +203,7 @@ class Request(AggregateRoot):
         fields = self.model_dump()
         fields["status"] = RequestStatus.FAILED
         fields["status_message"] = error_message
-        fields["completed_at"] = datetime.utcnow()
+        fields["completed_at"] = datetime.now(timezone.utc)
         fields["version"] = self.version + 1
 
         if error_details:
@@ -301,7 +301,7 @@ class Request(AggregateRoot):
         if self.started_at and self.completed_at:
             return int((self.completed_at - self.started_at).total_seconds())
         elif self.started_at:
-            return int((datetime.utcnow() - self.started_at).total_seconds())
+            return int((datetime.now(timezone.utc) - self.started_at).total_seconds())
         return None
 
     def to_provider_format(self, provider_type: str) -> dict[str, Any]:
@@ -445,7 +445,7 @@ class Request(AggregateRoot):
             machine_ids=machine_ids,
             status=RequestStatus.PENDING,
             metadata=metadata or {},
-            created_at=datetime.utcnow(),
+            created_at=datetime.now(timezone.utc),
             version=0,
         )
 
@@ -479,7 +479,7 @@ class Request(AggregateRoot):
             "successful_count": data.get("successful_count", 0),
             "failed_count": data.get("failed_count", 0),
             "created_at": datetime.fromisoformat(
-                data.get("created_at") or datetime.utcnow().isoformat()
+                data.get("created_at") or datetime.now(timezone.utc).isoformat()
             ),
             "metadata": data.get("metadata", {}),
             "error_details": data.get("error_details", {}),
@@ -523,7 +523,7 @@ class Request(AggregateRoot):
         if provisioning_result.get("success", False):
             fields["status"] = RequestStatus.IN_PROGRESS
             if not self.started_at:
-                fields["started_at"] = datetime.utcnow()
+                fields["started_at"] = datetime.now(timezone.utc)
 
         fields["version"] = self.version + 1
 

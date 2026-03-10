@@ -1,7 +1,7 @@
 """Exception context management."""
 
 import threading
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 
@@ -14,7 +14,7 @@ class ExceptionContext:
         """Initialize the instance."""
         self.operation = operation
         self.layer = layer
-        self.timestamp = datetime.utcnow()
+        self.timestamp = datetime.now(timezone.utc)
         self.thread_id = threading.get_ident()
         self.additional_context = additional_context
 
