@@ -18,8 +18,19 @@ from tests.unit.architecture.conftest import (
 )
 
 _TOP_PACKAGES = frozenset(
-    ["domain", "application", "infrastructure", "interface", "api", "cli",
-     "providers", "config", "mcp", "monitoring", "sdk"]
+    [
+        "domain",
+        "application",
+        "infrastructure",
+        "interface",
+        "api",
+        "cli",
+        "providers",
+        "config",
+        "mcp",
+        "monitoring",
+        "sdk",
+    ]
 )
 
 # Known cycles that exist in the current codebase.  Each cycle is stored as a

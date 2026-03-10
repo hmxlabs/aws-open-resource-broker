@@ -26,11 +26,7 @@ _INTERFACE_DIRS = [
     SRC_ORB / "cli",
 ]
 
-_INTERFACE_FILES = [
-    f
-    for d in _INTERFACE_DIRS
-    for f in collect_python_files(d)
-]
+_INTERFACE_FILES = [f for d in _INTERFACE_DIRS for f in collect_python_files(d)]
 
 # Known violations — interface/api/cli files that currently import providers
 # directly.  Remove entries as they are cleaned up.
@@ -51,9 +47,7 @@ _KNOWN_VIOLATIONS: frozenset[tuple[str, str]] = frozenset(
 )
 
 
-@pytest.mark.parametrize(
-    "filepath", _INTERFACE_FILES, ids=lambda p: str(p.relative_to(SRC_ORB))
-)
+@pytest.mark.parametrize("filepath", _INTERFACE_FILES, ids=lambda p: str(p.relative_to(SRC_ORB)))
 @pytest.mark.unit
 @pytest.mark.architecture
 def test_interface_has_no_new_provider_import(filepath: Path) -> None:
