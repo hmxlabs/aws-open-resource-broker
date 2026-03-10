@@ -1,12 +1,13 @@
 """Machine sync service for provider integration."""
 
-from typing import TYPE_CHECKING, Tuple
+from typing import TYPE_CHECKING, Optional, Tuple
 
 if TYPE_CHECKING:
-    pass
+    from orb.application.services.provider_registry_service import ProviderRegistryService
 
 from orb.application.ports.command_bus_port import CommandBusPort
-from orb.domain.base.ports.container_port import ContainerPort
+from orb.domain.base import UnitOfWorkFactory
+from orb.domain.base.ports.configuration_port import ConfigurationPort
 from orb.domain.base.ports.logging_port import LoggingPort
 from orb.domain.machine.aggregate import Machine
 from orb.domain.request.aggregate import Request
@@ -18,21 +19,22 @@ class MachineSyncService:
     def __init__(
         self,
         command_bus: CommandBusPort,
-        container: ContainerPort,
+        uow_factory: UnitOfWorkFactory,
+        config_port: ConfigurationPort,
         logger: LoggingPort,
+        provider_registry_service: Optional["ProviderRegistryService"] = None,
     ) -> None:
         self.command_bus = command_bus
-        self.container = container
+        self.uow_factory = uow_factory
+        self._config_port = config_port
         self.logger = logger
-        self._provider_registry_service = None  # Lazy loaded
+        self._provider_registry_service: Optional["ProviderRegistryService"] = (
+            provider_registry_service
+        )
 
     @property
-    def provider_registry_service(self):
-        """Lazy load provider registry service to avoid circular dependency."""
-        if self._provider_registry_service is None:
-            from orb.application.services.provider_registry_service import ProviderRegistryService
-
-            self._provider_registry_service = self.container.get(ProviderRegistryService)
+    def provider_registry_service(self) -> Optional["ProviderRegistryService"]:
+        """Return the injected provider registry service."""
         return self._provider_registry_service
 
     async def populate_missing_machine_ids(self, request: Request) -> None:
@@ -60,7 +62,6 @@ class MachineSyncService:
                 Operation as ProviderOperation,
                 OperationType as ProviderOperationType,
             )
-            from orb.domain.base.ports.configuration_port import ConfigurationPort
 
             # For return requests, always use instance-level status for the specific
             # machines being returned — not resource-level discovery which returns all
@@ -100,10 +101,11 @@ class MachineSyncService:
             )
 
             # Get provider configuration
-            config_port = self.container.get(ConfigurationPort)
-            config_port.get_provider_instance_config(request.provider_name or "")
+            self._config_port.get_provider_instance_config(request.provider_name or "")
 
             # Execute operation using Provider Registry Service
+            if self.provider_registry_service is None:
+                raise RuntimeError("ProviderRegistryService is required for this operation")
             result = await self.provider_registry_service.execute_operation(
                 request.provider_name or "", operation
             )
@@ -206,8 +208,6 @@ class MachineSyncService:
         self, request: Request, db_machines: list[Machine], provider_machines: list[Machine]
     ) -> Tuple[list[Machine], dict]:
         try:
-            from orb.domain.base import UnitOfWorkFactory
-
             existing_by_id = {str(m.machine_id.value): m for m in db_machines}
             updated_machines = []
             to_upsert = []
@@ -273,8 +273,7 @@ class MachineSyncService:
 
             # Persist changes
             if to_upsert:
-                uow_factory = self.container.get(UnitOfWorkFactory)
-                with uow_factory.create_unit_of_work() as uow:
+                with self.uow_factory.create_unit_of_work() as uow:
                     for machine in to_upsert:
                         uow.machines.save(machine)
 

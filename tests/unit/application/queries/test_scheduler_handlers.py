@@ -28,6 +28,7 @@ class TestListSchedulerStrategiesHandler:
     def handler(self):
         """Create handler instance."""
         from orb.application.services.scheduler_registry_service import SchedulerRegistryService
+        from orb.domain.base.ports.configuration_port import ConfigurationPort
         from orb.domain.services.generic_filter_service import GenericFilterService
 
         mock_logger = Mock()
@@ -40,8 +41,14 @@ class TestListSchedulerStrategiesHandler:
         ]
         mock_filter_service = Mock(spec=GenericFilterService)
         mock_filter_service.apply_filters.side_effect = lambda items, **kwargs: items
+        mock_config_port = Mock(spec=ConfigurationPort)
+        mock_config_port.get_scheduler_strategy.return_value = "hostfactory"
         return ListSchedulerStrategiesHandler(
-            mock_logger, mock_error_handler, mock_scheduler_service, mock_filter_service
+            mock_logger,
+            mock_error_handler,
+            mock_scheduler_service,
+            mock_filter_service,
+            mock_config_port,
         )
 
     @pytest.fixture
@@ -109,18 +116,14 @@ class TestListSchedulerStrategiesHandler:
 
     @pytest.mark.asyncio
     async def test_list_strategies_config_error(self, handler, mock_registry):
-        """Test strategy listing when config manager fails."""
+        """Test strategy listing when config port fails."""
         query = ListSchedulerStrategiesQuery(include_current=True, include_details=False)
 
-        with (
-            patch(
-                "orb.infrastructure.scheduler.registry.get_scheduler_registry",
-                return_value=mock_registry,
-            ),
-            patch(
-                "orb.config.manager.ConfigurationManager",
-                side_effect=Exception("Config error"),
-            ),
+        handler._config_port.get_scheduler_strategy.side_effect = Exception("Config error")
+
+        with patch(
+            "orb.infrastructure.scheduler.registry.get_scheduler_registry",
+            return_value=mock_registry,
         ):
             response = await handler.execute_query(query)
 
@@ -135,6 +138,7 @@ class TestGetSchedulerConfigurationHandler:
     def handler(self):
         """Create handler instance."""
         from orb.application.services.scheduler_registry_service import SchedulerRegistryService
+        from orb.domain.base.ports.configuration_port import ConfigurationPort
 
         mock_logger = Mock()
         mock_error_handler = Mock()
@@ -145,15 +149,16 @@ class TestGetSchedulerConfigurationHandler:
             "hf",
         ]
         mock_scheduler_service.is_scheduler_registered.side_effect = lambda name: (
-            name
-            in [
-                "default",
-                "hostfactory",
-                "hf",
-            ]
+            name in ["default", "hostfactory", "hf"]
         )
+        mock_config_port = Mock(spec=ConfigurationPort)
+        mock_config_port.get_scheduler_strategy.return_value = "hostfactory"
+        mock_config_port.get_configuration_value.return_value = {
+            "type": "hostfactory",
+            "config_root": "config",
+        }
         return GetSchedulerConfigurationHandler(
-            mock_logger, mock_error_handler, mock_scheduler_service
+            mock_logger, mock_error_handler, mock_scheduler_service, mock_config_port
         )
 
     @pytest.fixture
@@ -258,6 +263,7 @@ class TestValidateSchedulerConfigurationHandler:
         from unittest.mock import Mock
 
         from orb.application.services.scheduler_registry_service import SchedulerRegistryService
+        from orb.domain.base.ports.configuration_port import ConfigurationPort
 
         mock_logger = Mock()
         mock_error_handler = Mock()
@@ -268,8 +274,11 @@ class TestValidateSchedulerConfigurationHandler:
             "hf",
         ]
         mock_scheduler_service.create_scheduler_strategy.return_value = Mock()
+        mock_config_port = Mock(spec=ConfigurationPort)
+        mock_config_port.get_scheduler_strategy.return_value = "hostfactory"
+        mock_config_port.get_configuration_value.return_value = {"type": "hostfactory"}
         return ValidateSchedulerConfigurationHandler(
-            mock_logger, mock_error_handler, mock_scheduler_service
+            mock_logger, mock_error_handler, mock_scheduler_service, mock_config_port
         )
 
     @pytest.fixture

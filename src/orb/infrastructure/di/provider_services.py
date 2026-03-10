@@ -35,9 +35,18 @@ def _register_application_services(container: DIContainer) -> None:
 
     # Machine sync service - lazy initialization
     def create_machine_sync_service(c):
+        from orb.application.services.provider_registry_service import ProviderRegistryService
+        from orb.domain.base import UnitOfWorkFactory
+        from orb.domain.base.ports.configuration_port import ConfigurationPort
+
         command_bus = c.get(CommandBus)
+        uow_factory = c.get(UnitOfWorkFactory)
+        config_port = c.get(ConfigurationPort)
         logger = c.get(LoggingPort)
-        return MachineSyncService(command_bus, c, logger)
+        provider_registry_service = c.get(ProviderRegistryService)
+        return MachineSyncService(
+            command_bus, uow_factory, config_port, logger, provider_registry_service
+        )
 
     container.register_singleton(MachineSyncService, create_machine_sync_service)
 

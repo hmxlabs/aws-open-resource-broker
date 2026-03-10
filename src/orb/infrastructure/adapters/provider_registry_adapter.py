@@ -20,38 +20,23 @@ class ProviderRegistryAdapter(ProviderPort):
 
     def provision_resources(self, request: Request) -> list[Machine]:
         """Provision resources using Provider Registry."""
-        raise NotImplementedError(
-            "provision_resources must be called via a provider strategy, "
-            "not directly on ProviderRegistryAdapter"
-        )
+        raise NotImplementedError("ProviderRegistryAdapter does not support direct provisioning")
 
     def terminate_resources(self, *args, **kwargs) -> None:
         """Terminate resources using Provider Registry."""
-        raise NotImplementedError(
-            "terminate_resources must be called via a provider strategy, "
-            "not directly on ProviderRegistryAdapter"
-        )
+        raise NotImplementedError("ProviderRegistryAdapter does not support direct termination")
 
     def get_available_templates(self) -> list[Template]:
         """Get available templates using Provider Registry."""
-        raise NotImplementedError(
-            "get_available_templates must be called via a provider strategy, "
-            "not directly on ProviderRegistryAdapter"
-        )
+        raise NotImplementedError("ProviderRegistryAdapter does not support template listing")
 
     def validate_template(self, template: Template) -> bool:
         """Validate template using Provider Registry."""
-        raise NotImplementedError(
-            "validate_template must be called via a provider strategy, "
-            "not directly on ProviderRegistryAdapter"
-        )
+        raise NotImplementedError("ProviderRegistryAdapter does not support template validation")
 
     def get_resource_status(self, machine_ids: list[str]) -> dict[str, Any]:
         """Get resource status using Provider Registry."""
-        raise NotImplementedError(
-            "get_resource_status must be called via a provider strategy, "
-            "not directly on ProviderRegistryAdapter"
-        )
+        raise NotImplementedError("ProviderRegistryAdapter does not support resource status")
 
     def available_strategies(self) -> list[str]:
         """Get available strategies from the Provider Registry."""

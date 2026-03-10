@@ -14,6 +14,7 @@ from orb.application.queries.scheduler import (
     ValidateSchedulerConfigurationQuery,
 )
 from orb.application.services.scheduler_registry_service import SchedulerRegistryService
+from orb.domain.base.ports.configuration_port import ConfigurationPort
 from orb.domain.base.ports.error_handling_port import ErrorHandlingPort
 from orb.domain.base.ports.logging_port import LoggingPort
 from orb.domain.services.generic_filter_service import GenericFilterService
@@ -31,10 +32,12 @@ class ListSchedulerStrategiesHandler(
         error_handler: ErrorHandlingPort,
         scheduler_service: SchedulerRegistryService,
         generic_filter_service: GenericFilterService,
+        config_port: ConfigurationPort,
     ):
         super().__init__(logger, error_handler)
         self._scheduler_service = scheduler_service
         self._generic_filter_service = generic_filter_service
+        self._config_port = config_port
 
     async def execute_query(
         self, query: ListSchedulerStrategiesQuery
@@ -48,8 +51,6 @@ class ListSchedulerStrategiesHandler(
         Returns:
             Scheduler strategies list response
         """
-        from orb.config.manager import ConfigurationManager
-
         scheduler_types = self._scheduler_service.get_available_schedulers()
 
         strategies = []
@@ -57,8 +58,7 @@ class ListSchedulerStrategiesHandler(
 
         if query.include_current:
             try:
-                config_manager = ConfigurationManager()
-                current_strategy = config_manager.get_scheduler_strategy()
+                current_strategy = self._config_port.get_scheduler_strategy()
             except Exception:
                 current_strategy = "unknown"
 
@@ -136,9 +136,11 @@ class GetSchedulerConfigurationHandler(
         logger: LoggingPort,
         error_handler: ErrorHandlingPort,
         scheduler_service: SchedulerRegistryService,
+        config_port: ConfigurationPort,
     ):
         super().__init__(logger, error_handler)
         self._scheduler_service = scheduler_service
+        self._config_port = config_port
 
     async def execute_query(
         self, query: GetSchedulerConfigurationQuery
@@ -152,15 +154,11 @@ class GetSchedulerConfigurationHandler(
         Returns:
             Scheduler configuration response
         """
-        from orb.config.manager import ConfigurationManager
-
-        config_manager = ConfigurationManager()
-
         if query.scheduler_name:
             scheduler_name = query.scheduler_name
-            is_active = scheduler_name == config_manager.get_scheduler_strategy()
+            is_active = scheduler_name == self._config_port.get_scheduler_strategy()
         else:
-            scheduler_name = config_manager.get_scheduler_strategy()
+            scheduler_name = self._config_port.get_scheduler_strategy()
             is_active = True
 
         # Check if scheduler is registered
@@ -171,7 +169,7 @@ class GetSchedulerConfigurationHandler(
         found = False
 
         try:
-            configuration = config_manager.app_config.scheduler.model_dump()
+            configuration = self._config_port.get_configuration_value("scheduler", {})
             found = True
         except Exception:
             configuration = {"error": "Failed to load scheduler configuration"}
@@ -196,9 +194,11 @@ class ValidateSchedulerConfigurationHandler(
         logger: LoggingPort,
         error_handler: ErrorHandlingPort,
         scheduler_service: SchedulerRegistryService,
+        config_port: ConfigurationPort,
     ):
         super().__init__(logger, error_handler)
         self._scheduler_service = scheduler_service
+        self._config_port = config_port
 
     async def execute_query(
         self, query: ValidateSchedulerConfigurationQuery
@@ -212,10 +212,6 @@ class ValidateSchedulerConfigurationHandler(
         Returns:
             Validation result
         """
-        from orb.config.manager import ConfigurationManager
-
-        config_manager = ConfigurationManager()
-
         errors = []
         warnings = []
 
@@ -223,7 +219,7 @@ class ValidateSchedulerConfigurationHandler(
             if query.scheduler_name:
                 scheduler_name = query.scheduler_name
             else:
-                scheduler_name = config_manager.get_scheduler_strategy()
+                scheduler_name = self._config_port.get_scheduler_strategy()
 
             # Check if scheduler is registered
             available_schedulers = self._scheduler_service.get_available_schedulers()
@@ -235,7 +231,7 @@ class ValidateSchedulerConfigurationHandler(
             # Try to create scheduler strategy
             try:
                 strategy = self._scheduler_service.create_scheduler_strategy(
-                    scheduler_name, config_manager
+                    scheduler_name, self._config_port
                 )
                 if strategy is None:
                     errors.append(f"Failed to create scheduler strategy '{scheduler_name}'")
@@ -244,8 +240,8 @@ class ValidateSchedulerConfigurationHandler(
 
             # Check configuration completeness
             try:
-                scheduler_config = config_manager.app_config.scheduler
-                if not scheduler_config.type:
+                scheduler_config = self._config_port.get_configuration_value("scheduler", {})
+                if isinstance(scheduler_config, dict) and not scheduler_config.get("type"):
                     warnings.append("Scheduler type not specified in configuration")
             except Exception as e:
                 errors.append(f"Configuration access failed: {e!s}")

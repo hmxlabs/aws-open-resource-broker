@@ -282,6 +282,22 @@ class DIContainer(DIContainerPort, CQRSHandlerRegistrationPort, ContainerPort):
                 "container_type": "modular",
             }
 
+    def validate_required_ports(self, required_types: list[type]) -> list[str]:
+        """Validate that all required port types are registered.
+
+        Args:
+            required_types: List of types that must be registered.
+
+        Returns:
+            List of error messages for missing registrations (empty = all present).
+        """
+        missing = [
+            t.__name__ for t in required_types if not self._service_registry.is_registered(t)
+        ]
+        if missing:
+            logger.warning("DI container missing required registrations: %s", missing)
+        return missing
+
 
 # Singleton container management
 _container_instance: Optional[DIContainer] = None
@@ -312,6 +328,17 @@ def _create_configured_container() -> DIContainer:
     from orb.infrastructure.di.services import register_all_services
 
     register_all_services(container)
+
+    # Validate required ports are registered at startup
+    from orb.application.ports.command_bus_port import CommandBusPort
+    from orb.application.ports.query_bus_port import QueryBusPort
+    from orb.domain.base.ports import ConfigurationPort, ContainerPort, LoggingPort
+
+    missing = container.validate_required_ports(
+        [LoggingPort, ConfigurationPort, ContainerPort, CommandBusPort, QueryBusPort]
+    )
+    if missing:
+        logger.warning("Container startup: missing required port registrations: %s", missing)
 
     logger.info("DI Container configured and ready")
     return container
