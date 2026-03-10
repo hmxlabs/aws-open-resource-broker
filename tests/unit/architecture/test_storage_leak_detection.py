@@ -53,9 +53,7 @@ _KNOWN_VIOLATIONS: frozenset[tuple[str, str]] = frozenset(
 )
 
 
-@pytest.mark.parametrize(
-    "filepath", _NON_STORAGE_FILES, ids=lambda p: str(p.relative_to(SRC_ORB))
-)
+@pytest.mark.parametrize("filepath", _NON_STORAGE_FILES, ids=lambda p: str(p.relative_to(SRC_ORB)))
 @pytest.mark.unit
 @pytest.mark.architecture
 def test_no_new_storage_leak(filepath: Path) -> None:

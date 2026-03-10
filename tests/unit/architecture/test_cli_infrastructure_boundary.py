@@ -38,9 +38,7 @@ _KNOWN_VIOLATIONS: frozenset[tuple[str, str]] = frozenset(
 )
 
 
-@pytest.mark.parametrize(
-    "filepath", _CLI_FILES, ids=lambda p: str(p.relative_to(SRC_ORB))
-)
+@pytest.mark.parametrize("filepath", _CLI_FILES, ids=lambda p: str(p.relative_to(SRC_ORB)))
 @pytest.mark.unit
 @pytest.mark.architecture
 def test_cli_has_no_new_infrastructure_import(filepath: Path) -> None:

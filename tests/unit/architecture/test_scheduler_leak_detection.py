@@ -46,10 +46,6 @@ def test_no_scheduler_leak(filepath: Path) -> None:
     rel = str(filepath.relative_to(SRC_ORB))
     imports = extract_imports(filepath)
     violations = [
-        imp
-        for imp in imports
-        if any(kw.lower() in imp.lower() for kw in _SCHEDULER_FORBIDDEN)
+        imp for imp in imports if any(kw.lower() in imp.lower() for kw in _SCHEDULER_FORBIDDEN)
     ]
-    assert violations == [], (
-        f"{rel} leaks scheduler internals: {violations}"
-    )
+    assert violations == [], f"{rel} leaks scheduler internals: {violations}"

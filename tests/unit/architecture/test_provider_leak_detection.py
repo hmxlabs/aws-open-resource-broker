@@ -53,14 +53,15 @@ _KNOWN_VIOLATIONS: frozenset[tuple[str, str]] = frozenset(
         ("infrastructure/storage/repository_migrator.py", "orb.providers.aws.storage.dynamodb"),
         ("infrastructure/adapters/provider_registry_adapter.py", "orb.providers.registry"),
         ("infrastructure/storage/dynamodb/registration.py", "orb.providers.aws.session_factory"),
-        ("infrastructure/storage/components/dynamodb_client_manager.py", "orb.providers.aws.session_factory"),
+        (
+            "infrastructure/storage/components/dynamodb_client_manager.py",
+            "orb.providers.aws.session_factory",
+        ),
     }
 )
 
 
-@pytest.mark.parametrize(
-    "filepath", _NON_PROVIDER_FILES, ids=lambda p: str(p.relative_to(SRC_ORB))
-)
+@pytest.mark.parametrize("filepath", _NON_PROVIDER_FILES, ids=lambda p: str(p.relative_to(SRC_ORB)))
 @pytest.mark.unit
 @pytest.mark.architecture
 def test_no_new_provider_leak(filepath: Path) -> None:

@@ -25,8 +25,19 @@ from tests.unit.architecture.conftest import (
 _COUNTS_FILE = Path(__file__).parent / "violation_counts.json"
 
 _TOP_PACKAGES = frozenset(
-    ["domain", "application", "infrastructure", "interface", "api", "cli",
-     "providers", "config", "mcp", "monitoring", "sdk"]
+    [
+        "domain",
+        "application",
+        "infrastructure",
+        "interface",
+        "api",
+        "cli",
+        "providers",
+        "config",
+        "mcp",
+        "monitoring",
+        "sdk",
+    ]
 )
 
 
@@ -37,6 +48,7 @@ def _load_ceilings() -> dict[str, int]:
 # ---------------------------------------------------------------------------
 # Counters
 # ---------------------------------------------------------------------------
+
 
 def _count_domain_forbidden() -> int:
     forbidden = ("orb.infrastructure", "orb.providers", "orb.interface", "orb.api", "orb.cli")
@@ -89,7 +101,11 @@ def _count_storage_leaks() -> int:
     fragments = ("boto3.dynamodb", "boto3.resources", "botocore.exceptions", "sqlalchemy")
     count = 0
     for f in collect_python_files(SRC_ORB):
-        if f.is_relative_to(storage_dir) or f.is_relative_to(providers_dir) or str(f) in EXCEPTION_PATHS:
+        if (
+            f.is_relative_to(storage_dir)
+            or f.is_relative_to(providers_dir)
+            or str(f) in EXCEPTION_PATHS
+        ):
             continue
         for imp in extract_imports(f):
             if any(imp == frag or imp.startswith(frag + ".") for frag in fragments):

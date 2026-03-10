@@ -36,6 +36,5 @@ def extract_imports(filepath: Path) -> list[str]:
 # Paths that are explicitly allowed to cross certain boundaries because they
 # perform DI wiring (registering concrete implementations against ports).
 EXCEPTION_PATHS: frozenset[str] = frozenset(
-    str(p)
-    for p in collect_python_files(SRC_ORB / "infrastructure" / "di")
+    str(p) for p in collect_python_files(SRC_ORB / "infrastructure" / "di")
 )
