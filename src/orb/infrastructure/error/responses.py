@@ -1,6 +1,6 @@
 """Error response DTOs and HTTP response formatting."""
 
-from datetime import datetime
+from datetime import datetime, timezone
 from http import HTTPStatus
 from typing import Any, Optional
 
@@ -31,7 +31,7 @@ class InfrastructureErrorResponse(BaseDTO):
     category: str = ErrorCategory.INTERNAL
     details: dict[str, Any] = Field(default_factory=dict)
     http_status: int = HTTPStatus.INTERNAL_SERVER_ERROR
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     @classmethod
     def from_domain_error(

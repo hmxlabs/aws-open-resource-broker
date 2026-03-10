@@ -1,6 +1,6 @@
 """Unit tests for request metadata value objects."""
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -37,15 +37,15 @@ class TestRequestTimeout:
 
     def test_expiry_time_is_future(self):
         t = RequestTimeout(seconds=3600)
-        assert t.expiry_time > datetime.utcnow()
+        assert t.expiry_time > datetime.now(timezone.utc)
 
     def test_is_expired_false_for_recent_start(self):
         t = RequestTimeout(seconds=3600)
-        assert t.is_expired(datetime.utcnow()) is False
+        assert t.is_expired(datetime.now(timezone.utc)) is False
 
     def test_is_expired_true_for_old_start(self):
         t = RequestTimeout(seconds=1)
-        old_start = datetime.utcnow() - timedelta(seconds=10)
+        old_start = datetime.now(timezone.utc) - timedelta(seconds=10)
         assert t.is_expired(old_start) is True
 
     def test_from_seconds(self):

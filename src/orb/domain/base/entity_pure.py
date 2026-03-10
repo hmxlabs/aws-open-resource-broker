@@ -1,7 +1,7 @@
 """Pure domain entities - foundation for all domain objects without infrastructure dependencies."""
 
 from abc import ABC, abstractmethod
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Optional, TypeVar
 
 T = TypeVar("T", bound="Entity")
@@ -26,8 +26,8 @@ class Entity(ABC):
             **kwargs: Additional attributes for subclasses
         """
         self.id = id
-        self.created_at = created_at or datetime.utcnow()
-        self.updated_at = updated_at or datetime.utcnow()
+        self.created_at = created_at or datetime.now(timezone.utc)
+        self.updated_at = updated_at or datetime.now(timezone.utc)
 
         # Store additional attributes for subclasses
         for key, value in kwargs.items():

@@ -583,6 +583,6 @@ class AWSOperations:
             try:
                 package_info = self._config_port.get_package_info()
                 return package_info.get("name", "open-resource-broker")
-            except Exception:
-                pass
+            except Exception as e:
+                self._logger.debug("Could not get package name from config port: %s", e)
         return "open-resource-broker"

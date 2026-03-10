@@ -118,7 +118,7 @@ def get_scripts_location() -> Path:
                 if scripts_dir is not None:
                     return scripts_dir
         except Exception:
-            pass
+            pass  # Best-effort: DI container may not be ready during installation detection
 
         from orb.config.platform_dirs import get_config_location
 

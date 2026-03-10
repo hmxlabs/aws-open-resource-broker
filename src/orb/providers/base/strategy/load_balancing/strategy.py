@@ -379,8 +379,8 @@ class LoadBalancingProviderStrategy(ProviderStrategy):
         for strategy in self._strategies.values():
             try:
                 strategy.cleanup()
-            except Exception:
-                pass
+            except Exception as e:
+                self._logger.warning("Error during cleanup of load-balanced strategy: %s", e)
         self._initialized = False
 
     def generate_provider_name(self, config: dict) -> str:

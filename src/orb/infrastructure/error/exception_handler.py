@@ -14,7 +14,7 @@ Follows DDD/SOLID/DRY principles while preserving domain exception semantics.
 
 import json
 import threading
-from datetime import datetime
+from datetime import datetime, timezone
 from http import HTTPStatus
 
 # Import for HTTP error handling delegation
@@ -132,7 +132,7 @@ class InfrastructureErrorResponse(BaseDTO):
     category: str = ErrorCategory.INTERNAL
     details: dict[str, Any] = Field(default_factory=dict)
     http_status: int = HTTPStatus.INTERNAL_SERVER_ERROR
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
     @classmethod
     def from_domain_error(
@@ -281,7 +281,7 @@ class ExceptionContext:
         """Initialize the instance."""
         self.operation = operation
         self.layer = layer
-        self.timestamp = datetime.utcnow()
+        self.timestamp = datetime.now(timezone.utc)
         self.thread_id = threading.get_ident()
         self.additional_context = additional_context
 
@@ -704,7 +704,7 @@ class ExceptionHandler:
                     "document_excerpt": exc.doc[:200] if exc.doc else None,
                     "context": context_str or "json_parsing",
                     "handler": "json_decode_error_handler",
-                    "timestamp": datetime.utcnow().isoformat(),
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
                     **kwargs,
                 },
                 error_code="INVALID_JSON",  # For backward compatibility
@@ -718,7 +718,7 @@ class ExceptionHandler:
                     "column_number": exc.colno,
                     "context": context_str or "request_processing",
                     "handler": "json_decode_error_handler",
-                    "timestamp": datetime.utcnow().isoformat(),
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
                     **kwargs,
                 },
             )
@@ -732,7 +732,7 @@ class ExceptionHandler:
                     "document_excerpt": exc.doc[:200] if exc.doc else None,
                     "context": context_str or "json_processing",
                     "handler": "json_decode_error_handler",
-                    "timestamp": datetime.utcnow().isoformat(),
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
                     **kwargs,
                 },
             )
@@ -748,7 +748,7 @@ class ExceptionHandler:
                 "error_type": type(exc).__name__,
                 "context": context or "network_operation",
                 "handler": "connection_error_handler",
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
                 **kwargs,
             },
         )
@@ -768,7 +768,7 @@ class ExceptionHandler:
                     "errno": exc.errno,
                     "context": context or "file_access",
                     "handler": "file_not_found_error_handler",
-                    "timestamp": datetime.utcnow().isoformat(),
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
                     **kwargs,
                 },
             )
@@ -781,7 +781,7 @@ class ExceptionHandler:
                     "errno": exc.errno,
                     "context": context or "file_operation",
                     "handler": "file_not_found_error_handler",
-                    "timestamp": datetime.utcnow().isoformat(),
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
                     **kwargs,
                 },
             )
@@ -797,7 +797,7 @@ class ExceptionHandler:
                 "error_type": type(exc).__name__,
                 "context": context or "value_validation",
                 "handler": "value_error_handler",
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
                 **kwargs,
             },
         )
@@ -813,7 +813,7 @@ class ExceptionHandler:
                 "missing_key": str(exc).strip("'\""),
                 "context": context or "key_access",
                 "handler": "key_error_handler",
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
                 **kwargs,
             },
         )
@@ -829,7 +829,7 @@ class ExceptionHandler:
                 "error_type": type(exc).__name__,
                 "context": context or "type_validation",
                 "handler": "type_error_handler",
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
                 **kwargs,
             },
         )
@@ -845,7 +845,7 @@ class ExceptionHandler:
                 "error_type": type(exc).__name__,
                 "context": context or "attribute_access",
                 "handler": "attribute_error_handler",
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
                 **kwargs,
             },
         )
@@ -867,7 +867,7 @@ class ExceptionHandler:
                 "error_type": type(exc).__name__,
                 "context": context_str or "generic_operation",
                 "handler": "generic_exception_handler",
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
                 **kwargs,
             },
         )

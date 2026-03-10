@@ -1,7 +1,8 @@
 """Adapter to bridge Provider Registry with ProviderPort interface."""
 
-from typing import Any
+from typing import Any, Optional
 
+from orb.domain.base.ports.logging_port import LoggingPort
 from orb.domain.base.ports.provider_port import ProviderPort
 from orb.domain.machine.aggregate import Machine
 from orb.domain.request.aggregate import Request
@@ -12,35 +13,45 @@ from orb.providers.registry import ProviderRegistry
 class ProviderRegistryAdapter(ProviderPort):
     """Adapter that wraps Provider Registry to implement ProviderPort interface."""
 
-    def __init__(self, registry: ProviderRegistry) -> None:
+    def __init__(self, registry: ProviderRegistry, logger: Optional[LoggingPort] = None) -> None:
         """Initialize adapter with Provider Registry."""
         self.registry = registry
+        self._logger = logger
 
     def provision_resources(self, request: Request) -> list[Machine]:
         """Provision resources using Provider Registry."""
-        # This would need to be implemented based on Provider Registry methods
-        # For now, return empty list to maintain interface compliance
-        return []
+        raise NotImplementedError(
+            "provision_resources must be called via a provider strategy, "
+            "not directly on ProviderRegistryAdapter"
+        )
 
     def terminate_resources(self, *args, **kwargs) -> None:
         """Terminate resources using Provider Registry."""
-        # Implementation would delegate to Provider Registry
-        pass
+        raise NotImplementedError(
+            "terminate_resources must be called via a provider strategy, "
+            "not directly on ProviderRegistryAdapter"
+        )
 
     def get_available_templates(self) -> list[Template]:
         """Get available templates using Provider Registry."""
-        # Implementation would delegate to Provider Registry
-        return []
+        raise NotImplementedError(
+            "get_available_templates must be called via a provider strategy, "
+            "not directly on ProviderRegistryAdapter"
+        )
 
     def validate_template(self, template: Template) -> bool:
         """Validate template using Provider Registry."""
-        # Implementation would delegate to Provider Registry
-        return True
+        raise NotImplementedError(
+            "validate_template must be called via a provider strategy, "
+            "not directly on ProviderRegistryAdapter"
+        )
 
     def get_resource_status(self, machine_ids: list[str]) -> dict[str, Any]:
         """Get resource status using Provider Registry."""
-        # Implementation would delegate to Provider Registry
-        return {}
+        raise NotImplementedError(
+            "get_resource_status must be called via a provider strategy, "
+            "not directly on ProviderRegistryAdapter"
+        )
 
     def available_strategies(self) -> list[str]:
         """Get available strategies from the Provider Registry."""
@@ -64,7 +75,9 @@ class ProviderRegistryAdapter(ProviderPort):
             elif self.registry.is_provider_registered(strategy_name):
                 return self.registry.get_or_create_strategy(strategy_name, {})
             return None
-        except Exception:
+        except Exception as e:
+            if self._logger:
+                self._logger.warning("Failed to get strategy '%s': %s", strategy_name, e)
             return None
 
     def discover_infrastructure(self, provider_config: dict[str, Any]) -> dict[str, Any]:

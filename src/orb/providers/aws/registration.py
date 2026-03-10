@@ -60,8 +60,8 @@ def create_aws_strategy(provider_config: Any) -> Any:
             from orb.infrastructure.di.container import get_container
 
             config_port = get_container().get(ConfigurationPort)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Could not get config port from DI container: %s", e)
 
         # Create AWS provider strategy
         strategy = AWSProviderStrategy(
