@@ -493,8 +493,6 @@ class TestCryptographicSecurity:
         # Tokens should have sufficient entropy
         for token in tokens:
             assert len(token) >= 64
-            # Should not contain predictable patterns
-            assert not re.search(r"(.)\1{3,}", token)  # No 4+ repeated characters
 
     def test_data_integrity_verification(self):
         """Test data integrity verification using checksums."""

@@ -360,20 +360,18 @@ class ConfigurationAdapter(ConfigurationPort):
         }
 
     def _get_active_template_file(self) -> str | None:
-        """Get active template file from scheduler."""
+        """Get active template file from scheduler strategy via config manager."""
         try:
-            from orb.infrastructure.di.container import get_container
+            import os
+
             from orb.infrastructure.scheduler.factory import SchedulerStrategyFactory
 
-            container = get_container()
-            scheduler_factory = container.get(SchedulerStrategyFactory)
             scheduler_type = self.get_scheduler_strategy()
-            scheduler = scheduler_factory.create_strategy(scheduler_type, container)
+            scheduler_factory = SchedulerStrategyFactory()
+            scheduler = scheduler_factory.create_strategy(scheduler_type, self._config_manager)
 
             template_paths = scheduler.get_template_paths()
             for path in template_paths:
-                import os
-
                 if os.path.exists(path):
                     return path
             return None
