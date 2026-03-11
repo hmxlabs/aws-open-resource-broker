@@ -5,7 +5,9 @@ from typing import Any, Optional
 from botocore.config import Config
 from botocore.exceptions import ClientError
 
-from orb.infrastructure.storage.components.resource_manager import StorageResourceManager as ResourceManager
+from orb.infrastructure.storage.components.resource_manager import (
+    StorageResourceManager as ResourceManager,
+)
 
 _DEFAULT_CONFIG = Config(
     connect_timeout=10,
