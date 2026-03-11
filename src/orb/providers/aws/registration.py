@@ -493,7 +493,11 @@ def register_aws_services_with_di(container) -> None:
         from orb.monitoring.health import HealthCheck
 
         container.register_singleton(
-            HealthCheck, lambda c: HealthCheck(config=c.get(ConfigurationManager).get_raw_config(), logger=logging.getLogger("orb.monitoring.health"))
+            HealthCheck,
+            lambda c: HealthCheck(
+                config=c.get(ConfigurationManager).get_raw_config(),
+                logger=logging.getLogger("orb.monitoring.health"),
+            ),
         )
         logger.debug("HealthCheck registered with DI container")
 
