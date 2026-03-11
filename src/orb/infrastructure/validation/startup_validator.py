@@ -135,9 +135,7 @@ class StartupValidator:
         """Check if default_config.json template exists."""
         from orb.config.services.path_resolution_service import PathResolutionService
 
-        resolved_path = PathResolutionService().resolve_file_path(
-            "template", "default_config.json"
-        )
+        resolved_path = PathResolutionService().resolve_file_path("template", "default_config.json")
 
         return Path(resolved_path).exists()
 
