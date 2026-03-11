@@ -229,6 +229,7 @@ class BaseSchedulerStrategy(SchedulerPort, ABC):
     def _get_path_resolver(self) -> "PathResolutionPort":
         if self._path_resolver is None:
             from orb.infrastructure.adapters.path_resolution_adapter import PathResolutionAdapter
+
             self._path_resolver = PathResolutionAdapter()
         return self._path_resolver
 

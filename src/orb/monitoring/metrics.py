@@ -1,6 +1,7 @@
 """Application metrics collection and monitoring."""
 
 import json
+
 # stdlib logging used intentionally: LoggingPort would create a monitoring->domain->infrastructure->monitoring cycle.
 import logging
 import threading

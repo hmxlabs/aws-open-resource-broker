@@ -222,9 +222,7 @@ class TemplateGenerationService:
         """Get the full path for templates file."""
         if self._path_resolver is not None:
             return Path(self._path_resolver.get_config_dir()) / filename
-        raise RuntimeError(
-            "PathResolutionPort not injected; cannot resolve templates file path"
-        )
+        raise RuntimeError("PathResolutionPort not injected; cannot resolve templates file path")
 
     def _write_templates_file(
         self, templates_file: Path, formatted_examples: List[Dict[str, Any]]
