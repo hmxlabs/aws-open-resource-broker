@@ -61,8 +61,12 @@ class TestInVirtualenv:
         """Mise executable outside prefix but not in .venv — should return False."""
         mise_exe = str(Path.home() / ".local/share/mise/installs/python/3.12/bin/python")
         with (
-            patch.object(sys, "prefix", str(Path.home() / ".local/share/mise/installs/python/3.12")),
-            patch.object(sys, "base_prefix", str(Path.home() / ".local/share/mise/installs/python/3.12")),
+            patch.object(
+                sys, "prefix", str(Path.home() / ".local/share/mise/installs/python/3.12")
+            ),
+            patch.object(
+                sys, "base_prefix", str(Path.home() / ".local/share/mise/installs/python/3.12")
+            ),
             patch.object(sys, "executable", mise_exe),
         ):
             # prefix == base_prefix, and executable has no .venv component

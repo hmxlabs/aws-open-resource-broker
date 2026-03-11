@@ -72,27 +72,21 @@ class TestResolveFilePath:
 
     def test_resolve_file_path_log_type_uses_logs_location(self, monkeypatch, tmp_path):
         """file_type='log' resolves via get_logs_location()."""
-        monkeypatch.setattr(
-            "orb.config.platform_dirs.get_logs_location", lambda: tmp_path / "logs"
-        )
+        monkeypatch.setattr("orb.config.platform_dirs.get_logs_location", lambda: tmp_path / "logs")
         svc = PathResolutionService()
         result = svc.resolve_file_path("log", "orb.log")
         assert result == str(tmp_path / "logs" / "orb.log")
 
     def test_resolve_file_path_work_type_uses_work_location(self, monkeypatch, tmp_path):
         """file_type='work' resolves via get_work_location()."""
-        monkeypatch.setattr(
-            "orb.config.platform_dirs.get_work_location", lambda: tmp_path / "work"
-        )
+        monkeypatch.setattr("orb.config.platform_dirs.get_work_location", lambda: tmp_path / "work")
         svc = PathResolutionService()
         result = svc.resolve_file_path("work", "state.json")
         assert result == str(tmp_path / "work" / "state.json")
 
     def test_resolve_file_path_events_type_uses_work_location(self, monkeypatch, tmp_path):
         """file_type='events' resolves via get_work_location()."""
-        monkeypatch.setattr(
-            "orb.config.platform_dirs.get_work_location", lambda: tmp_path / "work"
-        )
+        monkeypatch.setattr("orb.config.platform_dirs.get_work_location", lambda: tmp_path / "work")
         svc = PathResolutionService()
         result = svc.resolve_file_path("events", "events.json")
         assert result == str(tmp_path / "work" / "events.json")
@@ -127,9 +121,7 @@ class TestFindFileWithFallbacks:
         """Returns the path of the first candidate that exists on disk."""
         config_dir = tmp_path / "config"
         config_dir.mkdir()
-        monkeypatch.setattr(
-            "orb.config.platform_dirs.get_config_location", lambda: config_dir
-        )
+        monkeypatch.setattr("orb.config.platform_dirs.get_config_location", lambda: config_dir)
         present = config_dir / "present.json"
         present.write_text("{}")
 
@@ -137,15 +129,11 @@ class TestFindFileWithFallbacks:
         result = svc.find_file_with_fallbacks("conf", ["missing.json", "present.json"])
         assert result == str(present)
 
-    def test_find_file_with_fallbacks_returns_none_when_all_missing(
-        self, monkeypatch, tmp_path
-    ):
+    def test_find_file_with_fallbacks_returns_none_when_all_missing(self, monkeypatch, tmp_path):
         """Returns None when none of the candidates exist."""
         config_dir = tmp_path / "config"
         config_dir.mkdir()
-        monkeypatch.setattr(
-            "orb.config.platform_dirs.get_config_location", lambda: config_dir
-        )
+        monkeypatch.setattr("orb.config.platform_dirs.get_config_location", lambda: config_dir)
         svc = PathResolutionService()
         result = svc.find_file_with_fallbacks("conf", ["a.json", "b.json"])
         assert result is None
