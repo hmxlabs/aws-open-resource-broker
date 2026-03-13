@@ -48,7 +48,7 @@ def create_aws_strategy(provider_config: Any) -> Any:
             provider_instance_config = None
             provider_name = None
             # Create AWS configuration
-            aws_config = AWSProviderConfig(**config_data)
+            aws_config = AWSProviderConfig(**(config_data or {}))
 
         # Create a simple logger adapter for now
         # The DI container will inject the appropriate logger later if needed
