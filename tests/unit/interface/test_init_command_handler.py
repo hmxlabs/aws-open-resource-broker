@@ -34,14 +34,18 @@ def test_discover_infrastructure_uses_fresh_strategy():
 
     # get_provider_registry is imported locally inside _discover_infrastructure,
     # so patch it at the source package.
-    with patch(
-        "orb.providers.registry.provider_registry.ProviderRegistry",
-    ), patch(
-        "orb.providers.registry.get_provider_registry",
-        return_value=mock_registry,
-    ), patch(
-        "orb.interface.init_command_handler.get_container",
-        return_value=_mock_container(),
+    with (
+        patch(
+            "orb.providers.registry.provider_registry.ProviderRegistry",
+        ),
+        patch(
+            "orb.providers.registry.get_provider_registry",
+            return_value=mock_registry,
+        ),
+        patch(
+            "orb.interface.init_command_handler.get_container",
+            return_value=_mock_container(),
+        ),
     ):
         result = _mod._discover_infrastructure("aws", "us-east-1", "my-profile")
 
@@ -76,15 +80,23 @@ def test_interactive_setup_credentials_before_region():
         patch.object(
             _mod,
             "_get_available_schedulers",
-            return_value=[{"type": "default", "display_name": "Default", "description": "Default scheduler"}],
+            return_value=[
+                {"type": "default", "display_name": "Default", "description": "Default scheduler"}
+            ],
         ),
         patch.object(
             _mod,
             "_get_available_providers",
             return_value=[{"type": "aws", "display_name": "aws", "description": "AWS Provider"}],
         ),
-        patch.object(_mod, "_get_available_credential_sources", side_effect=fake_get_available_credential_sources),
-        patch.object(_mod, "_test_provider_credentials", side_effect=fake_test_provider_credentials),
+        patch.object(
+            _mod,
+            "_get_available_credential_sources",
+            side_effect=fake_get_available_credential_sources,
+        ),
+        patch.object(
+            _mod, "_test_provider_credentials", side_effect=fake_test_provider_credentials
+        ),
         patch.object(_mod, "_pick_region", side_effect=fake_pick_region),
         patch.object(_mod, "_get_provider_strategy", return_value=_make_strategy()),
         patch.object(_mod, "_discover_infrastructure", return_value={}),
@@ -123,7 +135,9 @@ def test_credentials_tested_without_region():
         patch.object(
             _mod,
             "_get_available_schedulers",
-            return_value=[{"type": "default", "display_name": "Default", "description": "Default scheduler"}],
+            return_value=[
+                {"type": "default", "display_name": "Default", "description": "Default scheduler"}
+            ],
         ),
         patch.object(
             _mod,
@@ -135,7 +149,9 @@ def test_credentials_tested_without_region():
             "_get_available_credential_sources",
             return_value=[{"name": "my-profile", "description": "My Profile"}],
         ),
-        patch.object(_mod, "_test_provider_credentials", side_effect=fake_test_provider_credentials),
+        patch.object(
+            _mod, "_test_provider_credentials", side_effect=fake_test_provider_credentials
+        ),
         patch.object(_mod, "_pick_region", side_effect=fake_pick_region),
         patch.object(_mod, "_get_provider_strategy", return_value=_make_strategy()),
         patch.object(_mod, "_discover_infrastructure", return_value={}),
@@ -143,5 +159,7 @@ def test_credentials_tested_without_region():
     ):
         _mod._interactive_setup()
 
-    assert test_creds_called_before_region, "test_credentials was not called before region was collected"
+    assert test_creds_called_before_region, (
+        "test_credentials was not called before region was collected"
+    )
     assert region_collected, "region was never collected"
