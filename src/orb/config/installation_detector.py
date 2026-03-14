@@ -70,15 +70,20 @@ def detect_installation_mode(package_name: str = "orb-py") -> Tuple[str, Optiona
         return "development", None
 
 
+def is_mise_install() -> bool:
+    """True if running under a mise-managed Python."""
+    return "/.local/share/mise/" in str(Path(sys.executable).resolve())
+
+
 def detect_install_mode() -> Literal[
-    "development", "editable", "user", "uv_tool", "system", "venv"
+    "development", "editable", "user", "uv_tool", "mise", "system", "venv"
 ]:
     """Detect installation mode, returning a canonical literal.
 
     Checks uv tool install first (before venv detection would misclassify it),
     then delegates to detect_installation_mode() for the remaining cases.
 
-    Returns one of: 'development', 'editable', 'user', 'uv_tool', 'system', 'venv'
+    Returns one of: 'development', 'editable', 'user', 'uv_tool', 'mise', 'system', 'venv'
     """
     import site
 
@@ -86,6 +91,10 @@ def detect_install_mode() -> Literal[
     # ~/.local/share/uv/tools/ — intercept before the venv branch fires.
     if "/.local/share/uv/tools/" in str(sys.prefix):
         return "uv_tool"
+
+    # mise-managed Python: executable resolves through ~/.local/share/mise/
+    if is_mise_install():
+        return "mise"
 
     # Standard venv: prefix differs from base_prefix.
     if sys.prefix != sys.base_prefix:

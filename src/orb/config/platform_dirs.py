@@ -37,7 +37,8 @@ def in_virtualenv() -> bool:
     except ValueError:
         # Executable is outside prefix — only treat as symlink-venv if the
         # executable path actually contains a .venv directory component.
-        # This excludes mise (~/.local/share/mise/...) and similar tools.
+        # This excludes mise (~/.local/share/mise/...) — handled by
+        # is_mise_install() in installation_detector.py.
         if ".venv" in executable_path.parts:
             return True
         return False
@@ -69,7 +70,7 @@ def get_config_location() -> Path:
     # 3. Delegate to unified install-mode detector
     mode = detect_install_mode()
 
-    if mode == "uv_tool":
+    if mode in ("uv_tool", "mise"):
         return Path.home() / ".orb" / "config"
 
     if mode == "venv":
