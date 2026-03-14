@@ -14,7 +14,9 @@ def _make_strategy(regions=None, default_region="us-east-1"):
     ]
     strategy.test_credentials.return_value = {"success": True}
     strategy.get_credential_requirements.return_value = {}
-    strategy.get_operational_requirements.return_value = {"region": {"required": True, "description": "AWS region"}}
+    strategy.get_operational_requirements.return_value = {
+        "region": {"required": True, "description": "AWS region"}
+    }
     return strategy
 
 
@@ -33,14 +35,18 @@ def test_discover_infrastructure_uses_fresh_strategy():
     mock_strategy.discover_infrastructure_interactive.return_value = {"vpc_id": "vpc-123"}
     mock_registry.create_strategy_by_type.return_value = mock_strategy
 
-    with patch(
-        "orb.providers.registry.provider_registry.ProviderRegistry",
-    ), patch(
-        "orb.providers.registry.get_provider_registry",
-        return_value=mock_registry,
-    ), patch(
-        "orb.interface.init_command_handler.get_container",
-        return_value=_mock_container(),
+    with (
+        patch(
+            "orb.providers.registry.provider_registry.ProviderRegistry",
+        ),
+        patch(
+            "orb.providers.registry.get_provider_registry",
+            return_value=mock_registry,
+        ),
+        patch(
+            "orb.interface.init_command_handler.get_container",
+            return_value=_mock_container(),
+        ),
     ):
         result = _mod._discover_infrastructure("aws", "us-east-1", "my-profile")
 
