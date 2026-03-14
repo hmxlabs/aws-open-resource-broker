@@ -1,8 +1,6 @@
 """Health check monitoring for the application."""
 
-import json
 import threading
-import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -29,7 +27,7 @@ class HealthCheckConfig:
     """Typed configuration for HealthCheck."""
 
     health_dir: Path
-    enabled: bool = True
+    enabled: bool = False
     interval_seconds: int = 60
 
 
@@ -75,10 +73,6 @@ class HealthCheck(HealthCheckPort):
 
         # Register default health checks
         self._register_default_checks()
-
-        # Start background health checker if enabled
-        if config.enabled:
-            self._start_health_checker()
 
     # --- HealthCheckPort implementation ---
 
@@ -152,57 +146,6 @@ class HealthCheck(HealthCheckPort):
         self.register_check("disk", self._check_disk_health)
         self.register_check("database", self._check_database_health)
         self.register_check("application", self._check_application_health)
-
-    def _start_health_checker(self) -> None:
-        """Start background health checker thread."""
-
-        def check_health() -> None:
-            """Run health checks periodically in background thread."""
-            while True:
-                try:
-                    results = {name: self._run_check_internal(name) for name in self.checks}
-
-                    # Write results to file
-                    health_file = self.health_dir / "health.json"
-                    with health_file.open("w") as f:
-                        json.dump(
-                            {name: status.to_dict() for name, status in results.items()},
-                            f,
-                            indent=2,
-                        )
-
-                    # Check for alerts
-                    self._check_alerts(results)
-
-                    time.sleep(self.config.interval_seconds)
-
-                except Exception as e:
-                    self._logger.error("Health checker error: %s", e, exc_info=True)
-                    time.sleep(5)  # Shorter sleep on error
-
-        thread = threading.Thread(target=check_health, daemon=True)
-        thread.start()
-
-    def _check_alerts(self, results: dict[str, HealthStatus]) -> None:
-        """Check health status for alerts."""
-        alerts = []
-        for name, status in results.items():
-            if status.status == "unhealthy":
-                alerts.append(
-                    {
-                        "check": name,
-                        "status": status.status,
-                        "details": status.details,
-                        "timestamp": status.timestamp.isoformat(),
-                    }
-                )
-
-        if alerts:
-            alert_file = self.health_dir / "alerts.json"
-            with alert_file.open("w") as f:
-                json.dump(alerts, f, indent=2)
-
-            self._logger.error("Health check alerts", extra={"alerts": alerts})
 
     def _check_system_health(self) -> HealthStatus:
         """Check system health."""
