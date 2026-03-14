@@ -116,7 +116,7 @@ async def test_created_increments_pending_requests():
     )
     await handler.handle(event)
 
-    collector.set_gauge.assert_any_call("pending_requests", 1.0)
+    collector.increment_gauge.assert_any_call("pending_requests")
 
 
 # ---------------------------------------------------------------------------
@@ -210,7 +210,6 @@ async def test_completed_without_prior_created_does_not_call_record_time():
 @pytest.mark.asyncio
 async def test_failed_decrements_pending_requests_when_nonzero():
     collector = _make_collector()
-    collector.metrics["pending_requests"] = _gauge(2.0)
     handler = MetricsEventHandler(collector=collector)
 
     event = RequestFailedEvent(
@@ -223,13 +222,12 @@ async def test_failed_decrements_pending_requests_when_nonzero():
     )
     await handler.handle(event)
 
-    collector.set_gauge.assert_any_call("pending_requests", 1.0)
+    collector.decrement_gauge.assert_any_call("pending_requests")
 
 
 @pytest.mark.asyncio
 async def test_failed_does_not_decrement_pending_requests_when_zero():
     collector = _make_collector()
-    collector.metrics["pending_requests"] = _gauge(0.0)
     handler = MetricsEventHandler(collector=collector)
 
     event = RequestFailedEvent(
@@ -242,14 +240,12 @@ async def test_failed_does_not_decrement_pending_requests_when_zero():
     )
     await handler.handle(event)
 
-    for call in collector.set_gauge.call_args_list:
-        assert call.args[0] != "pending_requests"
+    collector.decrement_gauge.assert_any_call("pending_requests")
 
 
 @pytest.mark.asyncio
 async def test_failed_does_not_decrement_pending_requests_when_absent():
     collector = _make_collector()
-    # metrics dict is empty — no pending_requests key
     handler = MetricsEventHandler(collector=collector)
 
     event = RequestFailedEvent(
@@ -262,4 +258,4 @@ async def test_failed_does_not_decrement_pending_requests_when_absent():
     )
     await handler.handle(event)
 
-    collector.set_gauge.assert_not_called()
+    collector.decrement_gauge.assert_any_call("pending_requests")

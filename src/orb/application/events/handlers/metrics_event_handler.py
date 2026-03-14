@@ -48,10 +48,7 @@ class MetricsEventHandler(EventHandler):
     def _handle_request_created(self, event: DomainEvent) -> None:
         request_id = getattr(event, "request_id", event.aggregate_id)
         self._request_start_times[request_id] = time.time()
-        # Increment pending_requests by 1 each time a request is created
-        current = self._collector.metrics.get("pending_requests")
-        new_value = (current.value + 1.0) if current is not None else 1.0
-        self._collector.set_gauge("pending_requests", new_value)
+        self._collector.increment_gauge("pending_requests")
 
     def _handle_request_completed(self, event: DomainEvent) -> None:
         self._collector.increment_counter("requests_total")
@@ -59,25 +56,17 @@ class MetricsEventHandler(EventHandler):
         machine_ids: list[str] = getattr(event, "machine_ids", [])
         self._collector.set_gauge("active_instances", float(len(machine_ids)))
 
-        # Record provisioning duration if we saw the corresponding created event
         request_id = getattr(event, "request_id", event.aggregate_id)
         start = self._request_start_times.pop(request_id, None)
         if start is not None:
             self._collector.record_time("provisioning_duration", time.time() - start)
 
-        # Decrement pending_requests
-        current = self._collector.metrics.get("pending_requests")
-        if current is not None and current.value > 0:
-            self._collector.set_gauge("pending_requests", current.value - 1.0)
+        self._collector.decrement_gauge("pending_requests")
 
     def _handle_request_failed(self, event: DomainEvent) -> None:
         self._collector.increment_counter("requests_failed_total")
 
-        # Clean up start time tracking
         request_id = getattr(event, "request_id", event.aggregate_id)
         self._request_start_times.pop(request_id, None)
 
-        # Decrement pending_requests
-        current = self._collector.metrics.get("pending_requests")
-        if current is not None and current.value > 0:
-            self._collector.set_gauge("pending_requests", current.value - 1.0)
+        self._collector.decrement_gauge("pending_requests")
