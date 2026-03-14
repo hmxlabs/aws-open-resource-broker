@@ -61,7 +61,7 @@ orb requests status <request-id>
 ### 4. Return machines when done
 
 ```bash
-orb machines return --request-id <request-id>
+orb machines return <machine-id-1> <machine-id-2> ...
 ```
 
 ## Setup
@@ -168,7 +168,7 @@ All available commands and flags.
 | `orb templates validate --file <file>` | Validate a template file |
 | `orb machines request <template-id> <n>` | Request n machines |
 | `orb machines list` | List active machines |
-| `orb machines return --request-id <id>` | Return machines from a request |
+| `orb machines return <machine-id> [...]` | Return one or more machines |
 | `orb requests status <request-id>` | Check request status |
 | `orb requests list` | List all requests |
 | `orb infrastructure show` | Show configured infrastructure |
