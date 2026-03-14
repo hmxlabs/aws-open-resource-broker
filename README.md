@@ -116,7 +116,11 @@ export ORB_CONFIG_DIR=/path/to/config
 
 | Variable | Description |
 |---|---|
-| `ORB_CONFIG_DIR` | Override config directory path |
+| `ORB_ROOT_DIR` | Set base directory for all subdirs (config, work, logs, health, scripts) |
+| `ORB_CONFIG_DIR` | Override config directory path (takes precedence over `ORB_ROOT_DIR`) |
+| `ORB_WORK_DIR` | Override work directory path (takes precedence over `ORB_ROOT_DIR`) |
+| `ORB_LOG_DIR` | Override logs directory path (takes precedence over `ORB_ROOT_DIR`) |
+| `ORB_HEALTH_DIR` | Override health directory path (takes precedence over `ORB_ROOT_DIR`) |
 | `ORB_LOG_LEVEL` | Logging level: `DEBUG`, `INFO`, `WARNING`, `ERROR` |
 
 See the [Configuration Guide](docs/root/user_guide/configuration.md) for path resolution details, environment variables, and REST API server setup.

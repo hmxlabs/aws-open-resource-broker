@@ -30,6 +30,8 @@ except ImportError:
 # stdlib logging used intentionally: LoggingPort would create a monitoring->domain->infrastructure->monitoring cycle.
 import logging
 
+from orb.config.platform_dirs import get_health_location
+
 
 @dataclass
 class HealthStatus:
@@ -64,7 +66,7 @@ class HealthCheck:
         self._lock = threading.Lock()
 
         # Create health check directory
-        self.health_dir = Path(self.config.get("HEALTH_DIR", "./health"))
+        self.health_dir = Path(self.config.get("HEALTH_DIR", get_health_location()))
         self.health_dir.mkdir(parents=True, exist_ok=True)
 
         # Register default health checks
