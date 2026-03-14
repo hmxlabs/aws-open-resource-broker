@@ -1,11 +1,12 @@
 """AWS-specific CLI argument specification."""
 
 import argparse
-import logging
 import re
 from typing import Any
 
-logger = logging.getLogger(__name__)
+from orb.infrastructure.logging.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 class AWSCLISpec:
