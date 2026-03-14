@@ -4,7 +4,23 @@ import logging
 import os
 from typing import Optional
 
+from orb.config.platform_dirs import (
+    get_config_location,
+    get_health_location,
+    get_logs_location,
+    get_work_location,
+)
+
 logger = logging.getLogger(__name__)
+
+_PLATFORM_DIRS_ROUTING: dict[str, object] = {
+    "work": get_work_location,
+    "conf": get_config_location,
+    "config": get_config_location,
+    "log": get_logs_location,
+    "logs": get_logs_location,
+    "health": get_health_location,
+}
 
 
 class ConfigPathResolver:
@@ -21,7 +37,7 @@ class ConfigPathResolver:
         Resolve configuration path with fallback logic.
 
         Args:
-            path_type: Type of path (work, conf, log, etc.)
+            path_type: Type of path (work, conf, log, health, etc.)
             default_path: Default path to use
             config_path: Optional override path
 
@@ -30,7 +46,10 @@ class ConfigPathResolver:
         """
         if config_path:
             path = config_path
-        # Use base config path if available
+        elif path_type in _PLATFORM_DIRS_ROUTING:
+            # Route known types through platform_dirs for ORB_ROOT_DIR support
+            platform_fn = _PLATFORM_DIRS_ROUTING[path_type]
+            path = str(platform_fn())  # type: ignore[operator]
         elif self._base_config_path:
             base_dir = os.path.dirname(os.path.dirname(self._base_config_path))
             path = os.path.join(base_dir, default_path)

@@ -6,6 +6,13 @@ import sys
 from pathlib import Path
 
 
+def _get_root_dir() -> Path | None:
+    """Return ORB_ROOT_DIR as a Path if set, else None."""
+    if root := os.environ.get("ORB_ROOT_DIR"):
+        return Path(root)
+    return None
+
+
 def in_virtualenv() -> bool:
     """Check if running in a virtual environment.
 
@@ -53,7 +60,11 @@ def get_config_location() -> Path:
     if env_dir := os.environ.get("ORB_CONFIG_DIR"):
         return Path(env_dir)
 
-    # 2. uv tool install: ~/.local/share/uv/tools/<name>/
+    # 2. ORB_ROOT_DIR
+    if root := _get_root_dir():
+        return root / "config"
+
+    # 3. uv tool install: ~/.local/share/uv/tools/<name>/
     #    Standard venv branch would fire (prefix != base_prefix) and return
     #    ~/.local/share/uv/tools/config/ — wrong. Intercept before venv check.
     if "/.local/share/uv/tools/" in str(sys.prefix):
@@ -95,7 +106,11 @@ def get_work_location() -> Path:
     if env_dir := os.environ.get("ORB_WORK_DIR"):
         return Path(env_dir)
 
-    # 2. Relative to config
+    # 2. ORB_ROOT_DIR
+    if root := _get_root_dir():
+        return root / "work"
+
+    # 3. Relative to config
     return get_config_location().parent / "work"
 
 
@@ -105,10 +120,39 @@ def get_logs_location() -> Path:
     if env_dir := os.environ.get("ORB_LOG_DIR"):
         return Path(env_dir)
 
-    # 2. Relative to config
+    # 2. ORB_ROOT_DIR
+    if root := _get_root_dir():
+        return root / "logs"
+
+    # 3. Relative to config
     return get_config_location().parent / "logs"
 
 
 def get_scripts_location() -> Path:
     """Get basic scripts directory location for bootstrap."""
+    # 1. ORB_ROOT_DIR
+    if root := _get_root_dir():
+        return root / "scripts"
+
+    # 2. Relative to config
     return get_config_location().parent / "scripts"
+
+
+def get_health_location() -> Path:
+    """Get health check directory location.
+
+    Precedence:
+    1. ORB_HEALTH_DIR env var
+    2. ORB_ROOT_DIR/health
+    3. Sibling of config dir (get_config_location().parent / 'health')
+    """
+    # 1. Environment override
+    if env_dir := os.environ.get("ORB_HEALTH_DIR"):
+        return Path(env_dir)
+
+    # 2. ORB_ROOT_DIR
+    if root := _get_root_dir():
+        return root / "health"
+
+    # 3. Sibling of config dir
+    return get_config_location().parent / "health"
