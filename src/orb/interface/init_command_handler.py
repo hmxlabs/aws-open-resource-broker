@@ -191,23 +191,9 @@ def _interactive_setup() -> Dict[str, Any]:
         console.info("[3/4] Provider Configuration")
         console.separator(char="-", color="cyan")
 
-        # Get credential requirements
-        requirements = _get_credential_requirements(provider_type)
+        provider_config: Dict[str, Any] = {"type": provider_type}
 
-        # Collect required parameters first (e.g., region)
-        strategy = _get_provider_strategy(provider_type)
-        regions = strategy.get_available_regions() if strategy is not None else []
-        default_region = strategy.get_default_region() if strategy is not None else ""
-        provider_config = {"type": provider_type}
-        for param, info in requirements.items():
-            if info.get("required"):
-                if param == "region":
-                    provider_config[param] = _pick_region(regions, default_region)
-                else:
-                    prompt = f"  {info['description']}: "
-                    provider_config[param] = input(prompt).strip()
-
-        # Get available credential sources
+        # Step 1: credentials first
         credential_sources = _get_available_credential_sources(provider_type)
 
         console.info("")
@@ -221,12 +207,10 @@ def _interactive_setup() -> Dict[str, Any]:
         except (ValueError, IndexError):
             selected_source = None
 
-        # Test credentials
+        # Step 2: test credentials (region not needed yet)
         console.info("")
         console.info("Testing credentials...")
-        success, error_msg = _test_provider_credentials(
-            provider_type, selected_source, **provider_config
-        )
+        success, error_msg = _test_provider_credentials(provider_type, selected_source)
         if success:
             console.success("Credentials verified successfully")
             if selected_source:
@@ -236,9 +220,14 @@ def _interactive_setup() -> Dict[str, Any]:
             console.error(f"        {error_msg}")
             return {}
 
-        # Extract final values for backward compatibility
-        region = provider_config.get("region") or default_region
         profile = provider_config.get("profile") or None
+
+        # Step 3: ask for region
+        strategy = _get_provider_strategy(provider_type)
+        regions = strategy.get_available_regions() if strategy is not None else []
+        default_region = strategy.get_default_region() if strategy is not None else ""
+        region = _pick_region(regions, default_region)
+        provider_config["region"] = region
 
         console.info("")
         console.separator(char="-", color="cyan")
@@ -346,22 +335,9 @@ def _configure_additional_provider() -> Optional[Dict[str, Any]]:
         console.info("Provider Configuration")
         console.separator(char="-", color="cyan")
 
-        # Get credential requirements
-        requirements = _get_credential_requirements(provider_type)
+        provider_config: Dict[str, Any] = {"type": provider_type}
 
-        strategy = _get_provider_strategy(provider_type)
-        regions = strategy.get_available_regions() if strategy is not None else []
-        default_region = strategy.get_default_region() if strategy is not None else ""
-        provider_config = {"type": provider_type}
-        for param, info in requirements.items():
-            if info.get("required"):
-                if param == "region":
-                    provider_config[param] = _pick_region(regions, default_region)
-                else:
-                    prompt = f"  {info['description']}: "
-                    provider_config[param] = input(prompt).strip()
-
-        # Get available credential sources
+        # Step 1: credentials first
         credential_sources = _get_available_credential_sources(provider_type)
 
         console.info("")
@@ -375,12 +351,10 @@ def _configure_additional_provider() -> Optional[Dict[str, Any]]:
         except (ValueError, IndexError):
             selected_source = None
 
-        # Test credentials
+        # Step 2: test credentials (region not needed yet)
         console.info("")
         console.info("Testing credentials...")
-        success, error_msg = _test_provider_credentials(
-            provider_type, selected_source, **provider_config
-        )
+        success, error_msg = _test_provider_credentials(provider_type, selected_source)
         if success:
             console.success("Credentials verified successfully")
             if selected_source:
@@ -388,6 +362,15 @@ def _configure_additional_provider() -> Optional[Dict[str, Any]]:
         else:
             console.error(f"Authentication failed: {error_msg}")
             return None
+
+        # Step 3: ask for region
+        strategy = _get_provider_strategy(provider_type)
+        regions = strategy.get_available_regions() if strategy is not None else []
+        default_region = strategy.get_default_region() if strategy is not None else ""
+        region = _pick_region(regions, default_region)
+        provider_config["region"] = region
+
+        profile = provider_config.get("profile") or None
 
         # Infrastructure discovery
         console.info("")
@@ -397,8 +380,6 @@ def _configure_additional_provider() -> Optional[Dict[str, Any]]:
 
         infrastructure_defaults = {}
         if discover_choice in ["y", "yes"]:
-            region = provider_config.get("region") or default_region
-            profile = provider_config.get("profile") or None
             infrastructure_defaults = _discover_infrastructure(provider_type, region, profile)
 
         return {
@@ -519,8 +500,8 @@ def _discover_infrastructure(
         # Create provider config for discovery
         provider_config = {"region": region, "profile": profile}
 
-        # Get strategy from registry
-        strategy = registry.get_or_create_strategy(provider_type, provider_config)
+        # Get strategy from registry — bypass cache so discovery uses the correct region/profile
+        strategy = registry.create_strategy_by_type(provider_type, provider_config)
 
         # Check if provider strategy supports infrastructure discovery
         if hasattr(strategy, "discover_infrastructure_interactive"):
