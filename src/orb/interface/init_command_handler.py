@@ -697,5 +697,3 @@ def _copy_scripts(scripts_dir: Path):
         logger.warning(f"Failed to copy scripts: {e}", exc_info=True)
 
 
-def _get_installed_scripts_path():
-    """Get scripts path for installed package using proper scheme detection."""
