@@ -16,7 +16,7 @@ def register_monitoring_services(container) -> None:
     """
 
     def _create_health_check(c) -> HealthCheck:
-        config = HealthCheckConfig(health_dir=get_health_location())
+        config = HealthCheckConfig(health_dir=get_health_location(), enabled=False)
         return HealthCheck(
             config=config,
             logger=logging.getLogger("orb.monitoring.health"),
