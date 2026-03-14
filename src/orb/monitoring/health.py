@@ -15,11 +15,8 @@ except ImportError:
     PSUTIL_AVAILABLE = False
     psutil = None
 
-# stdlib logging used intentionally: LoggingPort would create a
-# monitoring->domain->infrastructure->monitoring circular dependency.
-import logging
-
 from orb.domain.base.ports.health_check_port import HealthCheckPort
+from orb.domain.base.ports.logging_port import LoggingPort
 
 
 @dataclass
@@ -58,18 +55,36 @@ class HealthCheck(HealthCheckPort):
     def __init__(
         self,
         config: HealthCheckConfig,
-        logger: logging.Logger | None = None,
+        logger: LoggingPort | None = None,
     ) -> None:
         """Initialize health check."""
-        self._logger = logger or logging.getLogger(__name__)
+        self._logger = logger
         self.config = config
         self.checks: dict[str, Callable[[], HealthStatus]] = {}
         self.status_history: dict[str, list[HealthStatus]] = {}
         self._lock = threading.Lock()
 
-        # Create health check directory
+        # Create health check directory with PermissionError fallbacks
         self.health_dir = config.health_dir
-        self.health_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            self.health_dir.mkdir(parents=True, exist_ok=True)
+        except PermissionError:
+            if self._logger:
+                self._logger.warning(
+                    "Permission denied creating health dir %s, falling back to ~/.orb/work/health",
+                    self.health_dir,
+                )
+            self.health_dir = Path.home() / ".orb" / "work" / "health"
+            try:
+                self.health_dir.mkdir(parents=True, exist_ok=True)
+            except PermissionError:
+                import tempfile
+                if self._logger:
+                    self._logger.warning(
+                        "Permission denied creating health dir %s, falling back to tempdir",
+                        self.health_dir,
+                    )
+                self.health_dir = Path(tempfile.mkdtemp(prefix="orb-health-"))
 
         # Register default health checks
         self._register_default_checks()
@@ -132,7 +147,8 @@ class HealthCheck(HealthCheckPort):
                     self.status_history[name].pop(0)
             return status
         except Exception as e:
-            self._logger.error("Health check %s failed: %s", name, e, exc_info=True)
+            if self._logger:
+                self._logger.error("Health check %s failed: %s", name, e, exc_info=True)
             return HealthStatus(
                 name=name,
                 status="unhealthy",

@@ -1,9 +1,8 @@
 """Monitoring service registrations for dependency injection."""
 
-import logging
-
 from orb.config.platform_dirs import get_health_location
 from orb.domain.base.ports.health_check_port import HealthCheckPort
+from orb.domain.base.ports.logging_port import LoggingPort
 from orb.monitoring.health import HealthCheck, HealthCheckConfig
 
 
@@ -18,7 +17,7 @@ def register_monitoring_services(container) -> None:
         config = HealthCheckConfig(health_dir=get_health_location(), enabled=False)
         return HealthCheck(
             config=config,
-            logger=logging.getLogger("orb.monitoring.health"),
+            logger=c.get(LoggingPort),
         )
 
     container.register_singleton(HealthCheckPort, _create_health_check)

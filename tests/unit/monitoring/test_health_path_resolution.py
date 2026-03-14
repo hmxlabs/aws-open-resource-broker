@@ -45,7 +45,7 @@ def test_orb_root_dir_flows_through_to_health_check(
     monkeypatch.setenv("ORB_ROOT_DIR", "/myroot")
     monkeypatch.delenv("ORB_HEALTH_DIR", raising=False)
     hc = _make_health_check()
-    assert hc.health_dir == Path("/myroot/health")
+    assert hc.health_dir == Path("/myroot/work/health")
 
 
 def test_orb_health_dir_flows_through_to_health_check(
