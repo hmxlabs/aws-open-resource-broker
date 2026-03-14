@@ -1,6 +1,5 @@
 """Configuration path resolution utilities."""
 
-import logging
 import os
 from typing import Optional
 
@@ -10,8 +9,9 @@ from orb.config.platform_dirs import (
     get_logs_location,
     get_work_location,
 )
+from orb.infrastructure.logging.logger import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 _PLATFORM_DIRS_ROUTING: dict[str, object] = {
     "work": get_work_location,

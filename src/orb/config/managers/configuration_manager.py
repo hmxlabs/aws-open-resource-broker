@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import json
-import logging
 import time
 from typing import TYPE_CHECKING, Any, Dict, Optional, TypeVar
 
 # Import config classes for runtime use
 from orb.config.schemas import AppConfig
 from orb.domain.base.exceptions import ConfigurationError
+from orb.infrastructure.logging.logger import get_logger
 
 from .cache_manager import ConfigCacheManager
 from .path_resolver import ConfigPathResolver
@@ -21,7 +21,7 @@ if TYPE_CHECKING:
     from orb.config.schemas.provider_strategy_schema import ProviderConfig
 
 T = TypeVar("T")
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class ConfigurationManager:
