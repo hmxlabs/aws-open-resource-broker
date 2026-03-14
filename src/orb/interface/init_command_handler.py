@@ -216,7 +216,9 @@ def _interactive_setup() -> Dict[str, Any]:
         # Step 3: test credentials (no region yet)
         console.info("")
         console.info("Testing credentials...")
-        success, error_msg = _test_provider_credentials(provider_type, selected_source, **provider_config)
+        success, error_msg = _test_provider_credentials(
+            provider_type, selected_source, **provider_config
+        )
         if success:
             console.success("Credentials verified successfully")
             if selected_source:
@@ -374,7 +376,9 @@ def _configure_additional_provider() -> Optional[Dict[str, Any]]:
         # Step 3: test credentials (no region yet)
         console.info("")
         console.info("Testing credentials...")
-        success, error_msg = _test_provider_credentials(provider_type, selected_source, **provider_config)
+        success, error_msg = _test_provider_credentials(
+            provider_type, selected_source, **provider_config
+        )
         if success:
             console.success("Credentials verified successfully")
             if selected_source:
