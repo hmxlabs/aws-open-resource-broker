@@ -116,14 +116,14 @@ def test_health_per_dir_env_wins(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_health_root_dir_used_when_no_per_dir(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("ORB_HEALTH_DIR", raising=False)
     monkeypatch.setenv("ORB_ROOT_DIR", "/root")
-    assert get_health_location() == Path("/root/health")
+    assert get_health_location() == Path("/root/work/health")
 
 
 def test_health_sibling_of_config_when_no_root(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("ORB_HEALTH_DIR", raising=False)
     monkeypatch.delenv("ORB_ROOT_DIR", raising=False)
     monkeypatch.setenv("ORB_CONFIG_DIR", "/some/config")
-    assert get_health_location() == Path("/some/health")
+    assert get_health_location() == Path("/some/work/health")
 
 
 def test_health_fallback_returns_path(monkeypatch: pytest.MonkeyPatch) -> None:
