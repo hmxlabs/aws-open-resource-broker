@@ -49,18 +49,25 @@ def is_system_install() -> bool:
 
 def get_config_location() -> Path:
     """Get basic configuration directory location for bootstrap."""
-    # 1. Environment override
+    # 1. Explicit config dir override
     if env_dir := os.environ.get("ORB_CONFIG_DIR"):
         return Path(env_dir)
 
-    # 2. uv tool install: ~/.local/share/uv/tools/<name>/
+    # 2. Root dir override → root/config
+    if root_dir := os.environ.get("ORB_ROOT_DIR"):
+        return Path(root_dir) / "config"
+
+    # 3. uv tool install: ~/.local/share/uv/tools/<name>/
     #    Standard venv branch would fire (prefix != base_prefix) and return
     #    ~/.local/share/uv/tools/config/ — wrong. Intercept before venv check.
     if "/.local/share/uv/tools/" in str(sys.prefix):
-        return Path.home() / ".local" / "orb" / "config"
+        return Path.home() / ".orb" / "config"
 
-    # 3. Virtual environment (check BEFORE user install)
+    # 4. Virtual environment (check BEFORE user install)
     if in_virtualenv():
+        # mise-managed Python: executable under ~/.local/share/mise/
+        if "/.local/share/mise/" in str(Path(sys.executable)):
+            return Path.home() / ".orb" / "config"
         # For symlink venvs (project .venv), use executable's grandparent's sibling
         # For standard venvs, use sys.prefix parent
         if sys.prefix != sys.base_prefix:
@@ -71,54 +78,75 @@ def get_config_location() -> Path:
             # .parent = .venv/bin, .parent = .venv, .parent = parent dir
             return Path(sys.executable).parent.parent.parent / "config"
 
-    # 3. Development mode
+    # 5. Development mode
     cwd = Path.cwd()
     for parent in [cwd] + list(cwd.parents):
         if (parent / "pyproject.toml").exists():
             return parent / "config"
 
-    # 4. User installation
+    # 6. User installation
     if is_user_install():
-        return Path.home() / ".local" / "orb" / "config"
+        return Path.home() / ".orb" / "config"
 
-    # 5. System installation
+    # 7. System installation
     if is_system_install():
         return Path(sys.prefix) / "orb" / "config"
 
-    # 6. Fallback
+    # 8. Fallback
     return cwd / "config"
 
 
 def get_work_location() -> Path:
     """Get basic work directory location for bootstrap."""
-    # 1. Environment override
+    # 1. Explicit work dir override
     if env_dir := os.environ.get("ORB_WORK_DIR"):
         return Path(env_dir)
 
-    # 2. Relative to config
+    # 2. Root dir override → root/work
+    if root_dir := os.environ.get("ORB_ROOT_DIR"):
+        return Path(root_dir) / "work"
+
+    # 3. Relative to config
     return get_config_location().parent / "work"
 
 
 def get_logs_location() -> Path:
     """Get basic logs directory location for bootstrap."""
-    # 1. Environment override
+    # 1. Explicit logs dir override
     if env_dir := os.environ.get("ORB_LOG_DIR"):
         return Path(env_dir)
 
-    # 2. Relative to config
+    # 2. Root dir override → root/logs
+    if root_dir := os.environ.get("ORB_ROOT_DIR"):
+        return Path(root_dir) / "logs"
+
+    # 3. Relative to config
     return get_config_location().parent / "logs"
 
 
 def get_scripts_location() -> Path:
     """Get basic scripts directory location for bootstrap."""
+    # 1. Explicit scripts dir override
+    if env_dir := os.environ.get("ORB_SCRIPTS_DIR"):
+        return Path(env_dir)
+
+    # 2. Root dir override → root/scripts
+    if root_dir := os.environ.get("ORB_ROOT_DIR"):
+        return Path(root_dir) / "scripts"
+
+    # 3. Relative to config
     return get_config_location().parent / "scripts"
 
 
 def get_health_location() -> Path:
     """Get health check directory location."""
-    # 1. Environment override via ORB_ROOT_DIR
+    # 1. Explicit health dir override
+    if env_dir := os.environ.get("ORB_HEALTH_DIR"):
+        return Path(env_dir)
+
+    # 2. Root dir override → root/work/health
     if root_dir := os.environ.get("ORB_ROOT_DIR"):
         return Path(root_dir) / "work" / "health"
 
-    # 2. Fallback: relative to work location
+    # 3. Relative to work location
     return get_work_location() / "health"
