@@ -3,8 +3,9 @@ SDK usage example for Open Resource Broker.
 
 Covers the full lifecycle:
   1. list_templates        — browse available compute templates
+  1.5. template CRUD       — create, validate, update, and delete a template
   2. create_request        — submit a provisioning request
-  3. wait_for_request      — poll until terminal status (fulfilled/failed/cancelled)
+  3. wait_for_request      — poll until terminal status (complete/partial/failed/cancelled/timeout)
   4. extract machine IDs   — read machine IDs from result["machines"]
   5. create_return_request — submit a return request with those machine IDs
   6. wait_for_return       — poll until return reaches terminal status
@@ -194,6 +195,55 @@ async def demo_list_templates(sdk) -> list:
         return []
 
 
+async def demo_template_crud(sdk) -> None:
+    """Demonstrate template create, validate, update, and delete."""
+    print("\n[1.5] Template CRUD demo...")
+    template_id = "sdk-demo-tmpl"
+
+    # Step 1: create
+    print(f"    [1.5.1] Creating template '{template_id}'...")
+    try:
+        result = await sdk.create_template(
+            template_id=template_id,
+            provider_api="EC2Fleet",
+            image_id="ami-0abcdef1234567890",
+            name="SDK Demo Template",
+            instance_type="t3.medium",
+        )
+        print(f"    create_template -> {result}")
+    except MethodExecutionError as e:
+        print(f"    create_template failed: {e.message}")
+        return
+
+    # Step 2: validate
+    print(f"    [1.5.2] Validating template '{template_id}'...")
+    try:
+        result = await sdk.validate_template(template_id=template_id)
+        print(f"    validate_template -> {result}")
+    except MethodExecutionError as e:
+        print(f"    validate_template failed: {e.message}")
+
+    # Step 3: update
+    print(f"    [1.5.3] Updating template '{template_id}'...")
+    try:
+        result = await sdk.update_template(
+            template_id=template_id,
+            name="SDK Demo Template (updated)",
+            instance_type="t3.large",
+        )
+        print(f"    update_template -> {result}")
+    except MethodExecutionError as e:
+        print(f"    update_template failed: {e.message}")
+
+    # Step 4: delete (clean up)
+    print(f"    [1.5.4] Deleting template '{template_id}'...")
+    try:
+        result = await sdk.delete_template(template_id=template_id)
+        print(f"    delete_template -> {result}")
+    except MethodExecutionError as e:
+        print(f"    delete_template failed: {e.message}")
+
+
 async def demo_request_machines(sdk, template_id: str, count: int, dry_run: bool) -> str | None:
     """Request machines and return the request_id, or None on failure."""
     print(f"\n[2] Requesting {count} machine(s) from template '{template_id}'...")
@@ -228,7 +278,7 @@ async def demo_wait_for_request(sdk, request_id: str) -> dict | None:
     print(f"\n[3] Waiting for request '{request_id}' to complete...")
     try:
         # wait_for_request polls every poll_interval seconds until the request
-        # reaches a terminal status (fulfilled, partially_fulfilled, failed, cancelled)
+        # reaches a terminal status (complete, partial, failed, cancelled)
         # or timeout expires (raises TimeoutError).
         final = await sdk.wait_for_request(
             request_id,
@@ -396,6 +446,10 @@ async def main() -> int:
 
             # Step 1: list templates
             templates = await demo_list_templates(sdk)
+
+            # Step 1.5: template CRUD (modifies state — skipped in dry-run)
+            if not args.dry_run:
+                await demo_template_crud(sdk)
 
             # Resolve template to use
             template_id = args.template
