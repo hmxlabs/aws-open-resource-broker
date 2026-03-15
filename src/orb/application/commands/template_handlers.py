@@ -67,8 +67,13 @@ class CreateTemplateHandler(BaseCommandHandler[CreateTemplateCommand, None]):  #
 
             template_port = self._container.get(TemplateConfigurationPort)
 
-            # Validate template configuration
-            validation_errors = template_port.validate_template_config(command.configuration)
+            # Validate template configuration — merge command fields with extra config
+            validation_errors = template_port.validate_template_config({
+                "template_id": command.template_id,
+                "provider_api": command.provider_api,
+                "image_id": command.image_id,
+                **command.configuration,
+            })
             if validation_errors:
                 self.logger.warning(
                     "Template validation failed for %s: %s",
