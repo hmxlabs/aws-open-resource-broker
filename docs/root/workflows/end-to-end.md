@@ -19,12 +19,256 @@ This guide walks through the complete machine lifecycle — from initialization 
 | Status | Terminal | Description |
 |--------|----------|-------------|
 | `pending` | No | Request received, not yet processed |
-| `running` | No | Machines are being provisioned |
-| `fulfilled` | Yes | All machines provisioned successfully |
-| `partially_fulfilled` | Yes | Some machines provisioned |
+| `in_progress` | No | Machines are being provisioned |
+| `complete` | Yes | All machines provisioned successfully |
+| `partial` | Yes | Some machines provisioned |
 | `failed` | Yes | Provisioning failed |
 | `cancelled` | Yes | Request was cancelled |
-| `returned` | Yes | Machines have been returned |
+
+---
+
+## Configuration
+
+### orb init
+
+`orb init` creates `~/.config/orb/config.json` (or the platform equivalent) and writes scheduler, provider, region, credentials, and discovered infrastructure defaults.
+
+**Interactive wizard** (recommended for first-time setup):
+
+```bash
+orb init
+```
+
+**Non-interactive** (for scripted or CI environments):
+
+```bash
+# Minimal — ORB discovers subnet/security-group IDs from AWS
+orb init --non-interactive --provider aws --region us-east-1 --profile myprofile
+
+# Explicit infrastructure IDs — skips AWS discovery
+orb init --non-interactive --provider aws --region us-east-1 \
+  --subnet-ids subnet-abc,subnet-def \
+  --security-group-ids sg-123
+
+# Reinitialize over an existing config
+orb init --force
+```
+
+The resulting config file looks like:
+
+```json
+{
+  "scheduler": {"type": "default"},
+  "provider": {
+    "providers": [
+      {
+        "name": "aws_myprofile_us-east-1",
+        "type": "aws",
+        "enabled": true,
+        "config": {"profile": "myprofile", "region": "us-east-1"},
+        "default": true,
+        "template_defaults": {
+          "subnet_ids": ["subnet-abc", "subnet-def"],
+          "security_group_ids": ["sg-123"]
+        }
+      }
+    ]
+  }
+}
+```
+
+**Inspect and edit config after init:**
+
+```bash
+orb config show                        # print current config
+orb config get provider                # get a single key
+orb config set scheduler.type default  # set a single key
+orb config validate                    # validate current config
+orb config validate --file /path/to/config.json  # validate a specific file
+```
+
+### SDK config modes
+
+The SDK supports four initialization modes:
+
+```python
+from orb import ORBClient as orb
+
+# Mode 1 — default: reads env vars (ORB_CONFIG_FILE, ORB_PROVIDER, ORB_REGION, …)
+#           or built-in defaults
+async with orb() as sdk: ...
+
+# Mode 2 — SDK config dict: tune provider, region, timeout, log_level, etc.
+async with orb(config={"provider": "aws", "region": "us-west-2"}) as sdk: ...
+
+# Mode 3 — config file on disk
+async with orb(config_path="/etc/orb/config.json") as sdk: ...
+
+# Mode 4 — full app config in memory (Lambda, CI, notebooks — no filesystem)
+app_cfg = {
+    "scheduler": {"type": "default"},
+    "provider": {
+        "providers": [
+            {"name": "default", "type": "aws", "enabled": True,
+             "config": {"region": "us-east-1"}, "default": True}
+        ]
+    }
+}
+async with orb(app_config=app_cfg) as sdk: ...
+```
+
+### REST API and MCP
+
+Neither the REST API nor the MCP server exposes config endpoints. Configuration must be set via `orb init` or a config file before starting the server.
+
+---
+
+## Template Management
+
+### CLI
+
+```bash
+# List all templates (optionally filter by provider API)
+orb templates list
+orb templates list --provider-api EC2Fleet
+
+# Inspect a single template
+orb templates show my-tmpl
+
+# Create from a JSON file
+orb templates create --file template.json
+orb templates create --file template.json --validate-only  # dry-run validation
+
+# Update fields from a JSON file (only keys present in the file are changed)
+orb templates update my-tmpl --file changes.json
+
+# Delete (--force skips confirmation prompt)
+orb templates delete my-tmpl
+orb templates delete my-tmpl --force
+
+# Validate an existing template or a file
+orb templates validate my-tmpl
+orb templates validate --file template.json
+
+# Generate a starter template scaffold
+orb templates generate
+orb templates generate --provider-api EC2Fleet
+orb templates generate --provider-specific   # include provider-specific fields
+orb templates generate --generic             # minimal provider-agnostic scaffold
+
+# Refresh the template cache
+orb templates refresh
+```
+
+### SDK
+
+All template methods are auto-discovered via CQRS.
+
+```python
+async with orb() as sdk:
+    # List templates
+    result = await sdk.list_templates(active_only=True)
+    # -> list of template dicts
+
+    # Get a single template
+    tmpl = await sdk.get_template(template_id="my-tmpl")
+    # -> template dict
+
+    # Create a template (template_id, provider_api, image_id are required)
+    result = await sdk.create_template(
+        template_id="my-tmpl",
+        provider_api="EC2Fleet",
+        image_id="ami-0abcdef1234567890",
+        name="My Template",
+        instance_type="t3.medium",
+        subnet_ids=["subnet-abc"],
+        security_group_ids=["sg-123"],
+        tags={"env": "dev"},
+    )
+    # -> {"created": True}
+    # -> {"created": False, "validation_errors": ["..."]}  on failure
+
+    # Validate a template
+    result = await sdk.validate_template(template_id="my-tmpl")
+    # -> {"valid": True, "validation_errors": []}
+
+    # Update fields (only supplied kwargs are changed)
+    result = await sdk.update_template(
+        template_id="my-tmpl",
+        name="Updated Name",
+        instance_type="t3.large",
+    )
+    # -> {"updated": True}
+    # -> {"updated": False, "validation_errors": ["..."]}  on failure
+
+    # Delete a template
+    result = await sdk.delete_template(template_id="my-tmpl")
+    # -> {"deleted": True}
+
+    # Refresh the template cache
+    await sdk.refresh_templates()
+```
+
+### REST API
+
+```bash
+# List templates
+curl -s http://localhost:8000/api/v1/templates/ | jq .
+
+# Filter by provider API
+curl -s "http://localhost:8000/api/v1/templates/?provider_api=EC2Fleet" | jq .
+
+# Get a single template
+curl -s http://localhost:8000/api/v1/templates/my-tmpl | jq .
+
+# Create a template
+curl -s -X POST http://localhost:8000/api/v1/templates/ \
+  -H "Content-Type: application/json" \
+  -d '{
+    "template_id": "my-tmpl",
+    "provider_api": "EC2Fleet",
+    "image_id": "ami-0abcdef1234567890",
+    "name": "My Template",
+    "instance_type": "t3.medium",
+    "subnet_ids": ["subnet-abc"],
+    "security_group_ids": ["sg-123"],
+    "tags": {"env": "dev"}
+  }'
+
+# Update a template (only supplied fields are changed)
+curl -s -X PUT http://localhost:8000/api/v1/templates/my-tmpl \
+  -H "Content-Type: application/json" \
+  -d '{"name": "Updated Name", "instance_type": "t3.large"}'
+
+# Delete a template
+curl -s -X DELETE http://localhost:8000/api/v1/templates/my-tmpl
+
+# Validate a template config
+curl -s -X POST http://localhost:8000/api/v1/templates/validate \
+  -H "Content-Type: application/json" \
+  -d '{"template_id": "my-tmpl", "provider_api": "EC2Fleet", "image_id": "ami-0abcdef1234567890"}'
+
+# Refresh the template cache
+curl -s -X POST http://localhost:8000/api/v1/templates/refresh
+```
+
+### MCP
+
+The MCP server exposes read-only template tools only. There are no create, update, or delete tools.
+
+```json
+{"name": "list_templates", "arguments": {}}
+```
+
+```json
+{"name": "get_template", "arguments": {"template_id": "my-tmpl"}}
+```
+
+```json
+{"name": "validate_template", "arguments": {"template_id": "my-tmpl"}}
+```
+
+To create, update, or delete templates from an MCP-driven workflow, use the REST API or CLI directly.
 
 ---
 
@@ -59,7 +303,7 @@ while true; do
   STATUS=$(orb requests status "$REQUEST_ID" --format json | jq -r '.status')
   echo "Status: $STATUS"
   case "$STATUS" in
-    fulfilled|partially_fulfilled|failed|cancelled)
+    complete|partial|failed|cancelled)
       break
       ;;
   esac
@@ -85,7 +329,7 @@ while true; do
   STATUS=$(orb requests status "$RETURN_ID" --format json | jq -r '.status')
   echo "Return status: $STATUS"
   case "$STATUS" in
-    returned|failed|cancelled)
+    complete|failed|cancelled)
       break
       ;;
   esac
@@ -197,7 +441,7 @@ http://localhost:8000/api/v1
 curl -s http://localhost:8000/api/v1/templates | jq .
 
 # 2. Request machines
-curl -s -X POST http://localhost:8000/api/v1/machines \
+curl -s -X POST http://localhost:8000/api/v1/machines/request \
   -H "Content-Type: application/json" \
   -d '{"template_id": "aws-basic", "count": 3}'
 # Response includes request_id, e.g.: "req-abc123"
@@ -207,10 +451,10 @@ REQUEST_ID="req-abc123"
 
 while true; do
   RESPONSE=$(curl -s "http://localhost:8000/api/v1/requests/${REQUEST_ID}")
-  STATUS=$(echo "$RESPONSE" | jq -r '.data.status')
+  STATUS=$(echo "$RESPONSE" | jq -r '.status')
   echo "Status: $STATUS"
   case "$STATUS" in
-    fulfilled|partially_fulfilled|failed|cancelled)
+    complete|partial|failed|cancelled)
       break
       ;;
   esac
@@ -219,7 +463,7 @@ done
 
 # 4. Extract machine IDs
 MACHINE_IDS=$(curl -s "http://localhost:8000/api/v1/requests/${REQUEST_ID}" \
-  | jq -r '.data.machines[].machine_id')
+  | jq -r '.machines[].machine_id')
 
 # 5. Return machines
 curl -s -X POST http://localhost:8000/api/v1/machines/return \
@@ -232,10 +476,10 @@ RETURN_ID="ret-xyz789"
 
 while true; do
   STATUS=$(curl -s "http://localhost:8000/api/v1/requests/${RETURN_ID}" \
-    | jq -r '.data.status')
+    | jq -r '.status')
   echo "Return status: $STATUS"
   case "$STATUS" in
-    returned|failed|cancelled)
+    complete|failed|cancelled)
       break
       ;;
   esac
@@ -296,7 +540,7 @@ Call `get_request_status` repeatedly until the status is terminal:
 }
 ```
 
-Repeat until `status` is one of: `fulfilled`, `partially_fulfilled`, `failed`, `cancelled`.
+Repeat until `status` is one of: `complete`, `partial`, `failed`, `cancelled`.
 
 ### 4. Return machines
 
@@ -304,8 +548,7 @@ Repeat until `status` is one of: `fulfilled`, `partially_fulfilled`, `failed`, `
 {
   "name": "return_machines",
   "arguments": {
-    "template_id": "aws-basic",
-    "count": 3
+    "machine_ids": ["machine-1", "machine-2", "machine-3"]
   }
 }
 ```
@@ -321,7 +564,7 @@ Repeat until `status` is one of: `fulfilled`, `partially_fulfilled`, `failed`, `
 }
 ```
 
-Repeat until `status` is `returned`, `failed`, or `cancelled`.
+Repeat until `status` is `complete`, `failed`, or `cancelled`.
 
 ---
 
