@@ -5,7 +5,7 @@ from typing import Any, cast
 
 from orb.domain.base.ports.configuration_port import ConfigurationPort
 from orb.domain.base.ports.console_port import ConsolePort
-from orb.domain.base.ports.scheduler_port import SchedulerPort
+from orb.application.ports.scheduler_port import SchedulerPort
 from orb.infrastructure.di.container import get_container
 
 
