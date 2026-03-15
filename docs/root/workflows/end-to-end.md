@@ -31,7 +31,20 @@ This guide walks through the complete machine lifecycle — from initialization 
 
 ### orb init
 
-`orb init` creates `~/.config/orb/config.json` (or the platform equivalent) and writes scheduler, provider, region, credentials, and discovered infrastructure defaults.
+`orb init` writes `config.json` and `default_config.json` into the ORB config directory. The config directory location depends on how ORB is installed:
+
+| Install type | Config directory |
+|---|---|
+| uv tool install | `~/.orb/config/` |
+| mise-managed Python | `~/.orb/config/` |
+| User install (`pip install --user`) | `~/.orb/config/` |
+| Standard virtualenv | `<venv-parent>/config/` |
+| System install (`/usr` or `/opt`) | `<sys.prefix>/orb/config/` |
+| Development (pyproject.toml found) | `<project-root>/config/` |
+| `ORB_CONFIG_DIR` env var | value of `ORB_CONFIG_DIR` |
+| `ORB_ROOT_DIR` env var | `$ORB_ROOT_DIR/config/` |
+
+Run `orb config show` to see the exact path in use.
 
 **Interactive wizard** (recommended for first-time setup):
 
