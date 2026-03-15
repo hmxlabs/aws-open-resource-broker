@@ -49,6 +49,7 @@ class TestAPIHandlerInitialization:
         handler = RequestMachinesRESTHandler(
             query_bus=self.query_bus,
             command_bus=self.command_bus,
+            scheduler_strategy=self.scheduler_strategy,
             logger=self.logger,
             error_handler=self.error_handler,
             metrics=self.metrics,
@@ -56,6 +57,7 @@ class TestAPIHandlerInitialization:
 
         assert handler._query_bus == self.query_bus
         assert handler._command_bus == self.command_bus
+        assert handler._scheduler_strategy == self.scheduler_strategy
         assert handler.logger == self.logger
         assert handler.error_handler == self.error_handler
         assert handler._metrics_collector == self.metrics
