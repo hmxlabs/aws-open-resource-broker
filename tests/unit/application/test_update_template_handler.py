@@ -30,7 +30,7 @@ def _make_template(**kwargs) -> Template:
 def _make_uow_factory(template: Template):
     mock_uow = Mock()
     mock_uow.templates.get_by_id.return_value = template
-    mock_uow.templates.update = Mock()
+    mock_uow.templates.save = Mock()
     mock_uow.commit = Mock()
     mock_uow.__enter__ = Mock(return_value=mock_uow)
     mock_uow.__exit__ = Mock(return_value=False)
@@ -66,7 +66,7 @@ async def test_update_instance_type():
     command = UpdateTemplateCommand(template_id="tpl-1", instance_type="t3.large")
     await handler.handle(command)
 
-    saved = mock_uow.templates.update.call_args[0][0]
+    saved = mock_uow.templates.save.call_args[0][0]
     assert saved.instance_type == "t3.large"
     assert command.updated is True
 
@@ -81,7 +81,7 @@ async def test_update_image_id():
     command = UpdateTemplateCommand(template_id="tpl-1", image_id="ami-123")
     await handler.handle(command)
 
-    saved = mock_uow.templates.update.call_args[0][0]
+    saved = mock_uow.templates.save.call_args[0][0]
     assert saved.image_id == "ami-123"
     assert command.updated is True
 
@@ -97,7 +97,7 @@ async def test_update_name_immutable_pattern():
     command = UpdateTemplateCommand(template_id="tpl-1", name="new-name")
     await handler.handle(command)
 
-    saved = mock_uow.templates.update.call_args[0][0]
+    saved = mock_uow.templates.save.call_args[0][0]
     assert saved.name == "new-name"
     assert saved is not template  # immutable — a new instance was produced
 
@@ -112,5 +112,5 @@ async def test_update_skips_none_instance_type():
     command = UpdateTemplateCommand(template_id="tpl-1", instance_type=None)
     await handler.handle(command)
 
-    saved = mock_uow.templates.update.call_args[0][0]
+    saved = mock_uow.templates.save.call_args[0][0]
     assert saved.instance_type == "t3.medium"
