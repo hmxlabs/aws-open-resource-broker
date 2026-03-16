@@ -248,6 +248,8 @@ class TemplateDefaultsService(TemplateDefaultsPort):
                     clean_field = (
                         field.replace("default_", "") if field.startswith("default_") else field
                     )
+                    if clean_field == "max_number":
+                        clean_field = "max_instances"
                     global_defaults[clean_field] = config_dict[field]
 
             return global_defaults
@@ -337,7 +339,8 @@ class TemplateDefaultsService(TemplateDefaultsPort):
             effective_defaults = self.get_effective_template_defaults(provider_instance_name)
 
             # Validate essential fields have defaults
-            essential_fields = ["provider_api", "price_type", "max_number"]
+            # TODO: Check this didn't break AWS, used to be max_number
+            essential_fields = ["provider_api", "price_type", "max_instances"]
             for field in essential_fields:
                 if field not in effective_defaults:
                     validation_result["warnings"].append(

@@ -55,6 +55,8 @@ dependencies = [
     "requests>=2.31.0",
     "PyYAML>=6.0.0", # Exported API (lazy-loaded)
     "jsonschema>=4.17.0",
+    "azure-core>=1.38.2",
+    "mgmt>=0.11.0",
 ]
 
 [project.optional-dependencies]
@@ -260,6 +262,15 @@ dev = [
     "pip-tools>=7.3.0,<8.0.0",
     "twine>=4.0.0",
     "git-changelog>=2.6.0,<3.0.0",
+    "azure-mgmt-authorization>=4.0.0",
+    "azure-mgmt-compute>=37.2.0",
+    "azure-mgmt-monitor>=7.0.0",
+    "azure-mgmt-msi>=7.1.0",
+    "azure-mgmt-network>=30.2.0",
+    "azure-mgmt-resource>=25.0.0",
+    "azure-mgmt-resource-subscriptions>=1.0.0b1",
+    "azure-identity>=1.25.2",
+    "pytest>=9.0.2",
 ]
 [project.scripts]
 orb = "orb.run:cli_main"

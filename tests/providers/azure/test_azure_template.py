@@ -1,0 +1,324 @@
+"""Tests for the Azure domain template aggregate and value objects."""
+
+import pytest
+
+from providers.azure.domain.template.azure_template_aggregate import AzureTemplate
+from providers.azure.domain.template.value_objects import (
+    AzureAllocationStrategy,
+    AzureCachingType,
+    AzureDataDisk,
+    AzureEvictionPolicy,
+    AzureImageReference,
+    AzureNetworkConfig,
+    AzureOSDiskConfig,
+    AzureOSDiskType,
+    AzurePriority,
+    AzureProviderApi,
+    AzureSecurityType,
+    AzureVMSSOrchestrationMode,
+)
+
+
+# ---------------------------------------------------------------------------
+# Required fields
+# ---------------------------------------------------------------------------
+
+_BASE_FIELDS = {
+    "template_id": "test-template",
+    "vm_size": "Standard_D4s_v5",
+    "resource_group": "test-rg",
+    "location": "eastus2",
+    "ssh_public_keys": ["ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQC7 test@host"],
+}
+
+
+# ---------------------------------------------------------------------------
+# AzureTemplate basic construction
+# ---------------------------------------------------------------------------
+
+
+class TestAzureTemplateConstruction:
+    def test_minimal_template(self):
+        t = AzureTemplate(**_BASE_FIELDS)
+        assert t.template_id == "test-template"
+        assert t.vm_size == "Standard_D4s_v5"
+        assert t.resource_group == "test-rg"
+        assert t.location == "eastus2"
+        assert t.provider_type == "azure"
+        assert t.provider_api == AzureProviderApi.VMSS
+
+    def test_rejects_missing_ssh_keys(self):
+        """SSH access is required — no password fallback (mirrors AWS key_name pattern)."""
+        fields = {**_BASE_FIELDS}
+        fields.pop("ssh_public_keys", None)
+        with pytest.raises(ValueError, match="SSH access is required"):
+            AzureTemplate(**fields)
+
+    def test_rejects_empty_ssh_keys_without_key_name(self):
+        """Empty ssh_public_keys without ssh_key_name should be rejected."""
+        fields = {**_BASE_FIELDS, "ssh_public_keys": []}
+        with pytest.raises(ValueError, match="SSH access is required"):
+            AzureTemplate(**fields)
+
+    def test_ssh_key_name_accepted(self):
+        """ssh_key_name alone (without inline keys) should pass validation."""
+        fields = {
+            "template_id": "test-template",
+            "vm_size": "Standard_D4s_v5",
+            "resource_group": "test-rg",
+            "location": "eastus2",
+            "ssh_key_name": "my-azure-ssh-key",
+        }
+        t = AzureTemplate(**fields)
+        assert t.ssh_key_name == "my-azure-ssh-key"
+        assert t.ssh_public_keys == []
+
+    def test_with_image(self):
+        t = AzureTemplate(
+            **_BASE_FIELDS,
+            image={
+                "publisher": "Canonical",
+                "offer": "0001-com-ubuntu-server-jammy",
+                "sku": "22_04-lts-gen2",
+                "version": "latest",
+            },
+        )
+        assert t.image is not None
+        assert t.image.publisher == "Canonical"
+
+    def test_with_custom_image_id(self):
+        t = AzureTemplate(
+            **_BASE_FIELDS,
+            image={"image_id": "/subscriptions/.../images/my-image"},
+        )
+        assert t.image.image_id is not None
+
+    def test_provider_type_forced_to_azure(self):
+        t = AzureTemplate(**_BASE_FIELDS, provider_type="wrong")
+        assert t.provider_type == "azure"
+
+    def test_from_azure_format(self):
+        data = {
+            **_BASE_FIELDS,
+            "vmSize": "Standard_D2s_v5",
+        }
+        data.pop("vm_size")
+        t = AzureTemplate.from_azure_format(data)
+        assert t.vm_size == "Standard_D2s_v5"
+
+
+# ---------------------------------------------------------------------------
+# Spot / priority validation
+# ---------------------------------------------------------------------------
+
+
+class TestSpotValidation:
+    def test_spot_sets_defaults(self):
+        t = AzureTemplate(**_BASE_FIELDS, priority="Spot")
+        assert t.eviction_policy == AzureEvictionPolicy.DEALLOCATE
+        assert t.spot_allocation_strategy == AzureAllocationStrategy.CAPACITY_OPTIMIZED
+
+    def test_regular_rejects_eviction_policy(self):
+        with pytest.raises(ValueError, match="eviction_policy"):
+            AzureTemplate(**_BASE_FIELDS, priority="Regular", eviction_policy="Delete")
+
+    def test_regular_rejects_billing_max_price(self):
+        with pytest.raises(ValueError, match="billing_profile_max_price"):
+            AzureTemplate(**_BASE_FIELDS, priority="Regular", billing_profile_max_price=1.0)
+
+
+# ---------------------------------------------------------------------------
+# Security validation
+# ---------------------------------------------------------------------------
+
+
+class TestSecurityValidation:
+    def test_trusted_launch_defaults(self):
+        t = AzureTemplate(
+            **_BASE_FIELDS,
+            security_type="TrustedLaunch",
+        )
+        assert t.secure_boot_enabled is True
+        assert t.vtpm_enabled is True
+
+
+# ---------------------------------------------------------------------------
+# Zone validation
+# ---------------------------------------------------------------------------
+
+
+class TestZoneValidation:
+    def test_zone_balance_requires_zones(self):
+        with pytest.raises(ValueError, match="zone_balance"):
+            AzureTemplate(**_BASE_FIELDS, zone_balance=True)
+
+    def test_zone_balance_with_zones(self):
+        t = AzureTemplate(**_BASE_FIELDS, zone_balance=True, zones=["1", "2"])
+        assert t.zone_balance is True
+
+    def test_overprovision_rejected_for_flexible(self):
+        with pytest.raises(ValueError, match="overprovision"):
+            AzureTemplate(
+                **_BASE_FIELDS,
+                orchestration_mode=AzureVMSSOrchestrationMode.FLEXIBLE,
+                overprovision=True,
+            )
+
+    def test_overprovision_allowed_for_uniform(self):
+        t = AzureTemplate(
+            **_BASE_FIELDS,
+            orchestration_mode=AzureVMSSOrchestrationMode.UNIFORM,
+            overprovision=True,
+        )
+        assert t.overprovision is True
+
+
+# ---------------------------------------------------------------------------
+# ARM payload generation
+# ---------------------------------------------------------------------------
+
+
+class TestArmPayload:
+    def test_basic_arm_payload(self):
+        t = AzureTemplate(
+            **_BASE_FIELDS,
+            image={
+                "publisher": "Canonical",
+                "offer": "0001-com-ubuntu-server-jammy",
+                "sku": "22_04-lts-gen2",
+                "version": "latest",
+            },
+        )
+        arm = t.to_azure_api_format()
+
+        assert arm["type"] == "Microsoft.Compute/virtualMachineScaleSets"
+        assert arm["location"] == "eastus2"
+        assert arm["sku"]["name"] == "Standard_D4s_v5"
+        assert "virtualMachineProfile" in arm["properties"]
+
+    def test_flexible_network_payload_uses_internal_network_api_version(self):
+        t = AzureTemplate(
+            **_BASE_FIELDS,
+            network_config={"subnet_id": "/subscriptions/.../subnets/default"},
+        )
+
+        arm = t.to_azure_api_format()
+
+        assert (
+            arm["properties"]["virtualMachineProfile"]["networkProfile"]["networkApiVersion"]
+            == "2022-11-01"
+        )
+
+    def test_spot_arm_payload(self):
+        t = AzureTemplate(
+            **_BASE_FIELDS,
+            priority="Spot",
+            billing_profile_max_price=-1.0,
+            image={
+                "publisher": "Canonical",
+                "offer": "0001-com-ubuntu-server-jammy",
+                "sku": "22_04-lts-gen2",
+                "version": "latest",
+            },
+        )
+        arm = t.to_azure_api_format()
+        vm_profile = arm["properties"]["virtualMachineProfile"]
+        assert vm_profile["priority"] == "Spot"
+        assert vm_profile["billingProfile"]["maxPrice"] == -1.0
+
+    def test_vmss_mix_payload_uses_sku_profile(self):
+        t = AzureTemplate(
+            **_BASE_FIELDS,
+            vm_sizes=["Standard_D8s_v5", "Standard_D16s_v5"],
+            priority="Spot",
+            spot_allocation_strategy=AzureAllocationStrategy.CAPACITY_OPTIMIZED,
+        )
+        arm = t.to_azure_api_format()
+
+        assert arm["sku"]["name"] == "Mix"
+        assert arm["skuProfile"]["vmSizes"] == [
+            {"name": "Standard_D4s_v5"},
+            {"name": "Standard_D8s_v5"},
+            {"name": "Standard_D16s_v5"},
+        ]
+        assert arm["skuProfile"]["allocationStrategy"] == "CapacityOptimized"
+        assert "vmSizeProperties" not in arm["properties"]["virtualMachineProfile"]["hardwareProfile"]
+
+    def test_zones_in_arm_payload(self):
+        t = AzureTemplate(
+            **_BASE_FIELDS,
+            zones=["1", "2", "3"],
+        )
+        arm = t.to_azure_api_format()
+        assert arm["zones"] == ["1", "2", "3"]
+
+    def test_identity_in_arm_payload(self):
+        t = AzureTemplate(
+            **_BASE_FIELDS,
+            system_assigned_identity=True,
+            user_assigned_identity_ids=["/subscriptions/.../identities/my-id"],
+        )
+        arm = t.to_azure_api_format()
+        assert arm["identity"]["type"] == "SystemAssigned, UserAssigned"
+
+
+# ---------------------------------------------------------------------------
+# Value objects
+# ---------------------------------------------------------------------------
+
+
+class TestValueObjects:
+    def test_image_reference_marketplace(self):
+        img = AzureImageReference(
+            publisher="Canonical",
+            offer="0001-com-ubuntu-server-jammy",
+            sku="22_04-lts-gen2",
+        )
+        arm = img.to_arm_dict()
+        assert arm["publisher"] == "Canonical"
+        assert arm["version"] == "latest"
+
+    def test_image_reference_custom(self):
+        img = AzureImageReference(image_id="/subscriptions/.../images/myimg")
+        arm = img.to_arm_dict()
+        assert arm["id"] == "/subscriptions/.../images/myimg"
+
+    def test_image_reference_requires_one_source(self):
+        with pytest.raises(ValueError):
+            AzureImageReference()
+
+    def test_os_disk_config(self):
+        disk = AzureOSDiskConfig(
+            disk_size_gb=128,
+            storage_account_type=AzureOSDiskType.PREMIUM_LRS,
+        )
+        arm = disk.to_arm_dict()
+        assert arm["diskSizeGB"] == 128
+        assert arm["managedDisk"]["storageAccountType"] == "Premium_LRS"
+
+    def test_data_disk(self):
+        dd = AzureDataDisk(lun=0, disk_size_gb=256)
+        arm = dd.to_arm_dict()
+        assert arm["lun"] == 0
+        assert arm["diskSizeGB"] == 256
+        assert arm["createOption"] == "Empty"
+
+    def test_network_config(self):
+        nc = AzureNetworkConfig(subnet_id="/subscriptions/.../subnets/default")
+        arm = nc.to_arm_dict()
+        assert arm["properties"]["primary"] is True
+        assert arm["properties"]["ipConfigurations"][0]["properties"]["subnet"]["id"] == (
+            "/subscriptions/.../subnets/default"
+        )
+
+    def test_allocation_strategy_from_core(self):
+        from domain.base.value_objects import AllocationStrategy
+
+        mapped = AzureAllocationStrategy.from_core(AllocationStrategy.LOWEST_PRICE)
+        assert mapped == AzureAllocationStrategy.LOWEST_PRICE
+
+    def test_priority_from_price_type(self):
+        from domain.base.value_objects import PriceType
+
+        mapped = AzurePriority.from_price_type(PriceType.SPOT)
+        assert mapped == AzurePriority.SPOT
