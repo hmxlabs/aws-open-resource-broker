@@ -117,12 +117,13 @@ def _get_available_schedulers() -> list[dict[str, str]]:
     return schedulers
 
 
-def _get_available_providers() -> list[dict[str, str]]:
+def _get_available_providers(registry: Any = None) -> list[dict[str, str]]:
     """Get available providers from provider registry."""
     try:
-        from orb.providers.registry import get_provider_registry
+        if registry is None:
+            from orb.domain.base.ports.provider_registry_port import ProviderRegistryPort
 
-        registry = get_provider_registry()
+            registry = get_container().get(ProviderRegistryPort)
         registered_types = registry.get_registered_providers()
 
         providers = []
@@ -431,12 +432,13 @@ def _configure_additional_provider() -> Optional[Dict[str, Any]]:
         return None
 
 
-def _get_provider_strategy(provider_type: str) -> Optional[Any]:
+def _get_provider_strategy(provider_type: str, registry: Any = None) -> Optional[Any]:
     """Get a lightweight provider strategy instance for credential/region queries."""
     try:
-        from orb.providers.registry import get_provider_registry
+        if registry is None:
+            from orb.domain.base.ports.provider_registry_port import ProviderRegistryPort
 
-        registry = get_provider_registry()
+            registry = get_container().get(ProviderRegistryPort)
         registry.ensure_provider_type_registered(provider_type)
         return registry.get_or_create_strategy(provider_type)
     except Exception:
@@ -627,23 +629,11 @@ def _write_config_file(config_file: Path, user_config: Dict[str, Any]):
         provider_type = provider_data["type"]
 
         # Generate provider name
-        strategy = None
-        try:
-            from orb.providers.factory import ProviderStrategyFactory
+        import re
 
-            container = get_container()
-            factory = container.get(ProviderStrategyFactory)
-
-            temp_config = {"type": provider_type, **provider_config}
-            strategy = factory.create_strategy(provider_type, temp_config)  # type: ignore[attr-defined]
-            provider_name = strategy.generate_provider_name(provider_config)
-        except Exception:
-            # Fallback to simple name generation
-            import re
-
-            profile_for_name = provider_data["profile"] or "instance-profile"
-            sanitized_profile = re.sub(r"[^a-zA-Z0-9\-_]", "-", profile_for_name)
-            provider_name = f"{provider_type}_{sanitized_profile}_{provider_data['region']}"
+        profile_for_name = provider_data["profile"] or "instance-profile"
+        sanitized_profile = re.sub(r"[^a-zA-Z0-9\-_]", "-", profile_for_name)
+        provider_name = f"{provider_type}_{sanitized_profile}_{provider_data['region']}"
 
         # Create provider instance
         provider_instance = {
@@ -660,6 +650,16 @@ def _write_config_file(config_file: Path, user_config: Dict[str, Any]):
         # Add template_defaults if infrastructure was discovered.
         # Promote all infrastructure_defaults to template_defaults except for keys
         # that belong in provider config — determined by the provider strategy.
+        strategy = None
+        try:
+            from orb.domain.base.ports.provider_registry_port import ProviderRegistryPort
+
+            _container = get_container()
+            _factory = _container.get(ProviderRegistryPort)
+            _temp_config = {"type": provider_type, **provider_config}
+            strategy = _factory.create_strategy(provider_type, _temp_config)  # type: ignore[attr-defined]
+        except Exception:
+            pass
         infrastructure_defaults = provider_data.get("infrastructure_defaults", {})
         if infrastructure_defaults:
             config_only_keys = (
