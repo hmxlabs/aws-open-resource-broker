@@ -66,7 +66,9 @@ class TestBootstrapIntegration:
                 new_callable=lambda: lambda self: AsyncMock(return_value=None)(),
             ),
         ):
-            mock_container = self._make_mock_container(mock_config_manager, mock_registry=mock_registry)
+            mock_container = self._make_mock_container(
+                mock_config_manager, mock_registry=mock_registry
+            )
             mock_get_container.return_value = mock_container
 
             app = Application(config_path="/test/config.json", skip_validation=True)
@@ -90,7 +92,9 @@ class TestBootstrapIntegration:
         mock_registry.is_provider_instance_registered.return_value = True
 
         with patch("orb.infrastructure.di.container.get_container") as mock_get_container:
-            mock_container = self._make_mock_container(mock_config_manager, mock_registry=mock_registry)
+            mock_container = self._make_mock_container(
+                mock_config_manager, mock_registry=mock_registry
+            )
             mock_get_container.return_value = mock_container
 
             app = Application(config_path="/test/legacy_config.json", skip_validation=True)
@@ -163,7 +167,9 @@ class TestBootstrapIntegration:
         mock_registry.is_provider_instance_registered.return_value = True
 
         with patch("orb.infrastructure.di.container.get_container") as mock_get_container:
-            mock_container = self._make_mock_container(mock_config_manager, mock_registry=mock_registry)
+            mock_container = self._make_mock_container(
+                mock_config_manager, mock_registry=mock_registry
+            )
             mock_get_container.return_value = mock_container
 
             app = Application(skip_validation=True)
