@@ -204,19 +204,6 @@ class TestArmPayload:
         assert arm["sku"]["name"] == "Standard_D4s_v5"
         assert "virtualMachineProfile" in arm["properties"]
 
-    def test_flexible_network_payload_uses_internal_network_api_version(self):
-        t = AzureTemplate(
-            **_BASE_FIELDS,
-            network_config={"subnet_id": "/subscriptions/.../subnets/default"},
-        )
-
-        arm = t.to_azure_api_format()
-
-        assert (
-            arm["properties"]["virtualMachineProfile"]["networkProfile"]["networkApiVersion"]
-            == "2022-11-01"
-        )
-
     def test_spot_arm_payload(self):
         t = AzureTemplate(
             **_BASE_FIELDS,

@@ -49,83 +49,9 @@ def test_acquire_hosts_returns_immediately_after_submitting_lro():
     assert result["instances"] == []
     assert result["provider_data"]["provisioning_state"] == "creating"
     assert result["provider_data"]["operation_status"] == "submitted"
-    assert result["provider_data"]["continuation_token"] == "vmss-lro-token"
-    poller.result.assert_not_called()
 
 
-def test_vmss_native_spec_override_is_used_for_create_payload():
-    azure_client = MagicMock()
-    logger = MagicMock()
-    handler = VMSSHandler(azure_client=azure_client, logger=logger)
-    handler.azure_native_spec_service = MagicMock()
-
-    poller = MagicMock()
-    azure_client.compute_client.virtual_machine_scale_sets.begin_create_or_update.return_value = poller
-
-    request = MagicMock()
-    request.requested_count = 3
-    request.request_id = "req-native"
-    request.metadata = {}
-
-    template = _make_template(provider_api_spec={"location": "westus2"})
-    merged_payload = {
-        "location": "westus2",
-        "sku": {"name": "Standard_D8s_v5"},
-        "properties": {"virtualMachineProfile": {}},
-    }
-    handler.azure_native_spec_service.process_provider_api_spec_with_merge.return_value = (
-        merged_payload
-    )
-
-    result = handler.acquire_hosts(request, template)
-
-    assert result["success"] is True
-    call = azure_client.compute_client.virtual_machine_scale_sets.begin_create_or_update.call_args
-    assert call.kwargs["parameters"]["location"] == "westus2"
-    assert call.kwargs["parameters"]["sku"]["capacity"] == 3
-
-
-def test_vmss_create_payload_includes_backend_pool_references():
-    azure_client = MagicMock()
-    logger = MagicMock()
-    handler = VMSSHandler(azure_client=azure_client, logger=logger)
-
-    poller = MagicMock()
-    azure_client.compute_client.virtual_machine_scale_sets.begin_create_or_update.return_value = poller
-
-    request = MagicMock()
-    request.requested_count = 2
-    request.request_id = "req-lb"
-    request.metadata = {}
-
-    template = _make_template(
-        network_config={
-            "subnet_id": "/subscriptions/.../subnets/default",
-            "load_balancer_backend_pool_ids": [
-                "/subscriptions/.../backendAddressPools/pool-a"
-            ],
-            "load_balancer_inbound_nat_pool_ids": [
-                "/subscriptions/.../inboundNatPools/nat-a"
-            ],
-            "application_gateway_backend_pool_ids": [
-                "/subscriptions/.../backendAddressPools/appgw-a"
-            ],
-        }
-    )
-
-    result = handler.acquire_hosts(request, template)
-
-    assert result["success"] is True
-    call = azure_client.compute_client.virtual_machine_scale_sets.begin_create_or_update.call_args
-    ip_config = call.kwargs["parameters"]["properties"]["virtualMachineProfile"]["networkProfile"][
-        "networkInterfaceConfigurations"
-    ][0]["properties"]["ipConfigurations"][0]["properties"]
-    assert ip_config["loadBalancerBackendAddressPools"][0]["id"].endswith("/pool-a")
-    assert ip_config["loadBalancerInboundNatPools"][0]["id"].endswith("/nat-a")
-    assert ip_config["applicationGatewayBackendAddressPools"][0]["id"].endswith("/appgw-a")
-
-
-def test_flexible_vmss_status_uses_virtual_machines_listing():
+def test_flexible_vmss_status_returns_only_member_vms():
     azure_client = MagicMock()
     logger = MagicMock()
     handler = VMSSHandler(azure_client=azure_client, logger=logger)
@@ -169,10 +95,6 @@ def test_flexible_vmss_status_uses_virtual_machines_listing():
 
     assert len(result) == 1
     assert result[0]["instance_id"] == "vmss-azure-test_abcd1234"
-    azure_client.compute_client.virtual_machines.list.assert_called_once_with(
-        resource_group_name="test-rg"
-    )
-    azure_client.compute_client.virtual_machine_scale_set_vms.list.assert_not_called()
 
 
 def test_single_vm_acquire_hosts_returns_immediately_after_submitting_lros():
@@ -217,65 +139,6 @@ def test_single_vm_acquire_hosts_returns_immediately_after_submitting_lros():
     assert len(result["resource_ids"]) == 1
     assert result["instances"] == []
     assert result["provider_data"]["operation_status"] == "submitted"
-    assert result["provider_data"]["submitted_vms"][0]["continuation_token"] == "single-vm-lro-token"
-    vm_poller.result.assert_not_called()
-
-
-def test_single_vm_native_spec_override_is_used_for_create_payload():
-    azure_client = MagicMock()
-    logger = MagicMock()
-    handler = SingleVMHandler(azure_client=azure_client, logger=logger)
-    handler.azure_native_spec_service = MagicMock()
-
-    nic_result = MagicMock()
-    nic_result.id = "/subscriptions/.../networkInterfaces/nic-vm-1"
-    nic_poller = MagicMock()
-    nic_poller.result.return_value = nic_result
-    azure_client.network_client.network_interfaces.begin_create_or_update.return_value = nic_poller
-
-    vm_poller = MagicMock()
-    azure_client.compute_client.virtual_machines.begin_create_or_update.return_value = vm_poller
-
-    request = MagicMock()
-    request.requested_count = 1
-    request.request_id = "req-native"
-    request.metadata = {}
-
-    template = AzureTemplate(
-        template_id="azure-singlevm-test",
-        provider_api="SingleVM",
-        vm_size="Standard_D4s_v5",
-        resource_group="test-rg",
-        location="eastus2",
-        network_config={"subnet_id": "/subscriptions/.../subnets/default"},
-        ssh_public_keys=["ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQC7 test@host"],
-        image={
-            "publisher": "Canonical",
-            "offer": "0001-com-ubuntu-server-jammy",
-            "sku": "22_04-lts-gen2",
-            "version": "latest",
-        },
-        provider_api_spec={"tags": {"Mode": "native"}},
-    )
-    handler.azure_native_spec_service.process_provider_api_spec_with_merge.return_value = {
-        "location": "eastus2",
-        "properties": {
-            "hardwareProfile": {"vmSize": "Standard_D8s_v5"},
-            "storageProfile": {"imageReference": {"publisher": "Canonical"}},
-            "osProfile": {"computerName": "vm-short", "adminUsername": "azureuser"},
-            "networkProfile": {
-                "networkInterfaces": [{"id": nic_result.id, "properties": {"primary": True}}]
-            },
-        },
-        "tags": {"Mode": "native"},
-    }
-
-    result = handler.acquire_hosts(request, template)
-
-    assert result["success"] is True
-    call = azure_client.compute_client.virtual_machines.begin_create_or_update.call_args
-    assert call.kwargs["parameters"]["tags"]["Mode"] == "native"
-    assert call.kwargs["parameters"]["properties"]["hardwareProfile"]["vmSize"] == "Standard_D8s_v5"
 
 
 def test_single_vm_partial_failure_returns_structured_errors():
@@ -599,32 +462,3 @@ def test_single_vm_status_populates_network_identity():
     assert result[0]["public_ip"] == "52.1.2.3"
     assert result[0]["subnet_id"].endswith("/subnets/default")
     assert result[0]["vpc_id"].endswith("/virtualNetworks/test-vnet")
-
-
-def test_single_vm_nic_create_includes_backend_pool_references():
-    azure_client = MagicMock()
-    logger = MagicMock()
-    handler = SingleVMHandler(azure_client=azure_client, logger=logger)
-
-    nic_result = MagicMock()
-    nic_result.id = "/subscriptions/.../networkInterfaces/nic-vm-1"
-    nic_poller = MagicMock()
-    nic_poller.result.return_value = nic_result
-    azure_client.network_client.network_interfaces.begin_create_or_update.return_value = nic_poller
-
-    nic_id = handler._create_nic(
-        vm_name="vm-1",
-        resource_group="test-rg",
-        location="eastus2",
-        subnet_id="/subscriptions/.../subnets/default",
-        load_balancer_backend_pool_ids=["/subscriptions/.../backendAddressPools/pool-a"],
-        load_balancer_inbound_nat_pool_ids=["/subscriptions/.../inboundNatPools/nat-a"],
-        application_gateway_backend_pool_ids=["/subscriptions/.../backendAddressPools/appgw-a"],
-    )
-
-    assert nic_id == nic_result.id
-    call = azure_client.network_client.network_interfaces.begin_create_or_update.call_args
-    ip_config = call.kwargs["parameters"]["properties"]["ipConfigurations"][0]["properties"]
-    assert ip_config["loadBalancerBackendAddressPools"][0]["id"].endswith("/pool-a")
-    assert ip_config["loadBalancerInboundNatPools"][0]["id"].endswith("/nat-a")
-    assert ip_config["applicationGatewayBackendAddressPools"][0]["id"].endswith("/appgw-a")

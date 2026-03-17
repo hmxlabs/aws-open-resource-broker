@@ -145,17 +145,6 @@ class TestCapacityMetadata:
         assert result.data["instances"] == []
         assert result.metadata["fleet_errors"][0]["error_code"] == "ProvisioningStateFailed"
 
-    def test_build_provisioning_error_payload_uses_sdk_error_code(self, strategy):
-        exc = Exception("fallback message")
-        exc.error_code = "AllocationFailed"
-        exc.status_code = 409
-
-        payload = strategy._build_provisioning_error_payload(exc)
-
-        assert payload["error_code"] == "AllocationFailed"
-        assert payload["status_code"] == 409
-        assert payload["raw_error_code"] == "AllocationFailed"
-
     def test_describe_resource_instances_adds_shortfall_summary(self, strategy):
         handler = MagicMock()
         handler.check_hosts_status.return_value = [

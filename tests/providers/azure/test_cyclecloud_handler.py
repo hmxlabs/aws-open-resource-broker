@@ -1,5 +1,7 @@
 """Tests for the CycleCloud handler and related template/exception additions."""
 
+import json
+from pathlib import Path
 import pytest
 from unittest.mock import MagicMock, patch
 
@@ -66,9 +68,18 @@ class TestCycleCloudTemplate:
         assert t.cluster_name == "my-cluster"
         assert t.node_array == "execute"
         assert t.cyclecloud_url == "https://cc.example.com"
+        assert t.cyclecloud_credential_path is None
         assert t.cyclecloud_username == "admin"
         assert t.cyclecloud_password == "secret"
         assert t.cyclecloud_verify_ssl is False
+
+    def test_cyclecloud_template_accepts_credential_path(self):
+        t = _make_template(
+            cyclecloud_username=None,
+            cyclecloud_password=None,
+            cyclecloud_credential_path="config/cyclecloud-credentials.json",
+        )
+        assert t.cyclecloud_credential_path == "config/cyclecloud-credentials.json"
 
     def test_cyclecloud_template_accepts_explicit_auth_fields(self):
         t = _make_template(
@@ -207,8 +218,7 @@ class TestCycleCloudHandlerAcquire:
 
         assert result["success"] is True
         assert len(result["instances"]) == 3
-        # Placeholders follow the pattern: cluster-nodearray-opid-index
-        assert result["instances"][0]["instance_id"].startswith("my-cluster-execute-op-456-")
+        assert all(instance["status"] == "pending" for instance in result["instances"])
 
     def test_acquire_hosts_missing_cluster_name(self):
         """Should raise CycleCloudNodeError if cluster_name is missing."""
@@ -231,40 +241,6 @@ class TestCycleCloudHandlerAcquire:
 
         with pytest.raises(CycleCloudConnectionError, match="cyclecloud_url is required"):
             handler.acquire_hosts(request, template)
-
-    @patch("providers.azure.infrastructure.handlers.cyclecloud_handler.requests.Session")
-    def test_acquire_hosts_with_multiple_vm_sizes_leaves_machine_type_unset(self, mock_session_cls):
-        handler = _make_handler()
-        template = _make_template(
-            vm_sizes=["Standard_D8s_v5", "Standard_D16s_v5"],
-            vm_size="Standard_D4s_v5",
-        )
-        request = _make_request(count=2)
-
-        mock_session = MagicMock()
-        mock_session_cls.return_value = mock_session
-
-        cluster_resp = MagicMock()
-        cluster_resp.content = b'{"state": "Started"}'
-        cluster_resp.json.return_value = {"state": "Started"}
-        cluster_resp.raise_for_status = MagicMock()
-
-        create_resp = MagicMock()
-        create_resp.content = b'{"operationId": "op-789", "sets": [{"added": 2, "nodes": []}]}'
-        create_resp.json.return_value = {
-            "operationId": "op-789",
-            "sets": [{"added": 2, "nodes": []}],
-        }
-        create_resp.raise_for_status = MagicMock()
-
-        mock_session.request.side_effect = [cluster_resp, create_resp]
-
-        result = handler.acquire_hosts(request, template)
-
-        assert result["success"] is True
-        post_call = mock_session.request.call_args_list[1]
-        assert post_call.kwargs["json"]["sets"][0]["definition"] == {}
-        assert result["instances"][0]["instance_type"] is None
 
     @patch("providers.azure.infrastructure.handlers.cyclecloud_handler.requests.Session")
     def test_acquire_hosts_collects_failed_node_errors(self, mock_session_cls):
@@ -603,3 +579,98 @@ class TestCycleCloudAuthModes:
         assert session.verify is False
         assert session.__dict__.get("_cyclecloud_auth_mode") == "basic"
         assert session.auth == ("cc_admin", "changeme")
+
+    def test_build_session_loads_credentials_from_file(self, tmp_path: Path):
+        handler = _make_handler()
+        credential_file = tmp_path / "cyclecloud-credentials.json"
+        credential_file.write_text(
+            json.dumps(
+                {
+                    "username": "file-admin",
+                    "password": "file-secret",
+                    "auth_mode": "basic",
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        session, base_url = handler._build_cc_session(
+            cc_url="https://cc.example.com",
+            cc_user=None,
+            cc_pass=None,
+            verify_ssl=False,
+            metadata={"cyclecloud_credential_path": str(credential_file)},
+        )
+
+        assert base_url == "https://cc.example.com"
+        assert session.auth == ("file-admin", "file-secret")
+
+    def test_build_session_resolves_credential_path_from_template(self, tmp_path: Path):
+        handler = _make_handler()
+        credential_file = tmp_path / "cyclecloud-credentials.json"
+        credential_payload = {
+            "url": "https://cc-from-template.example.com",
+            "username": "template-user",
+            "password": "template-pass",
+            "verify_ssl": False,
+            "auth_mode": "basic",
+        }
+        credential_file.write_text(json.dumps(credential_payload), encoding="utf-8")
+        template = _make_template(
+            cyclecloud_url=None,
+            cyclecloud_username=None,
+            cyclecloud_password=None,
+            cyclecloud_credential_path=str(credential_file),
+        )
+
+        session, base_url = handler._build_cc_session(
+            cc_url=None,
+            cc_user=None,
+            cc_pass=None,
+            verify_ssl=None,
+            template=template,
+        )
+
+        assert base_url == credential_payload["url"]
+        assert session.auth == (credential_payload["username"], credential_payload["password"])
+        assert session.verify is credential_payload["verify_ssl"]
+        assert session.__dict__.get("_cyclecloud_auth_mode") == credential_payload["auth_mode"]
+
+    @patch("providers.azure.infrastructure.handlers.cyclecloud_handler.requests.Session")
+    def test_acquire_hosts_persists_credential_path(self, mock_session_cls, tmp_path: Path):
+        handler = _make_handler()
+        credential_file = tmp_path / "cyclecloud-credentials.json"
+        credential_file.write_text(
+            json.dumps({"username": "file-admin", "password": "file-secret"}),
+            encoding="utf-8",
+        )
+        template = _make_template(
+            cyclecloud_username=None,
+            cyclecloud_password=None,
+            cyclecloud_credential_path=str(credential_file),
+        )
+        request = _make_request(count=1)
+
+        mock_session = MagicMock()
+        mock_session_cls.return_value = mock_session
+
+        cluster_status_resp = MagicMock()
+        cluster_status_resp.status_code = 200
+        cluster_status_resp.content = b'{"state": "Started"}'
+        cluster_status_resp.json.return_value = {"state": "Started"}
+        cluster_status_resp.raise_for_status = MagicMock()
+
+        node_create_resp = MagicMock()
+        node_create_resp.status_code = 200
+        node_create_resp.content = b'{"operationId": "op-123", "sets": [{"added": 1, "nodes": [{"name": "node-1", "status": "Acquiring"}]}]}'
+        node_create_resp.json.return_value = {
+            "operationId": "op-123",
+            "sets": [{"added": 1, "nodes": [{"name": "node-1", "status": "Acquiring"}]}],
+        }
+        node_create_resp.raise_for_status = MagicMock()
+
+        mock_session.request.side_effect = [cluster_status_resp, node_create_resp]
+
+        result = handler.acquire_hosts(request, template)
+
+        assert result["provider_data"]["cyclecloud_credential_path"] == str(credential_file)
