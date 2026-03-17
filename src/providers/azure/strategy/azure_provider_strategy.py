@@ -734,12 +734,6 @@ class AzureProviderStrategy(ProviderStrategy):
                     },
                 )
 
-            azure_client = self.azure_client
-            if not azure_client:
-                return ProviderResult.error_result(
-                    "Azure client not available", "AZURE_CLIENT_NOT_AVAILABLE"
-                )
-
             resource_group = (
                 operation.parameters.get("resource_group")
                 or self._azure_config.resource_group
@@ -748,6 +742,27 @@ class AzureProviderStrategy(ProviderStrategy):
                 return ProviderResult.error_result(
                     "resource_group is required for status query",
                     "MISSING_RESOURCE_GROUP",
+                )
+
+            handler_machines = self._get_instance_status_via_handlers(
+                operation=operation,
+                instance_ids=instance_ids,
+                resource_group=resource_group,
+            )
+            if handler_machines is not None:
+                return ProviderResult.success_result(
+                    {"machines": handler_machines, "queried_count": len(instance_ids)},
+                    {
+                        "operation": "get_instance_status",
+                        "instance_ids": instance_ids,
+                        "method": "handler"
+                    },
+                )
+
+            azure_client = self.azure_client
+            if not azure_client:
+                return ProviderResult.error_result(
+                    "Azure client not available", "AZURE_CLIENT_NOT_AVAILABLE"
                 )
 
             machines: list[dict[str, Any]] = []
@@ -781,6 +796,143 @@ class AzureProviderStrategy(ProviderStrategy):
                 f"Failed to get instance status: {exc!s}",
                 "GET_INSTANCE_STATUS_ERROR",
             )
+
+    def _get_instance_status_via_handlers(
+        self,
+        *,
+        operation: ProviderOperation,
+        instance_ids: list[str],
+        resource_group: str,
+    ) -> Optional[list[dict[str, Any]]]:
+        """Use Azure handlers for status queries when enough resource context is available."""
+        provider_api = operation.parameters.get("provider_api")
+        provider_api_value = provider_api.value if hasattr(provider_api, "value") else provider_api
+        raw_resource_mapping = operation.parameters.get("resource_mapping", {}) or {}
+        grouped_resource_mapping = self._group_instance_ids_by_resource(instance_ids, raw_resource_mapping)
+
+        if not provider_api_value and not grouped_resource_mapping:
+            return None
+
+        handler = self.handlers.get(provider_api_value) if provider_api_value else None
+        if not handler and provider_api_value == AzureProviderApi.VMSS_UNIFORM.value:
+            handler = self.handlers.get(AzureProviderApi.VMSS.value)
+        if not handler and not grouped_resource_mapping:
+            return None
+
+        from domain.request.aggregate import Request
+        from domain.request.value_objects import RequestType
+
+        request_id = operation.parameters.get("request_id") or (
+            operation.context.get("request_id") if operation.context else None
+        )
+
+        def build_metadata(additional: Optional[dict[str, Any]] = None) -> dict[str, Any]:
+            metadata = {"resource_group": resource_group}
+            for source in (
+                operation.parameters.get("request_metadata", {}) or {},
+                operation.context or {},
+                operation.parameters,
+            ):
+                for key in (
+                    "cluster_name",
+                    "node_array",
+                    "node_ids",
+                    "cyclecloud_url",
+                    "cyclecloud_username",
+                    "cyclecloud_password",
+                    "cyclecloud_verify_ssl",
+                    "cyclecloud_auth_mode",
+                    "cyclecloud_aad_scope",
+                ):
+                    value = source.get(key) if isinstance(source, dict) else None
+                    if value not in (None, ""):
+                        metadata[key] = value
+            if additional:
+                metadata.update(additional)
+            return metadata
+
+        def make_request(resource_ids: list[str], metadata: dict[str, Any]) -> Request:
+            request = Request.create_new_request(
+                request_type=RequestType.ACQUIRE,
+                template_id=operation.parameters.get("template_id", "unknown"),
+                machine_count=1,
+                provider_type="azure",
+                provider_instance="azure-default",
+                request_id=request_id,
+                metadata=metadata,
+            )
+            request.resource_ids = resource_ids
+            return request
+
+        if provider_api_value == AzureProviderApi.SINGLE_VM.value and handler:
+            request = make_request(instance_ids, build_metadata())
+            return handler.check_hosts_status(request)
+
+        all_results: list[dict[str, Any]] = []
+        seen_instance_ids: set[str] = set()
+
+        if grouped_resource_mapping:
+            for resource_id, mapped_ids in grouped_resource_mapping.items():
+                group_provider_api = provider_api_value
+                group_handler = handler
+                if not group_handler and group_provider_api:
+                    group_handler = self.handlers.get(group_provider_api)
+                if not group_handler:
+                    continue
+
+                extra_metadata: dict[str, Any] = {}
+                if group_provider_api == AzureProviderApi.CYCLECLOUD.value:
+                    extra_metadata["cluster_name"] = resource_id
+                    extra_metadata["node_ids"] = mapped_ids
+                request = make_request([resource_id], build_metadata(extra_metadata))
+                for machine in self._filter_status_results(group_handler.check_hosts_status(request), mapped_ids):
+                    machine_id = str(machine.get("instance_id"))
+                    if machine_id not in seen_instance_ids:
+                        all_results.append(machine)
+                        seen_instance_ids.add(machine_id)
+
+            if all_results:
+                return all_results
+
+        resource_id = operation.parameters.get("resource_id")
+        if not handler or not resource_id:
+            return None
+
+        extra_metadata = {}
+        if provider_api_value == AzureProviderApi.CYCLECLOUD.value:
+            extra_metadata = {
+                "cluster_name": resource_id,
+                "node_ids": instance_ids,
+            }
+        request = make_request(
+            instance_ids if provider_api_value == AzureProviderApi.SINGLE_VM.value else [resource_id],
+            build_metadata(extra_metadata),
+        )
+        if provider_api_value == AzureProviderApi.SINGLE_VM.value:
+            return handler.check_hosts_status(request)
+        return self._filter_status_results(handler.check_hosts_status(request), instance_ids)
+
+    @staticmethod
+    def _filter_status_results(
+        results: list[dict[str, Any]],
+        requested_ids: list[str],
+    ) -> list[dict[str, Any]]:
+        """Filter handler status results to the requested IDs using common Azure identifiers."""
+        requested = {str(item) for item in requested_ids}
+        filtered: list[dict[str, Any]] = []
+        for result in results:
+            provider_data = result.get("provider_data") or {}
+            candidate_ids = {
+                str(result.get("instance_id")),
+                str(provider_data.get("vm_id")),
+                str(provider_data.get("vmss_instance_id")),
+                str(provider_data.get("node_id")),
+                str(provider_data.get("vm_name")),
+            }
+            candidate_ids.discard("None")
+            if candidate_ids & requested:
+                filtered.append(result)
+        return filtered
 
     # ------------------------------------------------------------------
     # DESCRIBE_RESOURCE_INSTANCES

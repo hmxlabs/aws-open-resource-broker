@@ -441,6 +441,99 @@ class TestGetInstanceStatus:
         assert [m["instance_id"] for m in result.data["machines"]] == ["vm-1", "vm-2"]
         assert result.metadata["method"] == "dry_run"
 
+    def test_single_vm_provider_api_routes_status_via_handler(self, azure_config, logger):
+        strategy = AzureProviderStrategy(config=azure_config, logger=logger)
+        strategy.initialize()
+
+        handler = MagicMock()
+        handler.check_hosts_status.return_value = [
+            {
+                "instance_id": "vm-1",
+                "status": "running",
+                "private_ip": "10.0.0.4",
+                "public_ip": None,
+                "launch_time": None,
+                "instance_type": "Standard_D4s_v5",
+                "subnet_id": "/subscriptions/.../subnets/default",
+                "vpc_id": "/subscriptions/.../virtualNetworks/test-vnet",
+                "provider_type": "azure",
+                "provider_data": {"vm_name": "vm-1"},
+            }
+        ]
+        strategy._handlers = {"SingleVM": handler}
+
+        op = ProviderOperation(
+            operation_type=ProviderOperationType.GET_INSTANCE_STATUS,
+            parameters={
+                "instance_ids": ["vm-1"],
+                "provider_api": "SingleVM",
+                "resource_group": "test-rg",
+            },
+        )
+
+        result = _run(strategy.execute_operation(op))
+
+        assert result.success
+        assert result.metadata["method"] == "handler"
+        handler.check_hosts_status.assert_called_once()
+        assert result.data["machines"][0]["instance_id"] == "vm-1"
+
+    def test_vmss_provider_api_routes_status_via_handler_with_resource_mapping(self, azure_config, logger):
+        strategy = AzureProviderStrategy(config=azure_config, logger=logger)
+        strategy.initialize()
+
+        handler = MagicMock()
+        handler.check_hosts_status.return_value = [
+            {
+                "instance_id": "3",
+                "status": "running",
+                "private_ip": "10.0.0.7",
+                "public_ip": None,
+                "launch_time": None,
+                "instance_type": "Standard_D4s_v5",
+                "subnet_id": "/subscriptions/.../subnets/default",
+                "vpc_id": "/subscriptions/.../virtualNetworks/test-vnet",
+                "provider_type": "azure",
+                "provider_data": {
+                    "vmss_instance_id": "3",
+                    "vm_id": "vm-guid-3",
+                },
+            },
+            {
+                "instance_id": "9",
+                "status": "running",
+                "private_ip": "10.0.0.9",
+                "public_ip": None,
+                "launch_time": None,
+                "instance_type": "Standard_D4s_v5",
+                "subnet_id": "/subscriptions/.../subnets/default",
+                "vpc_id": "/subscriptions/.../virtualNetworks/test-vnet",
+                "provider_type": "azure",
+                "provider_data": {
+                    "vmss_instance_id": "9",
+                    "vm_id": "vm-guid-9",
+                },
+            },
+        ]
+        strategy._handlers = {"VMSS": handler}
+
+        op = ProviderOperation(
+            operation_type=ProviderOperationType.GET_INSTANCE_STATUS,
+            parameters={
+                "instance_ids": ["3"],
+                "provider_api": "VMSS",
+                "resource_group": "test-rg",
+                "resource_mapping": {"3": ("vmss-demo", 2)},
+            },
+        )
+
+        result = _run(strategy.execute_operation(op))
+
+        assert result.success
+        assert result.metadata["method"] == "handler"
+        handler.check_hosts_status.assert_called_once()
+        assert [m["instance_id"] for m in result.data["machines"]] == ["3"]
+
     def test_status_populates_network_identity(self, strategy):
         azure_client = MagicMock()
         strategy._client = azure_client
