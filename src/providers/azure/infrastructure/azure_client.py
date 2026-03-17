@@ -560,6 +560,139 @@ class AzureClient:
                 "Set it in the Azure provider configuration."
             )
 
+    @staticmethod
+    def _sdk_attr(value: Any, attr: str, default: Any = None) -> Any:
+        """Read an SDK-style attribute from an object or dict."""
+        if value is None:
+            return default
+        if hasattr(value, attr):
+            return getattr(value, attr)
+        if isinstance(value, dict):
+            return value.get(attr, default)
+        return default
+
+    @classmethod
+    def extract_resource_group_and_name_from_arm_id(
+        cls,
+        arm_id: str,
+    ) -> Optional[tuple[str, str]]:
+        """Extract ``(resource_group, resource_name)`` from an ARM resource ID."""
+        parts = [segment for segment in str(arm_id).split("/") if segment]
+        if not parts:
+            return None
+
+        try:
+            rg_index = next(
+                idx for idx, value in enumerate(parts) if value.lower() == "resourcegroups"
+            )
+            resource_group = parts[rg_index + 1]
+            resource_name = parts[-1]
+            if resource_group and resource_name:
+                return resource_group, resource_name
+        except Exception:
+            return None
+        return None
+
+    @staticmethod
+    def subnet_id_to_vnet_id(subnet_id: Optional[str]) -> Optional[str]:
+        """Return the parent VNet ARM ID from a subnet ARM ID."""
+        if not subnet_id:
+            return None
+        marker = "/subnets/"
+        if marker not in subnet_id:
+            return None
+        return subnet_id.split(marker, 1)[0]
+
+    def resolve_network_identity_from_vm(self, vm: Any) -> dict[str, Any]:
+        """Resolve network identity fields from a VM or VMSS VM object."""
+        net_profile = self._sdk_attr(vm, "network_profile")
+        nic_refs = self._sdk_attr(net_profile, "network_interfaces", []) or []
+        return self.resolve_network_identity_from_nic_refs(nic_refs)
+
+    def resolve_network_identity_from_nic_refs(self, nic_refs: list[Any]) -> dict[str, Any]:
+        """Resolve private/public IP and subnet/VNet identity from NIC refs."""
+        network_identity = {
+            "private_ip": None,
+            "public_ip": None,
+            "subnet_id": None,
+            "vnet_id": None,
+            "nic_id": None,
+            "nic_name": None,
+        }
+        if not nic_refs:
+            return network_identity
+
+        ordered_refs = sorted(
+            nic_refs,
+            key=lambda ref: (
+                not bool(self._sdk_attr(self._sdk_attr(ref, "properties", {}), "primary", False))
+            ),
+        )
+
+        for nic_ref in ordered_refs:
+            nic_id = self._sdk_attr(nic_ref, "id")
+            if not nic_id:
+                continue
+
+            nic_lookup = self.extract_resource_group_and_name_from_arm_id(str(nic_id))
+            if not nic_lookup:
+                continue
+
+            nic_rg, nic_name = nic_lookup
+            try:
+                nic = self.network_client.network_interfaces.get(
+                    resource_group_name=nic_rg,
+                    network_interface_name=nic_name,
+                )
+            except Exception as exc:
+                self._logger.debug("Failed to resolve NIC %s: %s", nic_id, exc)
+                continue
+
+            ip_configs = self._sdk_attr(nic, "ip_configurations", []) or []
+            for ip_cfg in ip_configs:
+                ip_cfg_props = self._sdk_attr(ip_cfg, "properties", {})
+                private_ip = self._sdk_attr(ip_cfg, "private_ip_address") or self._sdk_attr(
+                    ip_cfg_props, "private_ip_address"
+                )
+                subnet = self._sdk_attr(ip_cfg, "subnet") or self._sdk_attr(ip_cfg_props, "subnet")
+                subnet_id = self._sdk_attr(subnet, "id")
+                public_ip_ref = self._sdk_attr(ip_cfg, "public_ip_address") or self._sdk_attr(
+                    ip_cfg_props, "public_ip_address"
+                )
+
+                public_ip = None
+                public_ip_id = self._sdk_attr(public_ip_ref, "id")
+                if public_ip_id:
+                    public_ip_lookup = self.extract_resource_group_and_name_from_arm_id(
+                        str(public_ip_id)
+                    )
+                    if public_ip_lookup:
+                        pip_rg, pip_name = public_ip_lookup
+                        try:
+                            pip = self.network_client.public_ip_addresses.get(
+                                resource_group_name=pip_rg,
+                                public_ip_address_name=pip_name,
+                            )
+                            public_ip = self._sdk_attr(pip, "ip_address")
+                        except Exception as exc:
+                            self._logger.debug(
+                                "Failed to resolve public IP %s: %s", public_ip_id, exc
+                            )
+
+                network_identity.update(
+                    {
+                        "private_ip": private_ip,
+                        "public_ip": public_ip,
+                        "subnet_id": subnet_id,
+                        "vnet_id": self.subnet_id_to_vnet_id(subnet_id),
+                        "nic_id": nic_id,
+                        "nic_name": nic_name,
+                    }
+                )
+                return network_identity
+
+        return network_identity
+
     # ------------------------------------------------------------------
     # Metrics / observability
     # ------------------------------------------------------------------
@@ -572,4 +705,3 @@ class AzureClient:
             future instrumentation parity with the AWS client.
         """
         return {"metrics_enabled": self._metrics is not None}
-

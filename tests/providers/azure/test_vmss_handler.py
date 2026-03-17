@@ -8,22 +8,24 @@ from providers.azure.infrastructure.handlers.single_vm_handler import SingleVMHa
 from providers.azure.infrastructure.handlers.vmss_handler import VMSSHandler
 
 
-def _make_template() -> AzureTemplate:
-    return AzureTemplate(
-        template_id="azure-vmss-test",
-        provider_api="VMSS",
-        vm_size="Standard_D4s_v5",
-        resource_group="test-rg",
-        location="eastus2",
-        network_config={"subnet_id": "/subscriptions/.../subnets/default"},
-        ssh_public_keys=["ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQC7 test@host"],
-        image={
+def _make_template(**overrides) -> AzureTemplate:
+    config = {
+        "template_id": "azure-vmss-test",
+        "provider_api": "VMSS",
+        "vm_size": "Standard_D4s_v5",
+        "resource_group": "test-rg",
+        "location": "eastus2",
+        "network_config": {"subnet_id": "/subscriptions/.../subnets/default"},
+        "ssh_public_keys": ["ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQC7 test@host"],
+        "image": {
             "publisher": "Canonical",
             "offer": "0001-com-ubuntu-server-jammy",
             "sku": "22_04-lts-gen2",
             "version": "latest",
         },
-    )
+    }
+    config.update(overrides)
+    return AzureTemplate(**config)
 
 
 def test_acquire_hosts_returns_immediately_after_submitting_lro():
@@ -370,6 +372,60 @@ def test_vmss_instance_status_includes_structured_provisioning_errors():
     assert "Allocation failed" in result[0]["provider_data"]["fleet_errors"][0]["error_message"]
 
 
+def test_vmss_status_populates_network_identity():
+    azure_client = MagicMock()
+    logger = MagicMock()
+    handler = VMSSHandler(azure_client=azure_client, logger=logger)
+
+    vmss = MagicMock()
+    vmss.orchestration_mode = AzureVMSSOrchestrationMode.UNIFORM.value
+    azure_client.compute_client.virtual_machine_scale_sets.get.return_value = vmss
+
+    nic_ref = MagicMock()
+    nic_ref.id = (
+        "/subscriptions/sub/resourceGroups/test-rg/providers/"
+        "Microsoft.Network/networkInterfaces/nic-vmss-1"
+    )
+    nic_ref.properties.primary = True
+
+    member_vm = MagicMock()
+    member_vm.instance_id = "3"
+    member_vm.name = "vmss-3"
+    member_vm.vm_id = "vm-guid-3"
+    member_vm.instance_view.statuses = []
+    member_vm.hardware_profile.vm_size = "Standard_D4s_v5"
+    member_vm.location = "eastus2"
+    member_vm.zones = ["1"]
+    member_vm.network_profile.network_interfaces = [nic_ref]
+    azure_client.resolve_network_identity_from_vm.return_value = {
+        "private_ip": "10.0.0.7",
+        "public_ip": None,
+        "subnet_id": (
+            "/subscriptions/sub/resourceGroups/test-rg/providers/"
+            "Microsoft.Network/virtualNetworks/test-vnet/subnets/default"
+        ),
+        "vnet_id": (
+            "/subscriptions/sub/resourceGroups/test-rg/providers/"
+            "Microsoft.Network/virtualNetworks/test-vnet"
+        ),
+        "nic_id": nic_ref.id,
+        "nic_name": "nic-vmss-1",
+    }
+
+    azure_client.compute_client.virtual_machine_scale_set_vms.list.return_value = [member_vm]
+
+    request = MagicMock()
+    request.resource_ids = ["vmss-azure-test"]
+    request.metadata = {"resource_group": "test-rg"}
+
+    result = handler.check_hosts_status(request)
+
+    assert result[0]["private_ip"] == "10.0.0.7"
+    assert result[0]["subnet_id"].endswith("/subnets/default")
+    assert result[0]["vpc_id"].endswith("/virtualNetworks/test-vnet")
+    assert result[0]["provider_data"]["nic_name"] == "nic-vmss-1"
+
+
 def test_vmss_resource_errors_surface_failed_scale_set_without_instances():
     azure_client = MagicMock()
     logger = MagicMock()
@@ -384,3 +440,51 @@ def test_vmss_resource_errors_surface_failed_scale_set_without_instances():
 
     assert errors[0]["error_code"] == "ProvisioningStateFailed"
     assert errors[0]["instance_id"] == "vmss-azure-test"
+
+
+def test_single_vm_status_populates_network_identity():
+    azure_client = MagicMock()
+    logger = MagicMock()
+    handler = SingleVMHandler(azure_client=azure_client, logger=logger)
+
+    nic_ref = MagicMock()
+    nic_ref.id = (
+        "/subscriptions/sub/resourceGroups/test-rg/providers/"
+        "Microsoft.Network/networkInterfaces/nic-vm-1"
+    )
+    nic_ref.properties.primary = True
+
+    vm = MagicMock()
+    vm.name = "vm-1"
+    vm.vm_id = "vm-guid-1"
+    vm.instance_view.statuses = []
+    vm.hardware_profile.vm_size = "Standard_D4s_v5"
+    vm.location = "eastus2"
+    vm.zones = ["1"]
+    vm.network_profile.network_interfaces = [nic_ref]
+    azure_client.resolve_network_identity_from_vm.return_value = {
+        "private_ip": "10.0.0.4",
+        "public_ip": "52.1.2.3",
+        "subnet_id": (
+            "/subscriptions/sub/resourceGroups/test-rg/providers/"
+            "Microsoft.Network/virtualNetworks/test-vnet/subnets/default"
+        ),
+        "vnet_id": (
+            "/subscriptions/sub/resourceGroups/test-rg/providers/"
+            "Microsoft.Network/virtualNetworks/test-vnet"
+        ),
+        "nic_id": nic_ref.id,
+        "nic_name": "nic-vm-1",
+    }
+    azure_client.compute_client.virtual_machines.get.return_value = vm
+
+    request = MagicMock()
+    request.resource_ids = ["vm-1"]
+    request.metadata = {"resource_group": "test-rg"}
+
+    result = handler.check_hosts_status(request)
+
+    assert result[0]["private_ip"] == "10.0.0.4"
+    assert result[0]["public_ip"] == "52.1.2.3"
+    assert result[0]["subnet_id"].endswith("/subnets/default")
+    assert result[0]["vpc_id"].endswith("/virtualNetworks/test-vnet")

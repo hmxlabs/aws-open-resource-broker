@@ -441,6 +441,53 @@ class TestGetInstanceStatus:
         assert [m["instance_id"] for m in result.data["machines"]] == ["vm-1", "vm-2"]
         assert result.metadata["method"] == "dry_run"
 
+    def test_status_populates_network_identity(self, strategy):
+        azure_client = MagicMock()
+        strategy._client = azure_client
+
+        nic_ref = MagicMock()
+        nic_ref.id = (
+            "/subscriptions/sub/resourceGroups/test-rg/providers/"
+            "Microsoft.Network/networkInterfaces/nic-vm-1"
+        )
+        nic_ref.properties.primary = True
+
+        vm = MagicMock()
+        vm.name = "vm-1"
+        vm.vm_id = "vm-guid-1"
+        vm.instance_view.statuses = []
+        vm.hardware_profile.vm_size = "Standard_D4s_v5"
+        vm.zones = ["1"]
+        vm.location = "eastus2"
+        vm.network_profile.network_interfaces = [nic_ref]
+        azure_client.compute_client.virtual_machines.get.return_value = vm
+        azure_client.resolve_network_identity_from_vm.return_value = {
+            "private_ip": "10.0.0.4",
+            "public_ip": None,
+            "subnet_id": (
+                "/subscriptions/sub/resourceGroups/test-rg/providers/"
+                "Microsoft.Network/virtualNetworks/test-vnet/subnets/default"
+            ),
+            "vnet_id": (
+                "/subscriptions/sub/resourceGroups/test-rg/providers/"
+                "Microsoft.Network/virtualNetworks/test-vnet"
+            ),
+            "nic_id": nic_ref.id,
+            "nic_name": "nic-vm-1",
+        }
+
+        op = ProviderOperation(
+            operation_type=ProviderOperationType.GET_INSTANCE_STATUS,
+            parameters={"instance_ids": ["vm-1"], "resource_group": "test-rg"},
+        )
+
+        result = _run(strategy.execute_operation(op))
+
+        assert result.success
+        assert result.data["machines"][0]["private_ip"] == "10.0.0.4"
+        assert result.data["machines"][0]["subnet_id"].endswith("/subnets/default")
+        assert result.data["machines"][0]["vpc_id"].endswith("/virtualNetworks/test-vnet")
+
 
 # ---------------------------------------------------------------------------
 # DESCRIBE_RESOURCE_INSTANCES (with missing resource_ids → error path)

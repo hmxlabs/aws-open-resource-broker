@@ -306,6 +306,56 @@ class TestAzureMachineAdapter:
             adapter.cleanup_machine_resources(machine)
 
 
+class TestAzureClientNetworkResolution:
+    def test_resolve_network_identity_from_vm_populates_ips_and_subnet(self):
+        from providers.azure.infrastructure.azure_client import AzureClient
+
+        azure_client = object.__new__(AzureClient)
+        azure_client._logger = MagicMock()
+        azure_client._network_client = MagicMock()
+
+        nic_ref = MagicMock()
+        nic_ref.id = (
+            "/subscriptions/sub/resourceGroups/test-rg/providers/"
+            "Microsoft.Network/networkInterfaces/nic-vm-1"
+        )
+        nic_ref.properties.primary = True
+
+        vm = MagicMock()
+        vm.network_profile.network_interfaces = [nic_ref]
+
+        subnet = MagicMock()
+        subnet.id = (
+            "/subscriptions/sub/resourceGroups/test-rg/providers/"
+            "Microsoft.Network/virtualNetworks/test-vnet/subnets/default"
+        )
+        public_ip_ref = MagicMock()
+        public_ip_ref.id = (
+            "/subscriptions/sub/resourceGroups/test-rg/providers/"
+            "Microsoft.Network/publicIPAddresses/pip-vm-1"
+        )
+        ip_cfg = MagicMock()
+        ip_cfg.private_ip_address = "10.0.0.4"
+        ip_cfg.subnet = subnet
+        ip_cfg.public_ip_address = public_ip_ref
+
+        nic = MagicMock()
+        nic.ip_configurations = [ip_cfg]
+        azure_client.network_client.network_interfaces.get.return_value = nic
+
+        pip = MagicMock()
+        pip.ip_address = "52.1.2.3"
+        azure_client.network_client.public_ip_addresses.get.return_value = pip
+
+        result = AzureClient.resolve_network_identity_from_vm(azure_client, vm)
+
+        assert result["private_ip"] == "10.0.0.4"
+        assert result["public_ip"] == "52.1.2.3"
+        assert result["subnet_id"].endswith("/subnets/default")
+        assert result["vnet_id"].endswith("/virtualNetworks/test-vnet")
+        assert result["nic_name"] == "nic-vm-1"
+
+
 # ---------------------------------------------------------------------------
 # Template extension
 # ---------------------------------------------------------------------------

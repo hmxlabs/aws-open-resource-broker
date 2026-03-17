@@ -1081,22 +1081,26 @@ class AzureProviderStrategy(ProviderStrategy):
                     break
 
         hw = getattr(vm, "hardware_profile", None)
+        network_identity = self.azure_client.resolve_network_identity_from_vm(vm)
 
         return {
             "instance_id": getattr(vm, "vm_id", getattr(vm, "name", "")),
             "status": status,
-            "private_ip": None,
-            "public_ip": None,
+            "private_ip": network_identity["private_ip"],
+            "public_ip": network_identity["public_ip"],
             "launch_time": None,
             "instance_type": getattr(hw, "vm_size", None) if hw else None,
-            "subnet_id": None,
-            "vpc_id": None,
+            "subnet_id": network_identity["subnet_id"],
+            "vpc_id": network_identity["vnet_id"],
             "availability_zone": (getattr(vm, "zones", None) or [None])[0],
             "provider_type": "azure",
             "provider_data": {
                 "vm_name": getattr(vm, "name", None),
                 "location": getattr(vm, "location", None),
                 "provisioning_state": getattr(vm, "provisioning_state", None),
+                "nic_id": network_identity["nic_id"],
+                "nic_name": network_identity["nic_name"],
+                "vnet_id": network_identity["vnet_id"],
             },
         }
 

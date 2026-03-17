@@ -593,22 +593,12 @@ class VMSSHandler(AzureHandler):
         else:
             fleet_errors = []
 
-        # Network IPs
-        private_ip = None
-        public_ip = None
-        subnet_id = None
-        nic_configs = None
-        net_profile = getattr(vm, "network_profile", None)
-        if net_profile:
-            nic_configs = getattr(net_profile, "network_interfaces", None)
-        if nic_configs:
-            for nic in nic_configs:
-                nic_id = getattr(nic, "id", None)
-                if nic_id:
-                    # We store the NIC ARM id; resolving actual IPs would
-                    # require an extra network call.  Most callers use the
-                    # compute instance_view or the NIC reference.
-                    pass
+        # Network IPs / subnet / VNet
+        network_identity = self.azure_client.resolve_network_identity_from_vm(vm)
+        private_ip = network_identity["private_ip"]
+        public_ip = network_identity["public_ip"]
+        subnet_id = network_identity["subnet_id"]
+        vnet_id = network_identity["vnet_id"]
 
         # Hardware profile → instance type
         hw = getattr(vm, "hardware_profile", None)
@@ -642,7 +632,7 @@ class VMSSHandler(AzureHandler):
             "launch_time": launch_time,
             "instance_type": instance_type,
             "subnet_id": subnet_id,
-            "vpc_id": None,  # Azure uses VNet, stored in network_config
+            "vpc_id": vnet_id,
             "availability_zone": availability_zone,
             "provider_type": "azure",
             "provider_data": {
@@ -651,6 +641,9 @@ class VMSSHandler(AzureHandler):
                 "vmss_instance_id": instance_id,
                 "vm_id": vm_id,
                 "location": location,
+                "nic_id": network_identity["nic_id"],
+                "nic_name": network_identity["nic_name"],
+                "vnet_id": vnet_id,
                 "fleet_errors": fleet_errors,
             },
         }
