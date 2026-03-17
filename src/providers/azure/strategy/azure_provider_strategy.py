@@ -255,9 +255,11 @@ class AzureProviderStrategy(ProviderStrategy):
                 },
                 "instance_management": True,
                 "spot_instances": True,
-                # Azure VMSS supports autoscale as a platform feature, but this provider does not
-                # currently expose explicit autoscale-policy management.
-                "auto_scaling": False,
+                "fleet_management": True,
+                # VMSS now has AWS-comparable elastic-group lifecycle behavior in ORB
+                # (group creation, capacity-aware release, and capacity reporting),
+                # even though explicit autoscale-policy management is still not exposed.
+                "auto_scaling": True,
                 # Azure platform capability supports this around VMSS/NICs/LBs; the provider
                 # does not currently orchestrate load-balancer configuration.
                 "load_balancing": False,

@@ -442,6 +442,77 @@ def test_vmss_resource_errors_surface_failed_scale_set_without_instances():
     assert errors[0]["instance_id"] == "vmss-azure-test"
 
 
+def test_vmss_release_scales_down_before_deleting_uniform_instances():
+    azure_client = MagicMock()
+    logger = MagicMock()
+    handler = VMSSHandler(azure_client=azure_client, logger=logger)
+    handler.azure_resource_manager = MagicMock()
+    handler.azure_resource_manager.get_vmss_capacity.return_value = {"capacity": 5}
+    handler._resolve_vmss_instance_ids = MagicMock(return_value=["3", "4"])
+
+    vmss = MagicMock()
+    vmss.orchestration_mode = AzureVMSSOrchestrationMode.UNIFORM.value
+    azure_client.compute_client.virtual_machine_scale_sets.get.return_value = vmss
+
+    delete_poller = MagicMock()
+    azure_client.compute_client.virtual_machine_scale_sets.begin_delete_instances.return_value = (
+        delete_poller
+    )
+
+    handler.release_hosts(
+        machine_ids=["3", "4"],
+        resource_id="vmss-azure-test",
+        context={"resource_group": "test-rg"},
+    )
+
+    handler.azure_resource_manager.scale_vmss.assert_called_once_with(
+        resource_group="test-rg",
+        vmss_name="vmss-azure-test",
+        capacity=3,
+    )
+    azure_client.compute_client.virtual_machine_scale_sets.begin_delete_instances.assert_called_once()
+    azure_client.compute_client.virtual_machine_scale_sets.begin_delete.assert_not_called()
+
+
+def test_vmss_release_deletes_scale_set_when_capacity_reaches_zero():
+    azure_client = MagicMock()
+    logger = MagicMock()
+    handler = VMSSHandler(azure_client=azure_client, logger=logger)
+    handler.azure_resource_manager = MagicMock()
+    handler.azure_resource_manager.get_vmss_capacity.return_value = {"capacity": 1}
+    handler._resolve_vmss_instance_ids = MagicMock(return_value=["3"])
+
+    vmss = MagicMock()
+    vmss.orchestration_mode = AzureVMSSOrchestrationMode.UNIFORM.value
+    azure_client.compute_client.virtual_machine_scale_sets.get.return_value = vmss
+
+    delete_instances_poller = MagicMock()
+    azure_client.compute_client.virtual_machine_scale_sets.begin_delete_instances.return_value = (
+        delete_instances_poller
+    )
+    delete_vmss_poller = MagicMock()
+    azure_client.compute_client.virtual_machine_scale_sets.begin_delete.return_value = (
+        delete_vmss_poller
+    )
+
+    handler.release_hosts(
+        machine_ids=["3"],
+        resource_id="vmss-azure-test",
+        context={"resource_group": "test-rg"},
+    )
+
+    handler.azure_resource_manager.scale_vmss.assert_called_once_with(
+        resource_group="test-rg",
+        vmss_name="vmss-azure-test",
+        capacity=0,
+    )
+    azure_client.compute_client.virtual_machine_scale_sets.begin_delete_instances.assert_called_once()
+    azure_client.compute_client.virtual_machine_scale_sets.begin_delete.assert_called_once_with(
+        resource_group_name="test-rg",
+        vm_scale_set_name="vmss-azure-test",
+    )
+
+
 def test_single_vm_status_populates_network_identity():
     azure_client = MagicMock()
     logger = MagicMock()

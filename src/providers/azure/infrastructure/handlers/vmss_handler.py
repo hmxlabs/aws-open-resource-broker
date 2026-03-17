@@ -89,6 +89,12 @@ class VMSSHandler(AzureHandler):
             self.azure_native_spec_service = container.get(AzureNativeSpecService)
         except Exception:
             self.azure_native_spec_service = None
+        try:
+            from providers.azure.managers.azure_resource_manager import AzureResourceManager
+
+            self.azure_resource_manager = container.get(AzureResourceManager)
+        except Exception:
+            self.azure_resource_manager = None
 
     # ------------------------------------------------------------------
     # acquire_hosts
@@ -338,6 +344,12 @@ class VMSSHandler(AzureHandler):
                     resource_ids=[vmss_name],
                 ) from exc
         elif machine_ids:
+            current_capacity = self._get_vmss_capacity(resource_group, vmss_name)
+            new_capacity = max(0, current_capacity - len(machine_ids))
+
+            if new_capacity != current_capacity:
+                self._scale_vmss_capacity(resource_group, vmss_name, new_capacity)
+
             # Delete specific instances from the VMSS
             self._logger.info(
                 "Deleting %d instance(s) from VMSS '%s'",
@@ -380,9 +392,69 @@ class VMSSHandler(AzureHandler):
                     resource_ids=machine_ids,
                 ) from exc
 
+            if new_capacity == 0:
+                self._logger.info(
+                    "VMSS '%s' capacity reached zero; deleting the empty scale set",
+                    vmss_name,
+                )
+                try:
+                    poller = compute.virtual_machine_scale_sets.begin_delete(
+                        resource_group_name=resource_group,
+                        vm_scale_set_name=vmss_name,
+                    )
+                    poller.result()
+                except Exception as exc:
+                    raise TerminationError(
+                        f"Failed to delete empty VMSS '{vmss_name}': {exc}",
+                        resource_ids=[vmss_name],
+                    ) from exc
+
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+
+    def _get_vmss_capacity(self, resource_group: str, vmss_name: str) -> int:
+        """Return the current desired VMSS capacity."""
+        if self.azure_resource_manager:
+            capacity_info = self.azure_resource_manager.get_vmss_capacity(
+                resource_group=resource_group,
+                vmss_name=vmss_name,
+            )
+            return int(capacity_info.get("capacity") or 0)
+
+        vmss = self.azure_client.compute_client.virtual_machine_scale_sets.get(
+            resource_group_name=resource_group,
+            vm_scale_set_name=vmss_name,
+        )
+        sku = getattr(vmss, "sku", None)
+        return int(getattr(sku, "capacity", 0) or 0)
+
+    def _scale_vmss_capacity(self, resource_group: str, vmss_name: str, capacity: int) -> None:
+        """Scale a VMSS before deleting instances so replacements are not created."""
+        self._logger.info(
+            "Reducing VMSS '%s' capacity to %d before instance deletion",
+            vmss_name,
+            capacity,
+        )
+        if self.azure_resource_manager:
+            self.azure_resource_manager.scale_vmss(
+                resource_group=resource_group,
+                vmss_name=vmss_name,
+                capacity=capacity,
+            )
+            return
+
+        vmss = self.azure_client.compute_client.virtual_machine_scale_sets.get(
+            resource_group_name=resource_group,
+            vm_scale_set_name=vmss_name,
+        )
+        vmss.sku.capacity = capacity
+        poller = self.azure_client.compute_client.virtual_machine_scale_sets.begin_create_or_update(
+            resource_group_name=resource_group,
+            vm_scale_set_name=vmss_name,
+            parameters=vmss,
+        )
+        poller.result()
 
     def _resolve_vmss_instance_ids(
         self,
