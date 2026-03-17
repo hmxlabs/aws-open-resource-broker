@@ -109,6 +109,18 @@ class SingleVMHandler(AzureHandler):
             template.network_config.accelerated_networking
             if template.network_config else False
         )
+        backend_pool_ids = (
+            template.network_config.load_balancer_backend_pool_ids
+            if template.network_config else []
+        )
+        inbound_nat_pool_ids = (
+            template.network_config.load_balancer_inbound_nat_pool_ids
+            if template.network_config else []
+        )
+        app_gateway_pool_ids = (
+            template.network_config.application_gateway_backend_pool_ids
+            if template.network_config else []
+        )
 
         # Resolve ssh_key_name → actual key data if needed.
         # Done once before the loop so
@@ -131,6 +143,9 @@ class SingleVMHandler(AzureHandler):
                     subnet_id=subnet_id,
                     enable_accelerated_networking=accel_net,
                     nsg_id=nsg_id,
+                    load_balancer_backend_pool_ids=backend_pool_ids,
+                    load_balancer_inbound_nat_pool_ids=inbound_nat_pool_ids,
+                    application_gateway_backend_pool_ids=app_gateway_pool_ids,
                 )
                 created_nic_names.append(nic_name)
                 self._logger.debug("NIC '%s' created: %s", nic_name, nic_id)
@@ -435,19 +450,36 @@ class SingleVMHandler(AzureHandler):
         subnet_id: str,
         enable_accelerated_networking: bool = False,
         nsg_id: Optional[str] = None,
+        load_balancer_backend_pool_ids: Optional[list[str]] = None,
+        load_balancer_inbound_nat_pool_ids: Optional[list[str]] = None,
+        application_gateway_backend_pool_ids: Optional[list[str]] = None,
     ) -> str:
         """Create a NIC and return its ARM resource ID."""
         nic_name = f"nic-{vm_name}"
+        ip_config_properties: dict[str, Any] = {
+            "subnet": {"id": subnet_id},
+            "privateIPAllocationMethod": "Dynamic",
+        }
+        if load_balancer_backend_pool_ids:
+            ip_config_properties["loadBalancerBackendAddressPools"] = [
+                {"id": pool_id} for pool_id in load_balancer_backend_pool_ids
+            ]
+        if load_balancer_inbound_nat_pool_ids:
+            ip_config_properties["loadBalancerInboundNatPools"] = [
+                {"id": pool_id} for pool_id in load_balancer_inbound_nat_pool_ids
+            ]
+        if application_gateway_backend_pool_ids:
+            ip_config_properties["applicationGatewayBackendAddressPools"] = [
+                {"id": pool_id} for pool_id in application_gateway_backend_pool_ids
+            ]
+
         nic_params: dict[str, Any] = {
             "location": location,
             "properties": {
                 "ipConfigurations": [
                     {
                         "name": "ipconfig1",
-                        "properties": {
-                            "subnet": {"id": subnet_id},
-                            "privateIPAllocationMethod": "Dynamic",
-                        },
+                        "properties": ip_config_properties,
                     }
                 ],
                 "enableAcceleratedNetworking": enable_accelerated_networking,

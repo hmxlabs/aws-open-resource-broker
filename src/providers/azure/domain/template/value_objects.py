@@ -198,14 +198,38 @@ class AzureNetworkConfig(ValueObject):
         description="Enable accelerated networking (SR-IOV).",
     )
     public_ip_enabled: bool = False
+    load_balancer_backend_pool_ids: list[str] = Field(
+        default_factory=list,
+        description="Existing Azure Load Balancer backend address pool ARM IDs to attach.",
+    )
+    load_balancer_inbound_nat_pool_ids: list[str] = Field(
+        default_factory=list,
+        description="Existing Azure Load Balancer inbound NAT pool ARM IDs to attach.",
+    )
+    application_gateway_backend_pool_ids: list[str] = Field(
+        default_factory=list,
+        description="Existing Application Gateway backend pool ARM IDs to attach.",
+    )
 
     def to_arm_dict(self) -> dict[str, Any]:
         """Serialise to the ARM networkInterfaceConfiguration format."""
+        ip_config_properties: dict[str, Any] = {"subnet": {"id": self.subnet_id}}
+        if self.load_balancer_backend_pool_ids:
+            ip_config_properties["loadBalancerBackendAddressPools"] = [
+                {"id": pool_id} for pool_id in self.load_balancer_backend_pool_ids
+            ]
+        if self.load_balancer_inbound_nat_pool_ids:
+            ip_config_properties["loadBalancerInboundNatPools"] = [
+                {"id": pool_id} for pool_id in self.load_balancer_inbound_nat_pool_ids
+            ]
+        if self.application_gateway_backend_pool_ids:
+            ip_config_properties["applicationGatewayBackendAddressPools"] = [
+                {"id": pool_id} for pool_id in self.application_gateway_backend_pool_ids
+            ]
+
         ip_config: dict[str, Any] = {
             "name": "ipconfig1",
-            "properties": {
-                "subnet": {"id": self.subnet_id},
-            },
+            "properties": ip_config_properties,
         }
         if self.public_ip_enabled:
             ip_config["properties"]["publicIPAddressConfiguration"] = {
@@ -290,4 +314,3 @@ class AzureDataDisk(ValueObject):
                 "storageAccountType": self.storage_account_type.value,
             },
         }
-

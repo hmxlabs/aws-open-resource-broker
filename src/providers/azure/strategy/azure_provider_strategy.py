@@ -260,9 +260,11 @@ class AzureProviderStrategy(ProviderStrategy):
                 # (group creation, capacity-aware release, and capacity reporting),
                 # even though explicit autoscale-policy management is still not exposed.
                 "auto_scaling": True,
-                # Azure platform capability supports this around VMSS/NICs/LBs; the provider
-                # does not currently orchestrate load-balancer configuration.
-                "load_balancing": False,
+                # In this repo, "load_balancing" means templates can reference existing
+                # backend-pool-style network attachments in provider payloads. It does not
+                # mean ORB creates or manages Azure load balancers, probes, NAT rules, or
+                # application gateway policy objects.
+                "load_balancing": True,
                 "vpc_support": True,  # VNet
                 "security_groups": True,  # NSG
                 "key_pairs": True,  # SSH keys

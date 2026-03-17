@@ -312,12 +312,21 @@ class TestValueObjects:
         assert arm["createOption"] == "Empty"
 
     def test_network_config(self):
-        nc = AzureNetworkConfig(subnet_id="/subscriptions/.../subnets/default")
+        nc = AzureNetworkConfig(
+            subnet_id="/subscriptions/.../subnets/default",
+            load_balancer_backend_pool_ids=["/subscriptions/.../backendAddressPools/pool-a"],
+            load_balancer_inbound_nat_pool_ids=["/subscriptions/.../inboundNatPools/nat-a"],
+            application_gateway_backend_pool_ids=["/subscriptions/.../backendAddressPools/appgw-a"],
+        )
         arm = nc.to_arm_dict()
         assert arm["properties"]["primary"] is True
-        assert arm["properties"]["ipConfigurations"][0]["properties"]["subnet"]["id"] == (
+        ip_config = arm["properties"]["ipConfigurations"][0]["properties"]
+        assert ip_config["subnet"]["id"] == (
             "/subscriptions/.../subnets/default"
         )
+        assert ip_config["loadBalancerBackendAddressPools"][0]["id"].endswith("/pool-a")
+        assert ip_config["loadBalancerInboundNatPools"][0]["id"].endswith("/nat-a")
+        assert ip_config["applicationGatewayBackendAddressPools"][0]["id"].endswith("/appgw-a")
 
     def test_allocation_strategy_from_core(self):
         from domain.base.value_objects import AllocationStrategy

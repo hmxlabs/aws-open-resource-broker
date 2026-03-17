@@ -85,6 +85,46 @@ def test_vmss_native_spec_override_is_used_for_create_payload():
     assert call.kwargs["parameters"]["sku"]["capacity"] == 3
 
 
+def test_vmss_create_payload_includes_backend_pool_references():
+    azure_client = MagicMock()
+    logger = MagicMock()
+    handler = VMSSHandler(azure_client=azure_client, logger=logger)
+
+    poller = MagicMock()
+    azure_client.compute_client.virtual_machine_scale_sets.begin_create_or_update.return_value = poller
+
+    request = MagicMock()
+    request.requested_count = 2
+    request.request_id = "req-lb"
+    request.metadata = {}
+
+    template = _make_template(
+        network_config={
+            "subnet_id": "/subscriptions/.../subnets/default",
+            "load_balancer_backend_pool_ids": [
+                "/subscriptions/.../backendAddressPools/pool-a"
+            ],
+            "load_balancer_inbound_nat_pool_ids": [
+                "/subscriptions/.../inboundNatPools/nat-a"
+            ],
+            "application_gateway_backend_pool_ids": [
+                "/subscriptions/.../backendAddressPools/appgw-a"
+            ],
+        }
+    )
+
+    result = handler.acquire_hosts(request, template)
+
+    assert result["success"] is True
+    call = azure_client.compute_client.virtual_machine_scale_sets.begin_create_or_update.call_args
+    ip_config = call.kwargs["parameters"]["properties"]["virtualMachineProfile"]["networkProfile"][
+        "networkInterfaceConfigurations"
+    ][0]["properties"]["ipConfigurations"][0]["properties"]
+    assert ip_config["loadBalancerBackendAddressPools"][0]["id"].endswith("/pool-a")
+    assert ip_config["loadBalancerInboundNatPools"][0]["id"].endswith("/nat-a")
+    assert ip_config["applicationGatewayBackendAddressPools"][0]["id"].endswith("/appgw-a")
+
+
 def test_flexible_vmss_status_uses_virtual_machines_listing():
     azure_client = MagicMock()
     logger = MagicMock()
@@ -559,3 +599,32 @@ def test_single_vm_status_populates_network_identity():
     assert result[0]["public_ip"] == "52.1.2.3"
     assert result[0]["subnet_id"].endswith("/subnets/default")
     assert result[0]["vpc_id"].endswith("/virtualNetworks/test-vnet")
+
+
+def test_single_vm_nic_create_includes_backend_pool_references():
+    azure_client = MagicMock()
+    logger = MagicMock()
+    handler = SingleVMHandler(azure_client=azure_client, logger=logger)
+
+    nic_result = MagicMock()
+    nic_result.id = "/subscriptions/.../networkInterfaces/nic-vm-1"
+    nic_poller = MagicMock()
+    nic_poller.result.return_value = nic_result
+    azure_client.network_client.network_interfaces.begin_create_or_update.return_value = nic_poller
+
+    nic_id = handler._create_nic(
+        vm_name="vm-1",
+        resource_group="test-rg",
+        location="eastus2",
+        subnet_id="/subscriptions/.../subnets/default",
+        load_balancer_backend_pool_ids=["/subscriptions/.../backendAddressPools/pool-a"],
+        load_balancer_inbound_nat_pool_ids=["/subscriptions/.../inboundNatPools/nat-a"],
+        application_gateway_backend_pool_ids=["/subscriptions/.../backendAddressPools/appgw-a"],
+    )
+
+    assert nic_id == nic_result.id
+    call = azure_client.network_client.network_interfaces.begin_create_or_update.call_args
+    ip_config = call.kwargs["parameters"]["properties"]["ipConfigurations"][0]["properties"]
+    assert ip_config["loadBalancerBackendAddressPools"][0]["id"].endswith("/pool-a")
+    assert ip_config["loadBalancerInboundNatPools"][0]["id"].endswith("/nat-a")
+    assert ip_config["applicationGatewayBackendAddressPools"][0]["id"].endswith("/appgw-a")
