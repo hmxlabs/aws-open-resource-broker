@@ -269,13 +269,13 @@ def add_provider_actions(subparsers):
 
     providers_select = subparsers.add_parser("select", help="Select provider instance")
     add_global_arguments(providers_select)
-    providers_select.add_argument("provider", help="Provider name to select")
+    providers_select.add_argument("provider_name", help="Provider name to select")
     providers_select.add_argument("--strategy", help="Specific strategy to select")
 
     providers_exec = subparsers.add_parser("exec", help="Execute provider command")
     add_global_arguments(providers_exec)
     providers_exec.add_argument("operation", help="Operation to execute")
-    providers_exec.add_argument("--params", help="Operation parameters (JSON format)")
+    providers_exec.add_argument("--params", "--args", dest="params", help="Operation parameters (JSON format)")
 
     providers_metrics = subparsers.add_parser("metrics", help="Show provider metrics")
     add_global_arguments(providers_metrics)

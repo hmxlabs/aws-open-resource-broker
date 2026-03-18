@@ -83,3 +83,24 @@ def test_machines_list_has_request_id_flag_not_template_id():
     all_opts = [opt for a in list_parser._actions for opt in getattr(a, "option_strings", [])]
     assert "--request-id" in all_opts
     assert "--template-id" not in all_opts
+
+
+# ---------------------------------------------------------------------------
+# Task 2047 — providers select positional named provider_name + exec --args alias
+# ---------------------------------------------------------------------------
+
+
+def test_providers_select_positional_named_provider_name():
+    sp = _make_subparsers()
+    add_provider_actions(sp)
+    ns = _parse(sp, ["select", "aws-prod"])
+    assert hasattr(ns, "provider_name")
+    assert ns.provider_name == "aws-prod"
+
+
+def test_providers_exec_accepts_args_flag():
+    sp = _make_subparsers()
+    add_provider_actions(sp)
+    ns = _parse(sp, ["exec", "describe-instances", "--args", '{"key": "val"}'])
+    resolved = getattr(ns, "params", None) or getattr(ns, "args", None)
+    assert resolved == '{"key": "val"}'
