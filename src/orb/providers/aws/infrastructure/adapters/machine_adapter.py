@@ -151,7 +151,6 @@ class AWSMachineAdapter:
                 required_fields = [
                     "InstanceId",
                     "InstanceType",
-                    "PrivateIpAddress",
                     "Placement",
                     "SubnetId",
                     "VpcId",
