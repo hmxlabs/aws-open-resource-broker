@@ -9,16 +9,16 @@ from orb.cli.args_extractor import ArgsExtractor
 from orb.domain.machine.machine_status import MachineStatus
 
 
-def _make_subparsers():
+def _make_subparsers() -> tuple[argparse.ArgumentParser, argparse._SubParsersAction]:  # type: ignore[type-arg]
     parser = argparse.ArgumentParser()
     sp = parser.add_subparsers(dest="action")
-    sp._parser = parser  # stash parent for parse_args calls
-    return sp
+    return parser, sp
 
 
-def _parse(sp, args):
+def _parse(sp_tuple: tuple[argparse.ArgumentParser, argparse._SubParsersAction], args: list[str]) -> argparse.Namespace:  # type: ignore[type-arg]
     """Parse args using the parent parser that owns the subparsers."""
-    return sp._parser.parse_args(args)
+    parser, _sp = sp_tuple
+    return parser.parse_args(args)
 
 
 # ---------------------------------------------------------------------------
@@ -27,34 +27,38 @@ def _parse(sp, args):
 
 
 def test_machines_list_status_has_choices():
-    sp = _make_subparsers()
+    _, sp = _make_subparsers()
     add_machine_actions(sp)
     list_parser = sp.choices["list"]
     status_action = next(a for a in list_parser._actions if "--status" in getattr(a, "option_strings", []))
-    assert status_action.choices is not None and len(status_action.choices) > 0
+    choices = list(status_action.choices) if status_action.choices is not None else []
+    assert len(choices) > 0
 
 
 def test_machines_list_status_choices_match_machine_status_enum():
-    sp = _make_subparsers()
+    _, sp = _make_subparsers()
     add_machine_actions(sp)
     list_parser = sp.choices["list"]
     status_action = next(a for a in list_parser._actions if "--status" in getattr(a, "option_strings", []))
+    assert status_action.choices is not None
     assert set(status_action.choices) == {s.value for s in MachineStatus}
 
 
 @pytest.mark.parametrize("valid_status", [s.value for s in MachineStatus])
 def test_machines_list_valid_status_accepted(valid_status):
-    sp = _make_subparsers()
+    sp_tuple = _make_subparsers()
+    _, sp = sp_tuple
     add_machine_actions(sp)
-    ns = _parse(sp, ["list", "--status", valid_status])
+    ns = _parse(sp_tuple, ["list", "--status", valid_status])
     assert ns.status == valid_status
 
 
 def test_machines_list_invalid_status_raises_argparse_error():
-    sp = _make_subparsers()
+    sp_tuple = _make_subparsers()
+    _, sp = sp_tuple
     add_machine_actions(sp)
     with pytest.raises(SystemExit) as exc_info:
-        _parse(sp, ["list", "--status", "not-a-real-status"])
+        _parse(sp_tuple, ["list", "--status", "not-a-real-status"])
     assert exc_info.value.code != 0
 
 
@@ -77,7 +81,7 @@ def test_extract_output_format_does_not_return_file_path():
 
 
 def test_machines_list_has_request_id_flag_not_template_id():
-    sp = _make_subparsers()
+    _, sp = _make_subparsers()
     add_machine_actions(sp)
     list_parser = sp.choices["list"]
     all_opts = [opt for a in list_parser._actions for opt in getattr(a, "option_strings", [])]
@@ -91,17 +95,19 @@ def test_machines_list_has_request_id_flag_not_template_id():
 
 
 def test_providers_select_positional_named_provider_name():
-    sp = _make_subparsers()
+    sp_tuple = _make_subparsers()
+    _, sp = sp_tuple
     add_provider_actions(sp)
-    ns = _parse(sp, ["select", "aws-prod"])
+    ns = _parse(sp_tuple, ["select", "aws-prod"])
     assert hasattr(ns, "provider_name")
     assert ns.provider_name == "aws-prod"
 
 
 def test_providers_exec_accepts_args_flag():
-    sp = _make_subparsers()
+    sp_tuple = _make_subparsers()
+    _, sp = sp_tuple
     add_provider_actions(sp)
-    ns = _parse(sp, ["exec", "describe-instances", "--args", '{"key": "val"}'])
+    ns = _parse(sp_tuple, ["exec", "describe-instances", "--args", '{"key": "val"}'])
     resolved = getattr(ns, "params", None) or getattr(ns, "args", None)
     assert resolved == '{"key": "val"}'
 
@@ -113,7 +119,6 @@ def test_providers_exec_accepts_args_flag():
 
 @pytest.mark.asyncio
 async def test_requests_list_offset_forwarded_to_orchestrator():
-    import argparse
     from unittest.mock import AsyncMock, MagicMock, patch
 
     from orb.application.dto.interface_response import InterfaceResponse
@@ -144,7 +149,6 @@ async def test_requests_list_offset_forwarded_to_orchestrator():
 
 @pytest.mark.asyncio
 async def test_requests_list_status_forwarded_to_orchestrator():
-    import argparse
     from unittest.mock import AsyncMock, MagicMock, patch
 
     from orb.application.dto.interface_response import InterfaceResponse
@@ -181,35 +185,39 @@ async def test_requests_list_status_forwarded_to_orchestrator():
 
 @pytest.mark.parametrize("subcommand", ["return", "terminate", "stop", "start"])
 def test_machines_subcommand_accepts_machine_id_long_flag(subcommand):
-    sp = _make_subparsers()
+    sp_tuple = _make_subparsers()
+    _, sp = sp_tuple
     add_machine_actions(sp)
-    ns = _parse(sp, [subcommand, "--machine-id", "i-abc123"])
+    ns = _parse(sp_tuple, [subcommand, "--machine-id", "i-abc123"])
     ids = getattr(ns, "machine_ids", None) or getattr(ns, "machine_ids_flag", None)
     assert ids is not None and "i-abc123" in ids
 
 
 @pytest.mark.parametrize("subcommand", ["return", "terminate", "stop", "start"])
 def test_machines_subcommand_accepts_machine_id_short_flag(subcommand):
-    sp = _make_subparsers()
+    sp_tuple = _make_subparsers()
+    _, sp = sp_tuple
     add_machine_actions(sp)
-    ns = _parse(sp, [subcommand, "-m", "i-abc123"])
+    ns = _parse(sp_tuple, [subcommand, "-m", "i-abc123"])
     ids = getattr(ns, "machine_ids", None) or getattr(ns, "machine_ids_flag", None)
     assert ids is not None and "i-abc123" in ids
 
 
 @pytest.mark.parametrize("subcommand", ["show", "cancel"])
 def test_requests_subcommand_accepts_request_id_flag(subcommand):
-    sp = _make_subparsers()
+    sp_tuple = _make_subparsers()
+    _, sp = sp_tuple
     add_request_actions(sp)
-    ns = _parse(sp, [subcommand, "--request-id", "req-999"])
+    ns = _parse(sp_tuple, [subcommand, "--request-id", "req-999"])
     rid = getattr(ns, "request_id", None) or getattr(ns, "flag_request_id", None)
     assert rid is not None
 
 
 def test_templates_validate_accepts_template_id_flag():
-    sp = _make_subparsers()
+    sp_tuple = _make_subparsers()
+    _, sp = sp_tuple
     add_template_actions(sp)
-    ns = _parse(sp, ["validate", "--template-id", "tmpl-1"])
+    ns = _parse(sp_tuple, ["validate", "--template-id", "tmpl-1"])
     tid = getattr(ns, "template_id", None) or getattr(ns, "flag_template_id", None)
     assert tid is not None
 
@@ -222,7 +230,6 @@ def test_templates_validate_accepts_template_id_flag():
 def test_build_parser_is_callable():
     from orb.cli.args import build_parser
     parser, resource_parsers = build_parser()
-    import argparse
     assert isinstance(parser, argparse.ArgumentParser)
     assert isinstance(resource_parsers, dict)
 
@@ -251,7 +258,7 @@ def test_cli_contract_flag_exists(resource, subcommand, flag, short):
         "templates": add_template_actions,
         "providers": add_provider_actions,
     }
-    sp = _make_subparsers()
+    _, sp = _make_subparsers()
     adder_map[resource](sp)
     sub_parser = sp.choices[subcommand]
     all_opts = [opt for action in sub_parser._actions for opt in getattr(action, "option_strings", [])]
