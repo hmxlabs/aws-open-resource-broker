@@ -51,8 +51,8 @@ class RequestStatusService:
                 failed_count = sum(1 for m in provider_machines if m.status.value == "failed")
                 total_count = len(provider_machines)
 
-                # shutting-down is irreversible — treat it as terminated for completion purposes
-                effectively_done_count = terminated_count + shutting_down_count
+                # shutting-down/stopping are transient — only terminated/stopped are truly done
+                effectively_done_count = terminated_count
                 if effectively_done_count == total_count and running_count == 0:
                     return (
                         RequestStatus.COMPLETED.value,
