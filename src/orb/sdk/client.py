@@ -17,7 +17,13 @@ from orb.infrastructure.di.container import create_container
 
 from .config import SDKConfig
 from .discovery import MethodInfo, SDKMethodDiscovery
-from .exceptions import ConfigurationError, NotFoundError, ProviderError, SDKError
+from .exceptions import (
+    ConfigurationError,
+    NotFoundError,
+    ProviderError,
+    RequestTimeoutError,
+    SDKError,
+)
 from .middleware import SDKMiddleware, build_middleware_chain
 
 
@@ -248,7 +254,7 @@ class ORBClient:
                 "SDK not initialized. Call initialize() or use as async context manager."
             )
 
-        return list(self._methods.keys())
+        return sorted(self._EXPLICIT_METHODS | set(self._methods.keys()))
 
     def get_method_info(self, method_name: str) -> Optional[MethodInfo]:
         """
@@ -1015,7 +1021,7 @@ class ORBClient:
 
         from orb.domain.request.request_types import RequestStatus
 
-        deadline = asyncio.get_event_loop().time() + timeout
+        deadline = asyncio.get_running_loop().time() + timeout
         while True:
             status_result = await self.get_request_status(request_ids=[request_id], detailed=False)
             requests = status_result.get("requests", []) if isinstance(status_result, dict) else []
@@ -1032,12 +1038,9 @@ class ORBClient:
                 # Invalid or unknown status string; treat as non-terminal and continue polling.
                 pass
 
-            remaining = deadline - asyncio.get_event_loop().time()
+            remaining = deadline - asyncio.get_running_loop().time()
             if remaining <= 0:
-                raise TimeoutError(
-                    f"Request {request_id!r} did not reach terminal status within {timeout}s. "
-                    f"Last status: {status_str!r}"
-                )
+                raise RequestTimeoutError(request_id=request_id, timeout=timeout)
             await asyncio.sleep(min(poll_interval, remaining))
 
     async def wait_for_return(

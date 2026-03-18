@@ -39,7 +39,7 @@ class UpdateTemplateOrchestrator(OrchestratorBase[UpdateTemplateInput, UpdateTem
             validation_errors=command.validation_errors or [],
             raw={
                 "template_id": input.template_id,
-                "status": "updated",
+                "status": "updated" if command.updated else "validation_failed",
                 "updated": command.updated,
                 "validation_errors": command.validation_errors or [],
             },

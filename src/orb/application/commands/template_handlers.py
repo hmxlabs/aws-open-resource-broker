@@ -95,6 +95,9 @@ class CreateTemplateHandler(BaseCommandHandler[CreateTemplateCommand, None]):  #
             "image_id": command.image_id,
             "tags": command.tags,
         }
+        # instance_type → machine_types (backward compat)
+        if command.instance_type is not None and "machine_types" not in dto_fields:
+            dto_fields["machine_types"] = {command.instance_type: 1}
         # Remove None values so TemplateDTO defaults apply
         dto_fields = {k: v for k, v in dto_fields.items() if v is not None}
         dto = TemplateDTO(**dto_fields)
