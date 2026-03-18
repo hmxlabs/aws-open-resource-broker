@@ -184,7 +184,7 @@ class TestAcquireMachinesOrchestrator:
         assert hasattr(result, "raw")
 
     @pytest.mark.asyncio
-    async def test_wait_false_raw_contains_resource_ids_empty(self, orchestrator, mock_command_bus):
+    async def test_wait_false_raw_contains_machine_ids_empty(self, orchestrator, mock_command_bus):
         async def set_request_id(cmd):
             cmd.created_request_id = "req-001"
 
@@ -196,10 +196,10 @@ class TestAcquireMachinesOrchestrator:
 
         assert result.raw["request_id"] == "req-001"
         assert result.raw["status"] == "pending"
-        assert result.raw["resource_ids"] == []
+        assert result.raw["machine_ids"] == []
 
     @pytest.mark.asyncio
-    async def test_wait_true_raw_contains_resource_ids(
+    async def test_wait_true_raw_contains_machine_ids(
         self, orchestrator, mock_command_bus, mock_query_bus
     ):
         async def set_request_id(cmd):
@@ -222,12 +222,12 @@ class TestAcquireMachinesOrchestrator:
                 )
             )
 
-        assert result.raw["resource_ids"] == ["m-aaa"]
+        assert result.raw["machine_ids"] == ["m-aaa"]
         assert result.raw["request_id"] == "req-002"
         assert result.raw["status"] == "completed"
 
     @pytest.mark.asyncio
-    async def test_wait_true_failed_raw_contains_resource_ids_empty(
+    async def test_wait_true_failed_raw_contains_machine_ids_empty(
         self, orchestrator, mock_command_bus, mock_query_bus
     ):
         async def set_request_id(cmd):
@@ -248,11 +248,11 @@ class TestAcquireMachinesOrchestrator:
                 )
             )
 
-        assert result.raw["resource_ids"] == []
+        assert result.raw["machine_ids"] == []
         assert result.raw["status"] == "failed"
 
     @pytest.mark.asyncio
-    async def test_wait_true_timeout_raw_contains_resource_ids_empty(
+    async def test_wait_true_timeout_raw_contains_machine_ids_empty(
         self, orchestrator, mock_command_bus, mock_query_bus
     ):
         async def set_request_id(cmd):
@@ -272,11 +272,11 @@ class TestAcquireMachinesOrchestrator:
                 )
             )
 
-        assert result.raw["resource_ids"] == []
+        assert result.raw["machine_ids"] == []
         assert result.raw["status"] == "timeout"
 
     @pytest.mark.asyncio
-    async def test_raw_resource_ids_matches_machine_ids(
+    async def test_raw_machine_ids_matches_machine_ids(
         self, orchestrator, mock_command_bus, mock_query_bus
     ):
         async def set_request_id(cmd):
@@ -300,7 +300,7 @@ class TestAcquireMachinesOrchestrator:
                 )
             )
 
-        assert result.raw["resource_ids"] == result.machine_ids
+        assert result.raw["machine_ids"] == result.machine_ids
 
     @pytest.mark.asyncio
     async def test_poll_consecutive_errors_abort(

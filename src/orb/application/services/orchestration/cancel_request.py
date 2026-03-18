@@ -31,10 +31,15 @@ class CancelRequestOrchestrator(OrchestratorBase[CancelRequestInput, CancelReque
         command = CancelRequestCommand(request_id=input.request_id, reason=input.reason)
         await self._command_bus.execute(command)  # type: ignore[arg-type]
 
-        request_dict = {"request_id": input.request_id, "status": RequestStatus.CANCELLED.value}
+        status = (
+            command.final_status
+            if command.cancelled and command.final_status
+            else RequestStatus.CANCELLED.value
+        )
+        request_dict = {"request_id": input.request_id, "status": status}
         return CancelRequestOutput(
             request_id=input.request_id,
-            status=RequestStatus.CANCELLED.value,
+            status=status,
             raw=request_dict,
             requests=[request_dict],
         )

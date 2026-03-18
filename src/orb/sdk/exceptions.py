@@ -91,3 +91,12 @@ class AlreadyExistsError(SDKError):
         super().__init__(f"{entity_type} '{entity_id}' already exists")
         self.entity_type = entity_type
         self.entity_id = entity_id
+
+
+class RequestTimeoutError(SDKError):
+    """Raised when wait_for_request exceeds the timeout."""
+
+    def __init__(self, request_id: str, timeout: float) -> None:
+        super().__init__(f"Request {request_id!r} did not complete within {timeout}s")
+        self.request_id = request_id
+        self.timeout = timeout

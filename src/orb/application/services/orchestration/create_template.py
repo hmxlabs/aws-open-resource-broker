@@ -41,7 +41,7 @@ class CreateTemplateOrchestrator(OrchestratorBase[CreateTemplateInput, CreateTem
             validation_errors=command.validation_errors or [],
             raw={
                 "template_id": input.template_id,
-                "status": "created",
+                "status": "created" if command.created else "validation_failed",
                 "created": command.created,
                 "validation_errors": command.validation_errors or [],
             },
