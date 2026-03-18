@@ -123,11 +123,17 @@ def add_machine_actions(subparsers):
     add_global_arguments(machines_return)
     add_force_argument(machines_return)
     machines_return.add_argument("machine_ids", nargs="*", help="Machine IDs to return")
+    machines_return.add_argument(
+        "--machine-id", "-m", action="append", dest="machine_ids_flag", help="Machine ID to return"
+    )
 
     machines_terminate = subparsers.add_parser("terminate", help="Terminate (return) machines")
     add_global_arguments(machines_terminate)
     add_force_argument(machines_terminate)
     machines_terminate.add_argument("machine_ids", nargs="*", help="Machine IDs to terminate")
+    machines_terminate.add_argument(
+        "--machine-id", "-m", action="append", dest="machine_ids_flag", help="Machine ID to terminate"
+    )
 
     machines_status = subparsers.add_parser("status", help="Check machine status")
     add_global_arguments(machines_status)
@@ -140,10 +146,16 @@ def add_machine_actions(subparsers):
     add_global_arguments(machines_stop)
     add_force_argument(machines_stop)
     machines_stop.add_argument("machine_ids", nargs="*", help="Machine IDs to stop")
+    machines_stop.add_argument(
+        "--machine-id", "-m", action="append", dest="machine_ids_flag", help="Machine ID to stop"
+    )
 
     machines_start = subparsers.add_parser("start", help="Start stopped machines")
     add_global_arguments(machines_start)
     machines_start.add_argument("machine_ids", nargs="*", help="Machine IDs to start")
+    machines_start.add_argument(
+        "--machine-id", "-m", action="append", dest="machine_ids_flag", help="Machine ID to start"
+    )
 
 
 def add_request_actions(subparsers):
@@ -169,11 +181,17 @@ def add_request_actions(subparsers):
     requests_show = subparsers.add_parser("show", help="Show request details")
     add_global_arguments(requests_show)
     requests_show.add_argument("request_id", nargs="?", help="Request ID to show")
+    requests_show.add_argument(
+        "--request-id", "-r", dest="flag_request_id", help="Request ID to show"
+    )
 
     requests_cancel = subparsers.add_parser("cancel", help="Cancel request")
     add_global_arguments(requests_cancel)
     add_force_argument(requests_cancel)
-    requests_cancel.add_argument("request_id", help="Request ID to cancel")
+    requests_cancel.add_argument("request_id", nargs="?", help="Request ID to cancel")
+    requests_cancel.add_argument(
+        "--request-id", "-r", dest="flag_request_id", help="Request ID to cancel"
+    )
 
     requests_status = subparsers.add_parser("status", help="Check request status")
     add_global_arguments(requests_status)
@@ -329,6 +347,9 @@ def add_template_actions(subparsers):
     templates_validate = subparsers.add_parser("validate", help="Validate template")
     add_global_arguments(templates_validate)
     templates_validate.add_argument("template_id", nargs="?", help="Template ID to validate")
+    templates_validate.add_argument(
+        "--template-id", "-t", dest="flag_template_id", help="Template ID to validate"
+    )
     templates_validate.add_argument("--file", help="Template file to validate (pre-import)")
 
     templates_refresh = subparsers.add_parser("refresh", help="Refresh template cache")

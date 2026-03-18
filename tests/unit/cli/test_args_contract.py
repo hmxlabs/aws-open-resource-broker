@@ -172,3 +172,43 @@ async def test_requests_list_status_forwarded_to_orchestrator():
     call_input = list_req_orch.execute.call_args[0][0]
     assert call_input.status == "pending"
     assert call_input.limit == 10
+
+
+# ---------------------------------------------------------------------------
+# Task 2043 — --machine-id/-m, --request-id/-r, --template-id/-t flag forms
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("subcommand", ["return", "terminate", "stop", "start"])
+def test_machines_subcommand_accepts_machine_id_long_flag(subcommand):
+    sp = _make_subparsers()
+    add_machine_actions(sp)
+    ns = _parse(sp, [subcommand, "--machine-id", "i-abc123"])
+    ids = getattr(ns, "machine_ids", None) or getattr(ns, "machine_ids_flag", None)
+    assert ids is not None and "i-abc123" in ids
+
+
+@pytest.mark.parametrize("subcommand", ["return", "terminate", "stop", "start"])
+def test_machines_subcommand_accepts_machine_id_short_flag(subcommand):
+    sp = _make_subparsers()
+    add_machine_actions(sp)
+    ns = _parse(sp, [subcommand, "-m", "i-abc123"])
+    ids = getattr(ns, "machine_ids", None) or getattr(ns, "machine_ids_flag", None)
+    assert ids is not None and "i-abc123" in ids
+
+
+@pytest.mark.parametrize("subcommand", ["show", "cancel"])
+def test_requests_subcommand_accepts_request_id_flag(subcommand):
+    sp = _make_subparsers()
+    add_request_actions(sp)
+    ns = _parse(sp, [subcommand, "--request-id", "req-999"])
+    rid = getattr(ns, "request_id", None) or getattr(ns, "flag_request_id", None)
+    assert rid is not None
+
+
+def test_templates_validate_accepts_template_id_flag():
+    sp = _make_subparsers()
+    add_template_actions(sp)
+    ns = _parse(sp, ["validate", "--template-id", "tmpl-1"])
+    tid = getattr(ns, "template_id", None) or getattr(ns, "flag_template_id", None)
+    assert tid is not None
