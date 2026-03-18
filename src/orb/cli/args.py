@@ -9,6 +9,7 @@ import argparse
 import os
 import sys
 
+from orb.domain.machine.machine_status import MachineStatus
 from orb.domain.request.value_objects import RequestStatus
 
 # Optional: Rich formatting for help text
@@ -79,7 +80,11 @@ def add_machine_actions(subparsers):
         description="List machines with filtering support. Use specific filters (--status, --template-id) or generic filters (--filter field=value).",
     )
     add_global_arguments(machines_list)
-    machines_list.add_argument("--status", help="Filter by machine status (specific filter)")
+    machines_list.add_argument(
+        "--status",
+        choices=[s.value for s in MachineStatus],
+        help="Filter by machine status (specific filter)",
+    )
     machines_list.add_argument("--template-id", help="Filter by template ID (specific filter)")
     machines_list.add_argument(
         "--timestamp-format",
