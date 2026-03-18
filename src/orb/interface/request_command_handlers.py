@@ -2,6 +2,7 @@
 
 from typing import TYPE_CHECKING, Any, Union
 
+from orb.application.dto.interface_response import InterfaceResponse
 from orb.application.ports.scheduler_port import SchedulerPort
 from orb.application.services.response_formatting_service import ResponseFormattingService
 from orb.infrastructure.di.container import get_container
@@ -14,7 +15,7 @@ if TYPE_CHECKING:
 @handle_interface_exceptions(context="get_request_status", interface_type="cli")
 async def handle_get_request_status(
     args: "argparse.Namespace",
-) -> Union[dict[str, Any], tuple[dict[str, Any], int], list[Any]]:
+) -> Union[dict[str, Any], tuple[dict[str, Any], int], list[Any], InterfaceResponse]:
     """
     Handle get request status operations with --all support.
 
@@ -155,7 +156,7 @@ async def handle_request_machines(
 
 
 @handle_interface_exceptions(context="get_return_requests", interface_type="cli")
-async def handle_get_return_requests(args: "argparse.Namespace") -> dict[str, Any]:
+async def handle_get_return_requests(args: "argparse.Namespace") -> Union[dict[str, Any], InterfaceResponse]:
     """
     Handle get return requests operations.
 
@@ -179,7 +180,7 @@ async def handle_get_return_requests(args: "argparse.Namespace") -> dict[str, An
 
 
 @handle_interface_exceptions(context="request_return_machines", interface_type="cli")
-async def handle_request_return_machines(args: "argparse.Namespace") -> dict[str, Any]:
+async def handle_request_return_machines(args: "argparse.Namespace") -> Union[dict[str, Any], InterfaceResponse]:
     """
     Handle request return machines operations.
 
@@ -246,7 +247,7 @@ async def handle_request_return_machines(args: "argparse.Namespace") -> dict[str
 
 
 @handle_interface_exceptions(context="list_requests", interface_type="cli")
-async def handle_list_requests(args: "argparse.Namespace") -> dict[str, Any]:
+async def handle_list_requests(args: "argparse.Namespace") -> Union[dict[str, Any], InterfaceResponse]:
     """List all active provisioning requests."""
     from orb.application.services.orchestration.dtos import ListRequestsInput
     from orb.application.services.orchestration.list_requests import ListRequestsOrchestrator
@@ -266,7 +267,7 @@ async def handle_list_requests(args: "argparse.Namespace") -> dict[str, Any]:
 
 
 @handle_interface_exceptions(context="cancel_request", interface_type="cli")
-async def handle_cancel_request(args: "argparse.Namespace") -> dict[str, Any]:
+async def handle_cancel_request(args: "argparse.Namespace") -> Union[dict[str, Any], InterfaceResponse]:
     """Handle cancel request operations."""
     from orb.application.services.orchestration.cancel_request import CancelRequestOrchestrator
     from orb.application.services.orchestration.dtos import CancelRequestInput

@@ -1,8 +1,9 @@
 """Machine-related command handlers for the interface layer."""
 
 import asyncio
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Union
 
+from orb.application.dto.interface_response import InterfaceResponse
 from orb.application.services.response_formatting_service import ResponseFormattingService
 from orb.infrastructure.di.container import get_container
 from orb.infrastructure.error.decorators import handle_interface_exceptions
@@ -12,7 +13,7 @@ if TYPE_CHECKING:
 
 
 @handle_interface_exceptions(context="get_machine_status", interface_type="cli")
-async def handle_get_machine_status(args: "argparse.Namespace") -> dict[str, Any]:
+async def handle_get_machine_status(args: "argparse.Namespace") -> Union[dict[str, Any], InterfaceResponse]:
     """
     Handle get machine status operations for multiple machine IDs.
 
@@ -66,7 +67,7 @@ async def handle_get_machine_status(args: "argparse.Namespace") -> dict[str, Any
 
 
 @handle_interface_exceptions(context="list_machines", interface_type="cli")
-async def handle_list_machines(args: "argparse.Namespace") -> dict[str, Any]:
+async def handle_list_machines(args: "argparse.Namespace") -> Union[dict[str, Any], InterfaceResponse]:
     """
     Handle list machines operations with scheduler-aware formatting.
 
