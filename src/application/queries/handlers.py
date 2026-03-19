@@ -901,14 +901,21 @@ class GetRequestHandler(BaseQueryHandler[GetRequestQuery, RequestDTO]):
             # If provisioning already recorded a failure, keep the request terminal.
             metadata = getattr(request, "metadata", {}) or {}
             error_details = getattr(request, "error_details", {}) or {}
+            provider_metadata = provider_metadata or {}
 
             provisioning_error_type = metadata.get("error_type")
             provisioning_error_message = metadata.get("error_message")
             fleet_errors = metadata.get("fleet_errors")
             ec2_fleet_errors = (error_details.get("ec2_fleet") or {}).get("errors")
+            provider_fleet_errors = provider_metadata.get("fleet_errors")
+            capacity_fulfilment = provider_metadata.get("fleet_capacity_fulfilment") or {}
+            provider_capacity_state = str(capacity_fulfilment.get("state") or "")
 
             has_provisioning_errors = bool(
-                provisioning_error_type or fleet_errors or ec2_fleet_errors
+                provisioning_error_type
+                or fleet_errors
+                or ec2_fleet_errors
+                or provider_fleet_errors
             )
             has_any_instances = provider_machine_count > 0 or database_machine_count > 0
 
@@ -926,8 +933,35 @@ class GetRequestHandler(BaseQueryHandler[GetRequestQuery, RequestDTO]):
                 )
                 return (RequestStatus.PARTIAL.value, status_message)
 
+            # Providers like Azure VMSS may succeed in creating the control-plane
+            # resource while later surfacing an explicit failed provisioning state.
+            # Treat that as terminal even if no instances have appeared yet.
+            if (
+                request_type == RequestType.ACQUIRE
+                and not has_any_instances
+                and provider_capacity_state.lower() == "failed"
+            ):
+                status_message = "Provisioning failed: provider resource entered failed state"
+                if current_status != RequestStatus.FAILED:
+                    return (RequestStatus.FAILED.value, status_message)
+                return (None, None)
+
             if has_provisioning_errors:
-                status_message = provisioning_error_message or "Provisioning failed"
+                first_provider_error = None
+                if provider_fleet_errors and isinstance(provider_fleet_errors, list):
+                    first_provider_error = next(
+                        (
+                            error.get("error_message")
+                            for error in provider_fleet_errors
+                            if isinstance(error, dict) and error.get("error_message")
+                        ),
+                        None,
+                    )
+                status_message = (
+                    provisioning_error_message
+                    or first_provider_error
+                    or "Provisioning failed"
+                )
                 if not status_message.lower().startswith("provisioning failed"):
                     status_message = f"Provisioning failed: {status_message}"
                 if current_status != RequestStatus.FAILED:
