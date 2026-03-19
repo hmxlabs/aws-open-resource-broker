@@ -6,8 +6,10 @@ from typing import Any, Dict, List
 from orb.config.platform_dirs import get_config_location
 from orb.domain.base.ports.console_port import ConsolePort
 from orb.infrastructure.di.container import get_container
+from orb.infrastructure.error.decorators import handle_interface_exceptions
 
 
+@handle_interface_exceptions(context="infrastructure_discover", interface_type="cli")
 async def handle_infrastructure_discover(args) -> Dict[str, Any]:
     """Handle orb infrastructure discover command."""
     try:
@@ -35,6 +37,7 @@ async def handle_infrastructure_discover(args) -> Dict[str, Any]:
         }
 
 
+@handle_interface_exceptions(context="infrastructure_show", interface_type="cli")
 async def handle_infrastructure_show(args) -> Dict[str, Any]:
     """Handle orb infrastructure show command."""
     try:
@@ -59,6 +62,7 @@ async def handle_infrastructure_show(args) -> Dict[str, Any]:
         }
 
 
+@handle_interface_exceptions(context="infrastructure_validate", interface_type="cli")
 async def handle_infrastructure_validate(args) -> Dict[str, Any]:
     """Handle orb infrastructure validate command."""
     try:

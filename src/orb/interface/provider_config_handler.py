@@ -8,11 +8,13 @@ from orb.application.services.response_formatting_service import ResponseFormatt
 from orb.config.platform_dirs import get_config_location
 from orb.domain.base.ports.provider_cli_spec_port import CLISpecRegistry
 from orb.infrastructure.di.container import get_container
+from orb.infrastructure.error.decorators import handle_interface_exceptions
 from orb.infrastructure.logging.logger import get_logger
 
 logger = get_logger(__name__)
 
 
+@handle_interface_exceptions(context="provider_add", interface_type="cli")
 async def handle_provider_add(args) -> dict[str, Any]:
     """Handle orb providers add command."""
     try:
@@ -88,6 +90,7 @@ async def handle_provider_add(args) -> dict[str, Any]:
         return {"error": True, "message": f"Failed to add provider: {e}", "exit_code": 1}
 
 
+@handle_interface_exceptions(context="provider_remove", interface_type="cli")
 async def handle_provider_remove(args) -> dict[str, Any]:
     """Handle orb providers remove command."""
     try:
@@ -123,6 +126,7 @@ async def handle_provider_remove(args) -> dict[str, Any]:
         return {"error": True, "message": f"Failed to remove provider: {e}", "exit_code": 1}
 
 
+@handle_interface_exceptions(context="provider_update", interface_type="cli")
 async def handle_provider_update(args) -> dict[str, Any]:
     """Handle orb providers update command."""
     try:
@@ -185,6 +189,7 @@ async def handle_provider_update(args) -> dict[str, Any]:
         return {"error": True, "message": f"Failed to update provider: {e}", "exit_code": 1}
 
 
+@handle_interface_exceptions(context="provider_set_default", interface_type="cli")
 async def handle_provider_set_default(args) -> dict[str, Any]:
     """Handle orb providers set-default command."""
     try:
@@ -215,6 +220,7 @@ async def handle_provider_set_default(args) -> dict[str, Any]:
         return {"error": True, "message": f"Failed to set default provider: {e}", "exit_code": 1}
 
 
+@handle_interface_exceptions(context="provider_get_default", interface_type="cli")
 async def handle_provider_get_default(args) -> dict[str, Any]:
     """Handle orb providers get-default command."""
     try:
@@ -241,6 +247,7 @@ async def handle_provider_get_default(args) -> dict[str, Any]:
         return {"error": True, "message": f"Failed to get default provider: {e}", "exit_code": 1}
 
 
+@handle_interface_exceptions(context="provider_get", interface_type="cli")
 async def handle_provider_get(args) -> dict[str, Any]:
     """Handle orb providers get command."""
     try:
