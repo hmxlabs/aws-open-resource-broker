@@ -63,7 +63,12 @@ class TestAdditionalEndToEnd:
         from botocore.exceptions import ClientError
 
         self.mock_aws_client.ec2_client.describe_launch_templates.side_effect = ClientError(
-            error_response={"Error": {"Code": "InvalidLaunchTemplateName.NotFoundException", "Message": "Not found"}},
+            error_response={
+                "Error": {
+                    "Code": "InvalidLaunchTemplateName.NotFoundException",
+                    "Message": "Not found",
+                }
+            },
             operation_name="DescribeLaunchTemplates",
         )
 
