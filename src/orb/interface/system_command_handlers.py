@@ -3,22 +3,26 @@
 from typing import Any, Union, cast
 
 from orb.application.dto.interface_response import InterfaceResponse
-from orb.domain.constants import PROVIDER_TYPE_AWS
 from orb.infrastructure.di.container import get_container
 from orb.infrastructure.error.decorators import handle_interface_exceptions
 from orb.monitoring.metrics import MetricsCollector
 
 
 @handle_interface_exceptions(context="system_health", interface_type="cli")
-async def handle_system_health(args) -> dict[str, Any]:
+async def handle_system_health(args) -> Union[dict[str, Any], InterfaceResponse]:
     """Handle system health check."""
     import asyncio
 
     from orb.interface.health_command_handler import handle_health_check
 
-    # Run sync health check in executor
     loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(None, handle_health_check, args)
+    try:
+        return await loop.run_in_executor(None, handle_health_check, args)
+    except Exception as e:
+        from orb.application.services.response_formatting_service import ResponseFormattingService
+
+        formatter = get_container().get(ResponseFormattingService)
+        return formatter.format_error(f"Health check failed: {e}")
 
 
 @handle_interface_exceptions(context="provider_health", interface_type="cli")
@@ -78,43 +82,17 @@ async def handle_validate_provider_config(args) -> dict[str, Any]:
     }
 
 
-@handle_interface_exceptions(context="reload_provider_config", interface_type="cli")
-async def handle_reload_provider_config(args) -> Union[dict[str, Any], InterfaceResponse]:
-    """Handle reload provider config operations."""
-    from orb.application.services.provider_registry_service import ProviderRegistryService
-    from orb.application.services.response_formatting_service import ResponseFormattingService
-
-    container = get_container()
-    formatter = container.get(ResponseFormattingService)
-    try:
-        registry = container.get(ProviderRegistryService)
-        if hasattr(registry, "reload"):
-            await cast(Any, registry).reload()
-            return formatter.format_success({"message": "Provider configuration reloaded"})
-        return formatter.format_error("Reload not supported by current provider registry")
-    except Exception as e:
-        return formatter.format_error(f"Reload failed: {e}")
-
-
 @handle_interface_exceptions(context="select_provider_strategy", interface_type="cli")
 async def handle_select_provider_strategy(args) -> dict[str, Any]:
     """Handle select provider strategy operations."""
-    # Get first available provider as default
-    default_provider = PROVIDER_TYPE_AWS  # Keep as fallback
-    try:
-        from orb.application.services.provider_registry_service import ProviderRegistryService
+    from orb.application.services.provider_registry_service import ProviderRegistryService
 
-        registry_service = get_container().get(ProviderRegistryService)
-        registered_types = registry_service.get_available_strategies()
-        if registered_types:
-            default_provider = registered_types[0]
-    except Exception as e:
-        from orb.infrastructure.logging.logger import get_logger
+    registry_service = get_container().get(ProviderRegistryService)
+    registered_types = registry_service.get_available_strategies()
+    if not registered_types:
+        return {"error": "No providers registered", "message": "No provider strategies are available"}
 
-        logger = get_logger(__name__)
-        logger.debug(f"Failed to get default provider: {e}")  # Use fallback
-
-    provider = getattr(args, "provider", default_provider)
+    provider = getattr(args, "provider", None) or registered_types[0]
     return {
         "result": {"selected_provider": provider},
         "message": "Provider strategy selected successfully",
@@ -148,6 +126,24 @@ async def handle_provider_metrics(args) -> dict[str, Any]:
         )
     )
     return {"metrics": result.metrics, "message": result.message}
+
+
+@handle_interface_exceptions(context="reload_provider_config", interface_type="cli")
+async def handle_reload_provider_config(args) -> Union[dict[str, Any], InterfaceResponse]:
+    """Handle reload provider config operations."""
+    from orb.application.services.provider_registry_service import ProviderRegistryService
+    from orb.application.services.response_formatting_service import ResponseFormattingService
+
+    container = get_container()
+    formatter = container.get(ResponseFormattingService)
+    try:
+        registry = container.get(ProviderRegistryService)
+        if hasattr(registry, "reload"):
+            await cast(Any, registry).reload()
+            return formatter.format_success({"message": "Provider configuration reloaded"})
+        return formatter.format_error("Reload not supported by current provider registry")
+    except Exception as e:
+        return formatter.format_error(f"Reload failed: {e}")
 
 
 @handle_interface_exceptions(context="system_status", interface_type="cli")

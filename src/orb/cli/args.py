@@ -496,6 +496,9 @@ For more information, visit: {DOCS_URL}
     system_metrics = system_subparsers.add_parser("metrics", help="Show system metrics")
     add_global_arguments(system_metrics)
 
+    system_reload = system_subparsers.add_parser("reload", help="Reload provider configuration")
+    add_global_arguments(system_reload)
+
     system_serve = system_subparsers.add_parser("serve", help="Start REST API server")
     add_global_arguments(system_serve)
     system_serve.add_argument("--host", default="0.0.0.0", help="Server host")  # nosec B104 - intentional default, overridable via CLI flag
@@ -540,6 +543,9 @@ For more information, visit: {DOCS_URL}
     config_validate = config_subparsers.add_parser("validate", help="Validate configuration")
     add_global_arguments(config_validate)
     config_validate.add_argument("--file", help="Configuration file to validate")
+
+    config_reload = config_subparsers.add_parser("reload", help="Reload provider configuration")
+    add_global_arguments(config_reload)
 
     # Providers
     providers_parser = subparsers.add_parser("providers", help="Cloud providers")

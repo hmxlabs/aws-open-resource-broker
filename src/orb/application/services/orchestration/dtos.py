@@ -48,6 +48,7 @@ class ListRequestsInput:
     limit: int = 50
     sync: bool = False
     offset: int = 0
+    template_id: Optional[str] = None
 
 
 @dataclasses.dataclass(frozen=True)
