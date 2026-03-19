@@ -17,6 +17,7 @@ from orb.infrastructure.di.buses import CommandBus, QueryBus
 def _make_mock_container(mock_config_manager=None):
     """Create a mock DI container."""
     from orb.domain.base.ports.configuration_port import ConfigurationPort
+    from orb.domain.base.ports.provider_registry_port import ProviderRegistryPort
     from orb.infrastructure.di.buses import CommandBus, QueryBus
 
     if mock_config_manager is None:
@@ -24,6 +25,10 @@ def _make_mock_container(mock_config_manager=None):
 
     mock_query_bus = Mock(spec=QueryBus)
     mock_command_bus = Mock(spec=CommandBus)
+    mock_registry = Mock(spec=ProviderRegistryPort)
+    mock_registry.get_registered_providers.return_value = ["aws"]
+    mock_registry.get_registered_provider_instances.return_value = ["aws_default_us-east-1"]
+    mock_registry.is_provider_instance_registered.return_value = True
 
     mock_container = Mock()
     mock_container.is_lazy_loading_enabled.return_value = False
@@ -35,6 +40,8 @@ def _make_mock_container(mock_config_manager=None):
             return mock_query_bus
         if service_type is CommandBus:
             return mock_command_bus
+        if service_type is ProviderRegistryPort:
+            return mock_registry
         return Mock()
 
     mock_container.get.side_effect = _container_get
