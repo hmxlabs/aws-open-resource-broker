@@ -73,7 +73,9 @@ async def handle_validate_storage_config(args: "argparse.Namespace") -> dict[str
 
 
 @handle_interface_exceptions(context="test_storage", interface_type="cli")
-async def handle_test_storage(args: "argparse.Namespace") -> "Union[dict[str, Any], InterfaceResponse]":
+async def handle_test_storage(
+    args: "argparse.Namespace",
+) -> "Union[dict[str, Any], InterfaceResponse]":
     """Handle test storage operations."""
     from orb.infrastructure.di.buses import QueryBus
 

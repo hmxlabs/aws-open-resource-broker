@@ -93,6 +93,7 @@ async def handle_get_template(
         )
     except EntityNotFoundError:
         from orb.application.services.response_formatting_service import ResponseFormattingService
+
         formatter = container.get(ResponseFormattingService)
         return formatter.format_error(f"Template '{template_id}' not found")
 
@@ -321,7 +322,9 @@ async def handle_delete_template(args: "argparse.Namespace") -> dict[str, Any]:
 
 
 @handle_interface_exceptions(context="validate_template", interface_type="cli")
-async def handle_validate_template(args: "argparse.Namespace") -> "Union[dict[str, Any], InterfaceResponse]":
+async def handle_validate_template(
+    args: "argparse.Namespace",
+) -> "Union[dict[str, Any], InterfaceResponse]":
     """Handle validate template operations using the ValidateTemplateOrchestrator."""
     from orb.application.services.orchestration.dtos import ValidateTemplateInput
     from orb.application.services.orchestration.validate_template import (
@@ -398,7 +401,10 @@ async def handle_validate_template(args: "argparse.Namespace") -> "Union[dict[st
         try:
             result = await orchestrator.execute(ValidateTemplateInput(template_id=template_id))
         except EntityNotFoundError:
-            from orb.application.services.response_formatting_service import ResponseFormattingService
+            from orb.application.services.response_formatting_service import (
+                ResponseFormattingService,
+            )
+
             formatter = container.get(ResponseFormattingService)
             return formatter.format_error(f"Template '{template_id}' not found")
         return scheduler.format_template_mutation_response(
