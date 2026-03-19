@@ -24,7 +24,9 @@ from orb.config.schemas.server_schema import AuthConfig, ServerConfig
 def _make_acquire_result(request_id: str):
     """Build a minimal orchestrator result for acquire machines."""
     mock = MagicMock()
-    mock.raw = {"requestId": request_id, "message": "Request VM success."}
+    mock.request_id = request_id
+    mock.status = "pending"
+    mock.machine_ids = []
     return mock
 
 
