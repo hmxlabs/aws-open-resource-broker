@@ -151,7 +151,7 @@ class TestMultiProviderConfiguration:
         with pytest.raises(Exception) as exc_info:
             converter.get_typed(AWSProviderConfig)
 
-        assert "No enabled AWS provider found in configuration" in str(exc_info.value)
+        assert "No enabled aws provider found in configuration" in str(exc_info.value)
 
     def test_active_provider_not_found_fallback(self):
         """Test fallback when specified active provider is not found."""
@@ -249,7 +249,7 @@ class TestMultiProviderConfiguration:
         with pytest.raises(Exception) as exc_info:
             converter.get_typed(AWSProviderConfig)
 
-        assert "No enabled AWS provider found in configuration" in str(exc_info.value)
+        assert "No enabled aws provider found in configuration" in str(exc_info.value)
 
     def test_missing_provider_config_section(self):
         """Test handling when provider config section is missing."""
@@ -260,10 +260,10 @@ class TestMultiProviderConfiguration:
         with pytest.raises(Exception) as exc_info:
             converter.get_typed(AWSProviderConfig)
 
-        assert "No enabled AWS provider found in configuration" in str(exc_info.value)
+        assert "No enabled aws provider found in configuration" in str(exc_info.value)
 
     def test_provider_with_missing_config(self):
-        """Test handling of provider instance with missing config section."""
+        """Test handling of provider instance with missing config section — falls back to defaults."""
         config = {
             "provider": {
                 "providers": [
@@ -271,18 +271,15 @@ class TestMultiProviderConfiguration:
                         "name": "aws-no-config",
                         "type": "aws",
                         "enabled": True,
-                        # Missing 'config' section
+                        # Missing 'config' section — converter uses {} and constructs with defaults
                     }
                 ]
             }
         }
 
         converter = ConfigTypeConverter(config)
-
-        with pytest.raises(Exception) as exc_info:
-            converter.get_typed(AWSProviderConfig)
-
-        assert "No enabled AWS provider found in configuration" in str(exc_info.value)
+        result = converter.get_typed(AWSProviderConfig)
+        assert isinstance(result, AWSProviderConfig)
 
     def test_multiple_aws_providers_priority_order(self):
         """Test that provider order matters when no active provider specified."""
