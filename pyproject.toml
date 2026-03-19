@@ -337,14 +337,6 @@ env = [
 [tool.coverage.run]
 source = ["src/orb"]
 branch = true
-parallel = true
-omit = [
-    "tests/*",
-    "*/__init__.py",
-    "*/migrations/*",
-    "*/.venv/*",
-    "*/venv/*",
-]
 
 [tool.coverage.report]
 precision = 2
