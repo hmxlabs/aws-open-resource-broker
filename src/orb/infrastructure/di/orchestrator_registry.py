@@ -21,20 +21,14 @@ def register_orchestrators(container: DIContainer) -> None:
     from orb.application.services.orchestration.get_provider_metrics import (
         GetProviderMetricsOrchestrator,
     )
+    from orb.application.services.orchestration.get_request_status import (
+        GetRequestStatusOrchestrator,
+    )
     from orb.application.services.orchestration.get_scheduler_config import (
         GetSchedulerConfigOrchestrator,
     )
     from orb.application.services.orchestration.get_storage_config import (
         GetStorageConfigOrchestrator,
-    )
-    from orb.application.services.orchestration.list_scheduler_strategies import (
-        ListSchedulerStrategiesOrchestrator,
-    )
-    from orb.application.services.orchestration.list_storage_strategies import (
-        ListStorageStrategiesOrchestrator,
-    )
-    from orb.application.services.orchestration.get_request_status import (
-        GetRequestStatusOrchestrator,
     )
     from orb.application.services.orchestration.get_template import GetTemplateOrchestrator
     from orb.application.services.orchestration.list_machines import ListMachinesOrchestrator
@@ -42,6 +36,12 @@ def register_orchestrators(container: DIContainer) -> None:
     from orb.application.services.orchestration.list_requests import ListRequestsOrchestrator
     from orb.application.services.orchestration.list_return_requests import (
         ListReturnRequestsOrchestrator,
+    )
+    from orb.application.services.orchestration.list_scheduler_strategies import (
+        ListSchedulerStrategiesOrchestrator,
+    )
+    from orb.application.services.orchestration.list_storage_strategies import (
+        ListStorageStrategiesOrchestrator,
     )
     from orb.application.services.orchestration.list_templates import ListTemplatesOrchestrator
     from orb.application.services.orchestration.refresh_templates import (

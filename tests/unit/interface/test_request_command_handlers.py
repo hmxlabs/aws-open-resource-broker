@@ -195,7 +195,6 @@ class TestHandleRequestReturnMachines:
     async def test_happy_path(self):
         """machine_ids provided → ReturnMachinesOrchestrator called."""
         from orb.application.dto.interface_response import InterfaceResponse
-        from orb.application.services.response_formatting_service import ResponseFormattingService
 
         container, scheduler, _, _, _, _, _, return_orch, formatter = _mock_container()
         return_orch.execute.return_value = ReturnMachinesOutput(
