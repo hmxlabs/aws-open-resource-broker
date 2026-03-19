@@ -66,6 +66,11 @@ async def handle_get_request_status(
             request_ids.extend(args.request_ids)
         if hasattr(args, "flag_request_ids") and args.flag_request_ids:
             request_ids.extend(args.flag_request_ids)
+        if hasattr(args, "flag_request_id") and args.flag_request_id:
+            if isinstance(args.flag_request_id, list):
+                request_ids.extend(args.flag_request_id)
+            else:
+                request_ids.append(args.flag_request_id)
 
     if not request_ids:
         return {"error": "No request ID provided", "message": "Request ID is required"}
@@ -254,6 +259,7 @@ async def handle_list_requests(
             limit=getattr(args, "limit", None) or 50,
             sync=getattr(args, "sync", False),
             offset=getattr(args, "offset", None) or 0,
+            template_id=getattr(args, "template_id", None),
         )
     )
     return formatter.format_request_status(result.requests)

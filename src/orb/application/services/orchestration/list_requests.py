@@ -38,6 +38,8 @@ class ListRequestsOrchestrator(OrchestratorBase[ListRequestsInput, ListRequestsO
 
         results = await self._query_bus.execute(query)
         requests = [self._to_dict(r) for r in (results or [])]
+        if input.template_id:
+            requests = [r for r in requests if r.get("template_id") == input.template_id]
         return ListRequestsOutput(requests=requests, count=len(requests))
 
     @staticmethod

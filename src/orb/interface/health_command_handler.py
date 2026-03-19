@@ -202,4 +202,4 @@ def handle_health_check(args) -> dict[str, Any]:
 
     except Exception as e:
         get_container().get(ConsolePort).error(f"Health check failed: {e}")
-        return {"success": False, "error": str(e)}
+        return {"success": False, "message": str(e), "error": str(e)}

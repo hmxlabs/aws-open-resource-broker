@@ -400,13 +400,12 @@ class TestHandleSelectProviderStrategy:
         assert result["result"]["selected_provider"] == "aws"
 
     @pytest.mark.asyncio
-    async def test_falls_back_to_aws_when_registry_raises(self):
+    async def test_returns_error_when_registry_raises(self):
         from orb.interface.system_command_handlers import handle_select_provider_strategy
 
         with patch(
             "orb.interface.system_command_handlers.get_container",
             side_effect=RuntimeError("registry unavailable"),
         ):
-            result = await handle_select_provider_strategy(_ns())
-
-        assert result["result"]["selected_provider"] == "aws"
+            with pytest.raises(Exception):
+                await handle_select_provider_strategy(_ns())
