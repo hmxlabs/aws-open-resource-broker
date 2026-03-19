@@ -40,7 +40,7 @@ async def handle_get_request_status(
 
     if has_all:
         result = await orchestrator.execute(
-            GetRequestStatusInput(all_requests=True, detailed=getattr(args, "detailed", False))
+            GetRequestStatusInput(all_requests=True, verbose=getattr(args, "verbose", False))
         )
         return formatter.format_request_status(result.requests)
 
@@ -78,7 +78,7 @@ async def handle_get_request_status(
     result = await orchestrator.execute(
         GetRequestStatusInput(
             request_ids=[str(rid) for rid in request_ids],
-            detailed=getattr(args, "detailed", False),
+            verbose=getattr(args, "verbose", False),
         )
     )
     return formatter.format_request_status(result.requests)

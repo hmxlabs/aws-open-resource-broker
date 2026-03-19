@@ -85,10 +85,10 @@ class TestGetRequestStatusOrchestrator:
         r = MagicMock()
         r.model_dump = MagicMock(return_value={})
         mock_query_bus.execute.return_value = r
-        input = GetRequestStatusInput(request_ids=["req-1"], detailed=True)
+        input = GetRequestStatusInput(request_ids=["req-1"], verbose=True)
         await orchestrator.execute(input)
         query = mock_query_bus.execute.call_args[0][0]
-        assert query.long is True
+        assert query.verbose is True
         assert query.lightweight is False
 
     @pytest.mark.asyncio
@@ -96,10 +96,10 @@ class TestGetRequestStatusOrchestrator:
         r = MagicMock()
         r.model_dump = MagicMock(return_value={})
         mock_query_bus.execute.return_value = r
-        input = GetRequestStatusInput(request_ids=["req-1"], detailed=False)
+        input = GetRequestStatusInput(request_ids=["req-1"], verbose=False)
         await orchestrator.execute(input)
         query = mock_query_bus.execute.call_args[0][0]
-        assert query.long is False
+        assert query.verbose is False
 
     @pytest.mark.asyncio
     async def test_execute_multiple_ids_queries_each(self, orchestrator, mock_query_bus):
@@ -167,7 +167,7 @@ class TestGetRequestStatusOrchestrator:
             }
         )
         mock_query_bus.execute.return_value = r
-        input = GetRequestStatusInput(request_ids=["req-detail-1"], detailed=True)
+        input = GetRequestStatusInput(request_ids=["req-detail-1"], verbose=True)
 
         result = await orchestrator.execute(input)
 

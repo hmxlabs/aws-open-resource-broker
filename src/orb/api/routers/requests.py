@@ -84,7 +84,7 @@ async def list_return_requests(
 @handle_rest_exceptions(endpoint="/api/v1/requests/{request_id}/status", method="GET")
 async def get_request_status(
     request_id: str,
-    long: bool = Query(True, description="Include detailed info and refresh provider state"),
+    verbose: bool = Query(True, description="Include detailed info and refresh provider state"),
     orchestrator=STATUS_ORCHESTRATOR,
     formatter=FORMATTER,
 ) -> JSONResponse:
@@ -92,10 +92,10 @@ async def get_request_status(
     Get the status of a specific request.
 
     - **request_id**: Request identifier
-    - **long**: Include detailed information about the request
+    - **verbose**: Include detailed information about the request
     """
     result = await orchestrator.execute(
-        GetRequestStatusInput(request_ids=[request_id], detailed=long)
+        GetRequestStatusInput(request_ids=[request_id], verbose=verbose)
     )
     return JSONResponse(content=formatter.format_request_status(result.requests).data)
 
@@ -119,7 +119,7 @@ async def stream_request_status(
         while elapsed < timeout:
             try:
                 result = await orchestrator.execute(
-                    GetRequestStatusInput(request_ids=[request_id], detailed=False)
+                    GetRequestStatusInput(request_ids=[request_id], verbose=False)
                 )
                 formatted = formatter.format_request_status(result.requests).data
                 yield f"data: {json.dumps(formatted)}\n\n"

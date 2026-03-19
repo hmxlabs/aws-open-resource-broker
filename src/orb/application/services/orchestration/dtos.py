@@ -28,7 +28,7 @@ class AcquireMachinesOutput:
 class GetRequestStatusInput:
     request_ids: list[str] = dataclasses.field(default_factory=list)
     all_requests: bool = False
-    detailed: bool = False
+    verbose: bool = False
 
 
 @dataclasses.dataclass(frozen=True)

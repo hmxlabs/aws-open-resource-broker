@@ -36,7 +36,7 @@ class GetRequestStatusOrchestrator(OrchestratorBase[GetRequestStatusInput, GetRe
             try:
                 query = GetRequestQuery(  # type: ignore[assignment]
                     request_id=request_id,
-                    long=input.detailed,
+                    verbose=input.verbose,
                 )
                 result = await self._query_bus.execute(query)
                 request_dicts.append(self._to_dict(result))
