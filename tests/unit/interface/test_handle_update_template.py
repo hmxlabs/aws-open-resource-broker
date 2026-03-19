@@ -40,19 +40,19 @@ def _mock_command_bus(updated: bool = True) -> MagicMock:
 
 
 def _patch_container(bus: MagicMock):
-    from orb.application.ports.scheduler_port import SchedulerPort
     from orb.application.services.orchestration.update_template import UpdateTemplateOrchestrator
+    from orb.application.services.response_formatting_service import ResponseFormattingService
 
-    mock_scheduler = MagicMock(spec=SchedulerPort)
-    mock_scheduler.format_template_mutation_response.return_value = {"success": True}
+    mock_formatter = MagicMock(spec=ResponseFormattingService)
+    mock_formatter.format_template_mutation.return_value = {"success": True}
 
     container = MagicMock()
 
     def _get(cls):
         if cls is UpdateTemplateOrchestrator:
             return bus
-        if cls is SchedulerPort:
-            return mock_scheduler
+        if cls is ResponseFormattingService:
+            return mock_formatter
         return MagicMock()
 
     container.get.side_effect = _get
