@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING, Any, Union
 
+from orb.application.dto.interface_response import InterfaceResponse
 from orb.application.services.response_formatting_service import ResponseFormattingService
 from orb.domain.base.exceptions import DuplicateError, EntityNotFoundError
 from orb.infrastructure.di.container import get_container
@@ -16,8 +17,6 @@ from orb.infrastructure.error.decorators import handle_interface_exceptions
 
 if TYPE_CHECKING:
     import argparse
-
-    from orb.application.dto.interface_response import InterfaceResponse
 
 
 @handle_interface_exceptions(context="list_templates", interface_type="cli")
@@ -80,7 +79,10 @@ async def handle_get_template(
 
     template_id = getattr(args, "template_id", None) or getattr(args, "flag_template_id", None)
     if not template_id:
-        return {"success": False, "error": "Template ID is required", "template": None}
+        return InterfaceResponse(
+            data={"success": False, "error": "Template ID is required", "template": None},
+            exit_code=1,
+        )
 
     container = get_container()
     orchestrator = container.get(GetTemplateOrchestrator)
@@ -96,11 +98,14 @@ async def handle_get_template(
         return formatter.format_error(f"Template '{template_id}' not found")
 
     if not result.template:
-        return {
-            "success": False,
-            "error": f"Template '{template_id}' not found",
-            "template": None,
-        }
+        return InterfaceResponse(
+            data={
+                "success": False,
+                "error": f"Template '{template_id}' not found",
+                "template": None,
+            },
+            exit_code=1,
+        )
 
     raw = scheduler.format_template_for_display(result.template)
     return formatter.format_config(raw)
@@ -124,27 +129,27 @@ async def handle_create_template(
         }
 
     if not hasattr(args, "file") or not args.file:
-        return {"success": False, "error": "Template file is required"}
+        return InterfaceResponse(data={"success": False, "error": "Template file is required"}, exit_code=1)
 
     try:
         with open(args.file) as f:
             template_config = json.load(f)
     except FileNotFoundError:
-        return {"success": False, "error": f"Template file not found: {args.file}"}
+        return InterfaceResponse(data={"success": False, "error": f"Template file not found: {args.file}"}, exit_code=1)
     except json.JSONDecodeError as e:
-        return {"success": False, "error": f"Invalid JSON in template file: {e}"}
+        return InterfaceResponse(data={"success": False, "error": f"Invalid JSON in template file: {e}"}, exit_code=1)
 
     template_id = template_config.get("template_id") or template_config.get("templateId")
     if not template_id:
-        return {"success": False, "error": "template_id is required in template file"}
+        return InterfaceResponse(data={"success": False, "error": "template_id is required in template file"}, exit_code=1)
 
     provider_api = template_config.get("provider_api") or template_config.get("providerApi")
     if not provider_api:
-        return {"success": False, "error": "provider_api is required in template file"}
+        return InterfaceResponse(data={"success": False, "error": "provider_api is required in template file"}, exit_code=1)
 
     image_id = template_config.get("image_id") or template_config.get("imageId")
     if not image_id:
-        return {"success": False, "error": "image_id is required in template file"}
+        return InterfaceResponse(data={"success": False, "error": "image_id is required in template file"}, exit_code=1)
 
     if getattr(args, "validate_only", False):
         return {
@@ -173,18 +178,24 @@ async def handle_create_template(
             )
         )
     except DuplicateError:
-        return {
-            "success": False,
-            "error": f"Template '{template_id}' already exists",
-            "template_id": template_id,
-        }
+        return InterfaceResponse(
+            data={
+                "success": False,
+                "error": f"Template '{template_id}' already exists",
+                "template_id": template_id,
+            },
+            exit_code=1,
+        )
 
     if result.validation_errors:
-        return {
-            "success": False,
-            "error": f"Template validation failed: {', '.join(result.validation_errors)}",
-            "template_id": template_id,
-        }
+        return InterfaceResponse(
+            data={
+                "success": False,
+                "error": f"Template validation failed: {', '.join(result.validation_errors)}",
+                "template_id": template_id,
+            },
+            exit_code=1,
+        )
 
     return formatter.format_template_mutation(
         {
@@ -217,23 +228,26 @@ async def handle_update_template(
 
     file_path = getattr(args, "file", None)
     if not file_path:
-        return {"success": False, "error": "Template file is required"}
+        return InterfaceResponse(data={"success": False, "error": "Template file is required"}, exit_code=1)
 
     try:
         with open(file_path) as f:
             template_config = json.load(f)
     except FileNotFoundError:
-        return {"success": False, "error": f"Template file not found: {file_path}"}
+        return InterfaceResponse(data={"success": False, "error": f"Template file not found: {file_path}"}, exit_code=1)
     except json.JSONDecodeError as e:
-        return {"success": False, "error": f"Invalid JSON in template file: {e}"}
+        return InterfaceResponse(data={"success": False, "error": f"Invalid JSON in template file: {e}"}, exit_code=1)
 
     if not isinstance(template_config, dict):
-        return {"success": False, "error": "Template file must contain a JSON object"}
+        return InterfaceResponse(data={"success": False, "error": "Template file must contain a JSON object"}, exit_code=1)
 
     file_template_id = template_config.get("template_id") or template_config.get("templateId")
     resolved_template_id = template_id or file_template_id
     if not resolved_template_id:
-        return {"success": False, "error": "Template ID is required (via arg or file)"}
+        return InterfaceResponse(
+            data={"success": False, "error": "Template ID is required (via arg or file)"},
+            exit_code=1,
+        )
 
     container = get_container()
     orchestrator = container.get(UpdateTemplateOrchestrator)
@@ -251,18 +265,24 @@ async def handle_update_template(
             )
         )
     except EntityNotFoundError:
-        return {
-            "success": False,
-            "error": f"Template '{resolved_template_id}' not found",
-            "template_id": resolved_template_id,
-        }
+        return InterfaceResponse(
+            data={
+                "success": False,
+                "error": f"Template '{resolved_template_id}' not found",
+                "template_id": resolved_template_id,
+            },
+            exit_code=1,
+        )
 
     if result.validation_errors:
-        return {
-            "success": False,
-            "error": f"Template validation failed: {', '.join(result.validation_errors)}",
-            "template_id": resolved_template_id,
-        }
+        return InterfaceResponse(
+            data={
+                "success": False,
+                "error": f"Template validation failed: {', '.join(result.validation_errors)}",
+                "template_id": resolved_template_id,
+            },
+            exit_code=1,
+        )
 
     return formatter.format_template_mutation(
         {
@@ -285,7 +305,10 @@ async def handle_delete_template(
 
     template_id = getattr(args, "template_id", None) or getattr(args, "flag_template_id", None)
     if not template_id:
-        return {"success": False, "error": "Template ID is required"}
+        return InterfaceResponse(
+            data={"success": False, "error": "Template ID is required"},
+            exit_code=1,
+        )
 
     if is_dry_run_active():
         return {
@@ -308,18 +331,24 @@ async def handle_delete_template(
     try:
         result = await orchestrator.execute(DeleteTemplateInput(template_id=template_id))
     except EntityNotFoundError:
-        return {
-            "success": False,
-            "error": f"Template '{template_id}' not found",
-            "template_id": template_id,
-        }
+        return InterfaceResponse(
+            data={
+                "success": False,
+                "error": f"Template '{template_id}' not found",
+                "template_id": template_id,
+            },
+            exit_code=1,
+        )
 
     if not result.deleted:
-        return {
-            "success": False,
-            "error": f"Template '{template_id}' could not be deleted",
-            "template_id": template_id,
-        }
+        return InterfaceResponse(
+            data={
+                "success": False,
+                "error": f"Template '{template_id}' could not be deleted",
+                "template_id": template_id,
+            },
+            exit_code=1,
+        )
 
     return formatter.format_template_mutation(
         {
@@ -372,11 +401,14 @@ async def handle_validate_template(
 
         template_file = Path(args.file)
         if not template_file.exists():
-            return {
-                "success": False,
-                "error": f"Template file not found: {template_file}",
-                "valid": False,
-            }
+            return InterfaceResponse(
+                data={
+                    "success": False,
+                    "error": f"Template file not found: {template_file}",
+                    "valid": False,
+                },
+                exit_code=1,
+            )
 
         try:
             with open(template_file) as f:
@@ -385,11 +417,14 @@ async def handle_validate_template(
                 else:
                     template_config = json.load(f)
         except Exception as e:
-            return {
-                "success": False,
-                "error": f"Failed to parse template file: {e!s}",
-                "valid": False,
-            }
+            return InterfaceResponse(
+                data={
+                    "success": False,
+                    "error": f"Failed to parse template file: {e!s}",
+                    "valid": False,
+                },
+                exit_code=1,
+            )
 
         template_id = template_config.get("template_id", "file-template")
         result = await orchestrator.execute(
@@ -421,11 +456,14 @@ async def handle_validate_template(
             }
         )
 
-    return {
-        "success": False,
-        "error": "Must provide either template_id, --file, or --all",
-        "valid": False,
-    }
+    return InterfaceResponse(
+        data={
+            "success": False,
+            "error": "Must provide either template_id, --file, or --all",
+            "valid": False,
+        },
+        exit_code=1,
+    )
 
 
 @handle_interface_exceptions(context="refresh_templates", interface_type="cli")

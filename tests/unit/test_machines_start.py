@@ -172,7 +172,7 @@ async def test_machines_start_validation_errors():
     args1.all = False
 
     result1 = await handle_start_machines(args1)
-    assert result1["error"] == "No machines specified"
+    assert result1.data["error"] == "No machines specified"
 
     # Test: both specific IDs and --all
     args2 = argparse.Namespace()
@@ -180,7 +180,7 @@ async def test_machines_start_validation_errors():
     args2.all = True
 
     result2 = await handle_start_machines(args2)
-    assert result2["error"] == "Cannot use --all with specific machine IDs"
+    assert result2.data["error"] == "Cannot use --all with specific machine IDs"
 
 
 if __name__ == "__main__":
