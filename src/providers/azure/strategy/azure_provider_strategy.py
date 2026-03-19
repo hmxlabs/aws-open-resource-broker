@@ -534,14 +534,14 @@ class AzureProviderStrategy(ProviderStrategy):
             if token is None:
                 response_time_ms = (time.time() - start_time) * 1000
                 return ProviderHealthStatus.unhealthy(
-                    "Azure provider unhealthy - no subscriptions found",
-                    {"error": "no_subscriptions", "response_time_ms": response_time_ms},
+                    "Azure provider unhealthy - no token found",
+                    {"error": "no_token", "response_time_ms": response_time_ms},
                 )
 
             # If we got here, the provider is healthy
             response_time_ms = (time.time() - start_time) * 1000
             return ProviderHealthStatus.healthy(
-                f"Azure provider healthy - Token: {token}, " # TODO: Is this safe to log?
+                f"Azure provider healthy - Token fetched successfully in {response_time_ms}, "
                 f"Region: {self._azure_config.region}",
                 response_time_ms,
             )
