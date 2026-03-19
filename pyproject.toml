@@ -292,57 +292,90 @@ include-package-data = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+norecursedirs = ["tests/onaws"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
-addopts = "-v --cov --cov-report=term-missing --cov-report=html"
+asyncio_mode = "strict"
+addopts = "--tb=short --strict-markers --disable-warnings --cov=src/orb --cov-report=term-missing --cov-branch"
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore::PendingDeprecationWarning",
+]
 markers = [
-    "unit: marks unit tests",
-    "integration: marks integration tests",
+    "unit: Unit tests",
+    "integration: Integration tests",
     "e2e: marks end-to-end tests",
-    "slow: marks slow tests",
-    "db: marks tests requiring a database",
-    "api: marks API tests",
-    "security: marks security tests",
-    "aws: marks tests that require real AWS credentials",
-    "manual_aws: marks tests that must be run manually against AWS",
-    "rest_api: marks REST API integration tests",
-    "sdk: marks SDK-based integration tests",
-    "provider_contract: part of the provider contract test suite",
-    "simulator_limitation: assertion weakened due to known simulator gap",
-    "requires_real_provider: skipped unless --run-real-provider flag passed",
-    "asyncio: marks async tests",
-    "benchmark: marks benchmark/performance tests",
-    "architecture: marks architecture compliance tests",
-    "domain: marks domain layer tests",
-    "application: marks application layer tests",
-    "infrastructure: marks infrastructure layer tests",
-    "providers: marks provider tests",
-    "patterns: marks design pattern tests",
-    "moto: marks tests that use moto-mocked AWS",
+    "mcp: MCP server tests",
+    "slow: Slow running tests (docker builds, stress loops, subprocess spawning)",
+    "aws: Tests requiring AWS credentials",
+    "manual_aws: Live AWS integration tests that must be run manually with --run-manual-aws",
+    "rest_api: REST API integration tests",
+    "application: Application layer tests",
+    "architecture: Architecture compliance tests",
+    "domain: Domain layer tests",
+    "infrastructure: Infrastructure layer tests",
+    "patterns: Design pattern tests",
+    "providers: Provider implementation tests",
+    "performance: Performance benchmark tests",
+    "provider_contract: Part of the provider contract test suite",
+    "simulator_limitation: Assertion weakened due to known simulator gap",
+    "requires_real_provider: Skipped unless --run-real-provider flag passed",
+    "moto: Tests using moto-mocked AWS (no real credentials required)",
+    "sdk: Tests exercising the ORBClient SDK interface",
     "cli: marks CLI integration tests",
+    "benchmark: marks benchmark/performance tests",
 ]
 env = [
     "AWS_DEFAULT_REGION=us-east-1",
     "AWS_ACCESS_KEY_ID=testing",
     "AWS_SECRET_ACCESS_KEY=testing",
     "AWS_SECURITY_TOKEN=testing",
-    "AWS_SESSION_TOKEN=testing"
+    "AWS_SESSION_TOKEN=testing",
 ]
 
 [tool.coverage.run]
 source = ["src/orb"]
 branch = true
+parallel = true
+omit = [
+    "tests/*",
+    "*/__init__.py",
+    "*/migrations/*",
+    "*/.venv/*",
+    "*/venv/*",
+]
 
 [tool.coverage.report]
+precision = 2
+show_missing = true
+skip_covered = false
+ignore_errors = true
 exclude_lines = [
     "pragma: no cover",
+    "pragma: nocover",
     "def __repr__",
+    "def __str__",
     "if self.debug:",
+    "raise AssertionError",
     "raise NotImplementedError",
+    "if 0:",
     "if __name__ == .__main__.:",
+    "class .*\\bProtocol\\):",
+    "@(abc\\.)?abstractmethod",
+    "pass",
+    "raise ImportError",
+    "except ImportError:",
     "if TYPE_CHECKING:",
+    "\\.\\.\\.$",
 ]
+
+[tool.coverage.html]
+directory = "htmlcov"
+title = "Open Resource Broker Coverage Report"
+
+[tool.coverage.xml]
+output = "coverage.xml"
 
 [tool.ruff]
 target-version = "py39"

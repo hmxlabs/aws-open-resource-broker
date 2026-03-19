@@ -18,6 +18,13 @@
   <a href="https://deepwiki.com/awslabs/open-resource-broker"><img src="https://deepwiki.com/badge.svg" alt="Ask DeepWiki"></a>
 </p>
 
+<p align="center">
+  <a href="https://github.com/awslabs/open-resource-broker/actions/workflows/ci-tests.yml"><img src="https://github.com/awslabs/open-resource-broker/actions/workflows/ci-tests.yml/badge.svg" alt="Unit Tests"></a>
+  <a href="https://github.com/awslabs/open-resource-broker/actions/workflows/ci-quality.yml"><img src="https://github.com/awslabs/open-resource-broker/actions/workflows/ci-quality.yml/badge.svg" alt="Quality Checks"></a>
+  <a href="https://github.com/awslabs/open-resource-broker/actions/workflows/security-code.yml"><img src="https://github.com/awslabs/open-resource-broker/actions/workflows/security-code.yml/badge.svg" alt="Security Scanning"></a>
+  <a href="https://codecov.io/gh/awslabs/open-resource-broker"><img src="https://codecov.io/gh/awslabs/open-resource-broker/graph/badge.svg" alt="Coverage"></a>
+</p>
+
 ---
 
 ORB is a unified API for orchestrating and provisioning compute capacity programmatically. Define what you need in a template, request it, track it, return it — through a CLI, REST API, Python SDK, or MCP server.
