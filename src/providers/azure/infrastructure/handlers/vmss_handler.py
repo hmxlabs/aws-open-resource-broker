@@ -6,6 +6,15 @@ It handles:
 - Creating a VMSS with Flexible orchestration (default) or Uniform
 - Listing instances in a VMSS for status checks
 - Deleting VMSS instances and the scale set itself
+
+Important limitation:
+- Azure Flexible VMSS does not expose an AWS-ASG-style "detach these exact
+  instances and decrement desired capacity for them" flow.
+- Scaling in first can let Azure choose different victims than the caller
+  requested, so Flexible VMSS termination in this provider submits explicit VM
+  deletes first and reconciles VMSS capacity later.
+- That deferred reconciliation is currently tracked in process memory by the
+  Azure strategy and is not durable across process restarts.
 """
 
 from __future__ import annotations
@@ -293,7 +302,7 @@ class VMSSHandler(AzureHandler):
         machine_ids: list[str],
         resource_id: str,
         context: Optional[dict[str, Any]] = None,
-    ) -> None:
+    ) -> Optional[dict[str, Any]]:
         """Delete specific VM instances from a VMSS, or the entire VMSS."""
         context = context or {}
         resource_group = (
@@ -324,7 +333,6 @@ class VMSSHandler(AzureHandler):
                         resource_group_name=resource_group,
                         vm_name=vm_name,
                     )
-                    poller.result()
             # Delete the entire VMSS
             self._logger.info(
                 "Deleting entire VMSS '%s' in resource group '%s'",
@@ -336,8 +344,15 @@ class VMSSHandler(AzureHandler):
                     resource_group_name=resource_group,
                     vm_scale_set_name=vmss_name,
                 )
-                poller.result()
-                self._logger.info("VMSS '%s' deleted successfully", vmss_name)
+                self._logger.info("Submitted delete for VMSS '%s'", vmss_name)
+                return {
+                    "provider_data": {
+                        "resource_group": resource_group,
+                        "vmss_name": vmss_name,
+                        "operation_status": "submitted",
+                        "delete_vmss": True,
+                    }
+                }
             except Exception as exc:
                 raise TerminationError(
                     f"Failed to delete VMSS '{vmss_name}': {exc}",
@@ -347,7 +362,10 @@ class VMSSHandler(AzureHandler):
             current_capacity = self._get_vmss_capacity(resource_group, vmss_name)
             new_capacity = max(0, current_capacity - len(machine_ids))
 
-            if new_capacity != current_capacity:
+            if (
+                orchestration_mode != AzureVMSSOrchestrationMode.FLEXIBLE
+                and new_capacity != current_capacity
+            ):
                 self._scale_vmss_capacity(resource_group, vmss_name, new_capacity)
 
             # Delete specific instances from the VMSS
@@ -358,17 +376,49 @@ class VMSSHandler(AzureHandler):
                 )
             try:
                 if orchestration_mode == AzureVMSSOrchestrationMode.FLEXIBLE:
+                    submitted_deletions: list[dict[str, Any]] = []
                     for vm_name in machine_ids:
                         poller = compute.virtual_machines.begin_delete(
                             resource_group_name=resource_group,
                             vm_name=str(vm_name),
                         )
-                        poller.result()
+                        continuation_token = None
+                        if hasattr(poller, "continuation_token"):
+                            try:
+                                continuation_token = poller.continuation_token()
+                            except Exception as exc:
+                                self._logger.debug(
+                                    "Could not capture Flexible VMSS delete continuation token for '%s': %s",
+                                    vm_name,
+                                    exc,
+                                )
+                        submitted_deletions.append(
+                            {
+                                "vm_name": str(vm_name),
+                                "continuation_token": continuation_token,
+                            }
+                        )
                     self._logger.info(
-                        "Deleted %d flexible VMSS instance(s) from '%s'",
+                        "Submitted delete for %d flexible VMSS instance(s) from '%s'",
                         len(machine_ids),
                         vmss_name,
                     )
+                    return {
+                        "provider_data": {
+                            "resource_group": resource_group,
+                            "vmss_name": vmss_name,
+                            "operation_status": "submitted",
+                            "submitted_deletions": submitted_deletions,
+                            "pending_reconciliation": {
+                                "resource_group": resource_group,
+                                "vmss_name": vmss_name,
+                                "machine_ids": [str(machine_id) for machine_id in machine_ids],
+                                "target_capacity": new_capacity,
+                                "orchestration_mode": orchestration_mode.value,
+                                "delete_vmss_when_empty": new_capacity == 0,
+                            },
+                        }
+                    }
                 else:
                     resolved_instance_ids = self._resolve_vmss_instance_ids(
                         resource_group=resource_group,
@@ -380,34 +430,46 @@ class VMSSHandler(AzureHandler):
                         vm_scale_set_name=vmss_name,
                         vm_instance_i_ds={"instance_ids": resolved_instance_ids},
                     )
-                    poller.result()
+                    continuation_token = None
+                    if hasattr(poller, "continuation_token"):
+                        try:
+                            continuation_token = poller.continuation_token()
+                        except Exception as exc:
+                            self._logger.debug(
+                                "Could not capture Uniform VMSS delete continuation token for '%s': %s",
+                                vmss_name,
+                                exc,
+                            )
                     self._logger.info(
-                        "Deleted %d instance(s) from VMSS '%s'",
+                        "Submitted delete for %d instance(s) from VMSS '%s'",
                         len(resolved_instance_ids),
                         vmss_name,
                     )
+                    return {
+                        "provider_data": {
+                            "resource_group": resource_group,
+                            "vmss_name": vmss_name,
+                            "operation_status": "submitted",
+                            "resolved_instance_ids": resolved_instance_ids,
+                            "continuation_token": continuation_token,
+                            "pending_reconciliation": {
+                                "resource_group": resource_group,
+                                "vmss_name": vmss_name,
+                                "machine_ids": [str(machine_id) for machine_id in machine_ids],
+                                "target_capacity": new_capacity,
+                                "orchestration_mode": orchestration_mode.value,
+                                "delete_vmss_when_empty": new_capacity == 0,
+                            }
+                            if new_capacity == 0
+                            else None,
+                        }
+                    }
             except Exception as exc:
                 raise TerminationError(
                     f"Failed to delete instances from VMSS '{vmss_name}': {exc}",
                     resource_ids=machine_ids,
                 ) from exc
-
-            if new_capacity == 0:
-                self._logger.info(
-                    "VMSS '%s' capacity reached zero; deleting the empty scale set",
-                    vmss_name,
-                )
-                try:
-                    poller = compute.virtual_machine_scale_sets.begin_delete(
-                        resource_group_name=resource_group,
-                        vm_scale_set_name=vmss_name,
-                    )
-                    poller.result()
-                except Exception as exc:
-                    raise TerminationError(
-                        f"Failed to delete empty VMSS '{vmss_name}': {exc}",
-                        resource_ids=[vmss_name],
-                    ) from exc
+        return None
 
     # ------------------------------------------------------------------
     # Internal helpers

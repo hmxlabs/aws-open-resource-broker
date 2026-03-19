@@ -405,6 +405,46 @@ class TestTerminateInstances:
         assert result.metadata["method"] == "dry_run"
         handler.release_hosts.assert_not_called()
 
+    def test_terminate_instances_records_pending_vmss_reconciliation(self, azure_config, logger):
+        strategy = AzureProviderStrategy(config=azure_config, logger=logger)
+        strategy.initialize()
+
+        handler = MagicMock()
+        handler.release_hosts.return_value = {
+            "provider_data": {
+                "pending_reconciliation": {
+                    "resource_group": "test-rg",
+                    "vmss_name": "vmss-prod-b",
+                    "machine_ids": ["orb-1"],
+                    "target_capacity": 2,
+                    "orchestration_mode": "Flexible",
+                    "delete_vmss_when_empty": False,
+                }
+            }
+        }
+        strategy._handlers = {"VMSS": handler}
+
+        op = ProviderOperation(
+            operation_type=ProviderOperationType.TERMINATE_INSTANCES,
+            parameters={
+                "instance_ids": ["orb-1"],
+                "provider_api": "VMSS",
+                "resource_mapping": {
+                    "orb-1": ("vmss-prod-b", 1),
+                },
+            },
+        )
+
+        result = _run(strategy.execute_operation(op))
+
+        assert result.success
+        assert (
+            strategy._pending_vmss_termination_reconciliations[("test-rg", "vmss-prod-b")][
+                "target_capacity"
+            ]
+            == 2
+        )
+
 
 # ---------------------------------------------------------------------------
 # GET_INSTANCE_STATUS (with missing ids → error path)
@@ -593,6 +633,46 @@ class TestDescribeResourceInstances:
         result = _run(strategy.execute_operation(op))
         assert not result.success
         assert result.error_code == "MISSING_RESOURCE_IDS"
+
+    def test_describe_resource_instances_reconciles_pending_flexible_vmss_scale_down(self, strategy):
+        handler = MagicMock()
+        handler.check_hosts_status.return_value = []
+        handler.get_vmss_resource_errors.return_value = []
+        strategy._handlers["VMSS"] = handler
+        strategy._resource_manager = MagicMock()
+        strategy._resource_manager.get_vmss_capacity.return_value = {
+            "capacity": 2,
+            "provisioned_instance_count": 0,
+            "provisioning_state": "Updating",
+        }
+        strategy._pending_vmss_termination_reconciliations[("test-rg", "vmss-demo")] = {
+            "resource_group": "test-rg",
+            "vmss_name": "vmss-demo",
+            "machine_ids": ["vm-a"],
+            "target_capacity": 2,
+            "orchestration_mode": "Flexible",
+            "delete_vmss_when_empty": False,
+        }
+
+        op = ProviderOperation(
+            operation_type=ProviderOperationType.DESCRIBE_RESOURCE_INSTANCES,
+            parameters={
+                "resource_ids": ["vmss-demo"],
+                "provider_api": "VMSS",
+                "resource_group": "test-rg",
+                "template_id": "tmpl-1",
+            },
+        )
+
+        result = _run(strategy.execute_operation(op))
+
+        assert result.success
+        strategy._resource_manager.scale_vmss.assert_called_once_with(
+            resource_group="test-rg",
+            vmss_name="vmss-demo",
+            capacity=2,
+        )
+        assert ("test-rg", "vmss-demo") not in strategy._pending_vmss_termination_reconciliations
 
     def test_dry_run_short_circuits_resource_discovery(self, azure_config, logger):
         strategy = AzureProviderStrategy(config=azure_config, logger=logger)

@@ -377,6 +377,34 @@ def test_vmss_release_scales_down_before_deleting_uniform_instances():
     azure_client.compute_client.virtual_machine_scale_sets.begin_delete.assert_not_called()
 
 
+def test_vmss_release_submits_flexible_deletes_without_waiting():
+    azure_client = MagicMock()
+    logger = MagicMock()
+    handler = VMSSHandler(azure_client=azure_client, logger=logger)
+    handler.azure_resource_manager = MagicMock()
+    handler.azure_resource_manager.get_vmss_capacity.return_value = {"capacity": 5}
+
+    vmss = MagicMock()
+    vmss.orchestration_mode = AzureVMSSOrchestrationMode.FLEXIBLE.value
+    azure_client.compute_client.virtual_machine_scale_sets.get.return_value = vmss
+
+    delete_poller = MagicMock()
+    delete_poller.continuation_token.return_value = "token-1"
+    delete_poller.result.side_effect = AssertionError("result() should not be called")
+    azure_client.compute_client.virtual_machines.begin_delete.return_value = delete_poller
+
+    result = handler.release_hosts(
+        machine_ids=["vm-a", "vm-b"],
+        resource_id="vmss-azure-test",
+        context={"resource_group": "test-rg"},
+    )
+
+    assert result["provider_data"]["operation_status"] == "submitted"
+    assert result["provider_data"]["pending_reconciliation"]["target_capacity"] == 3
+    assert handler.azure_resource_manager.scale_vmss.call_count == 0
+    assert azure_client.compute_client.virtual_machines.begin_delete.call_count == 2
+
+
 def test_vmss_release_deletes_scale_set_when_capacity_reaches_zero():
     azure_client = MagicMock()
     logger = MagicMock()
@@ -393,12 +421,7 @@ def test_vmss_release_deletes_scale_set_when_capacity_reaches_zero():
     azure_client.compute_client.virtual_machine_scale_sets.begin_delete_instances.return_value = (
         delete_instances_poller
     )
-    delete_vmss_poller = MagicMock()
-    azure_client.compute_client.virtual_machine_scale_sets.begin_delete.return_value = (
-        delete_vmss_poller
-    )
-
-    handler.release_hosts(
+    result = handler.release_hosts(
         machine_ids=["3"],
         resource_id="vmss-azure-test",
         context={"resource_group": "test-rg"},
@@ -410,10 +433,8 @@ def test_vmss_release_deletes_scale_set_when_capacity_reaches_zero():
         capacity=0,
     )
     azure_client.compute_client.virtual_machine_scale_sets.begin_delete_instances.assert_called_once()
-    azure_client.compute_client.virtual_machine_scale_sets.begin_delete.assert_called_once_with(
-        resource_group_name="test-rg",
-        vm_scale_set_name="vmss-azure-test",
-    )
+    azure_client.compute_client.virtual_machine_scale_sets.begin_delete.assert_not_called()
+    assert result["provider_data"]["pending_reconciliation"]["delete_vmss_when_empty"] is True
 
 
 def test_single_vm_status_populates_network_identity():

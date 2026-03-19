@@ -81,6 +81,7 @@ class AzureProviderStrategy(ProviderStrategy):
         self._azure_provisioning_port_resolver = azure_provisioning_port_resolver
         self._spot_placement_planner = SpotPlacementPlanner()
         self._spot_placement_execution = SpotPlacementExecutionService()
+        self._pending_vmss_termination_reconciliations: dict[tuple[str, str], dict[str, Any]] = {}
 
     # ------------------------------------------------------------------
     # Lazy-initialised properties
@@ -875,20 +876,31 @@ class AzureProviderStrategy(ProviderStrategy):
 
             if handler:
                 context = dict(release_context)
+                termination_provider_data: list[dict[str, Any]] = []
 
                 if grouped_resource_mapping:
                     for resource_id, mapped_instance_ids in grouped_resource_mapping.items():
-                        handler.release_hosts(
+                        handler_result = handler.release_hosts(
                             machine_ids=mapped_instance_ids,
                             resource_id=resource_id,
                             context=context,
                         )
+                        self._record_pending_vmss_reconciliation(handler_result)
+                        if isinstance(handler_result, dict):
+                            provider_data = handler_result.get("provider_data")
+                            if isinstance(provider_data, dict):
+                                termination_provider_data.append(provider_data)
                 else:
-                    handler.release_hosts(
+                    handler_result = handler.release_hosts(
                         machine_ids=instance_ids,
                         resource_id=default_resource_id or "unknown",
                         context=context,
                     )
+                    self._record_pending_vmss_reconciliation(handler_result)
+                    if isinstance(handler_result, dict):
+                        provider_data = handler_result.get("provider_data")
+                        if isinstance(provider_data, dict):
+                            termination_provider_data.append(provider_data)
 
                 return ProviderResult.success_result(
                     {"success": True, "terminated_count": len(instance_ids)},
@@ -896,6 +908,9 @@ class AzureProviderStrategy(ProviderStrategy):
                         "operation": "terminate_instances",
                         "instance_ids": instance_ids,
                         "method": "handler",
+                        "provider_data": {
+                            "termination_requests": termination_provider_data,
+                        } if termination_provider_data else {},
                     },
                 )
 
@@ -1145,6 +1160,104 @@ class AzureProviderStrategy(ProviderStrategy):
                 filtered.append(result)
         return filtered
 
+    @staticmethod
+    def _status_candidate_ids(result: dict[str, Any]) -> set[str]:
+        provider_data = result.get("provider_data") or {}
+        candidate_ids = {
+            str(result.get("instance_id")),
+            str(provider_data.get("vm_id")),
+            str(provider_data.get("vmss_instance_id")),
+            str(provider_data.get("node_id")),
+            str(provider_data.get("vm_name")),
+        }
+        candidate_ids.discard("None")
+        candidate_ids.discard("")
+        return candidate_ids
+
+    def _record_pending_vmss_reconciliation(self, handler_result: Any) -> None:
+        if not isinstance(handler_result, dict):
+            return
+
+        provider_data = handler_result.get("provider_data")
+        if not isinstance(provider_data, dict):
+            return
+
+        pending = provider_data.get("pending_reconciliation")
+        if not isinstance(pending, dict):
+            return
+
+        resource_group = pending.get("resource_group")
+        vmss_name = pending.get("vmss_name")
+        if not resource_group or not vmss_name:
+            return
+
+        key = (str(resource_group), str(vmss_name))
+        self._pending_vmss_termination_reconciliations[key] = {
+            "resource_group": str(resource_group),
+            "vmss_name": str(vmss_name),
+            "machine_ids": [str(machine_id) for machine_id in pending.get("machine_ids", [])],
+            "target_capacity": int(pending.get("target_capacity", 0)),
+            "orchestration_mode": str(pending.get("orchestration_mode", "Flexible")),
+            "delete_vmss_when_empty": bool(pending.get("delete_vmss_when_empty", False)),
+        }
+
+    def _maybe_reconcile_pending_vmss_termination(
+        self,
+        *,
+        resource_group: Optional[str],
+        resource_ids: list[str],
+        instance_details: list[dict[str, Any]],
+    ) -> None:
+        if not resource_group or not resource_ids:
+            return
+
+        vmss_name = str(resource_ids[0])
+        key = (str(resource_group), vmss_name)
+        pending = self._pending_vmss_termination_reconciliations.get(key)
+        if not pending:
+            return
+
+        requested_ids = {str(machine_id) for machine_id in pending.get("machine_ids", [])}
+        if not requested_ids:
+            self._pending_vmss_termination_reconciliations.pop(key, None)
+            return
+
+        observed_ids: set[str] = set()
+        for instance in instance_details:
+            observed_ids.update(self._status_candidate_ids(instance))
+
+        if requested_ids & observed_ids:
+            return
+
+        try:
+            target_capacity = int(pending.get("target_capacity", 0))
+            orchestration_mode = str(pending.get("orchestration_mode", "Flexible"))
+
+            if orchestration_mode.lower() == "flexible" and target_capacity > 0:
+                if self.resource_manager:
+                    self.resource_manager.scale_vmss(
+                        resource_group=str(resource_group),
+                        vmss_name=vmss_name,
+                        capacity=target_capacity,
+                    )
+
+            if pending.get("delete_vmss_when_empty"):
+                azure_client = self.azure_client
+                if azure_client:
+                    azure_client.compute_client.virtual_machine_scale_sets.begin_delete(
+                        resource_group_name=str(resource_group),
+                        vm_scale_set_name=vmss_name,
+                    )
+
+            self._pending_vmss_termination_reconciliations.pop(key, None)
+        except Exception as exc:
+            self._logger.warning(
+                "Failed to reconcile pending VMSS termination for '%s' in '%s': %s",
+                vmss_name,
+                resource_group,
+                exc,
+            )
+
     # ------------------------------------------------------------------
     # DESCRIBE_RESOURCE_INSTANCES
     # ------------------------------------------------------------------
@@ -1210,6 +1323,13 @@ class AzureProviderStrategy(ProviderStrategy):
             request.resource_ids = resource_ids
 
             instance_details = handler.check_hosts_status(request)
+            self._maybe_reconcile_pending_vmss_termination(
+                resource_group=operation.parameters.get(
+                    "resource_group", self._azure_config.resource_group
+                ),
+                resource_ids=resource_ids,
+                instance_details=instance_details,
+            )
 
             if not instance_details:
                 metadata = {
