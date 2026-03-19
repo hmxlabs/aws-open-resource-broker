@@ -215,6 +215,7 @@ class TestValidateTemplate:
                     "vm_size": "Standard_D4s_v5",
                     "resource_group": "rg",
                     "location": "eastus2",
+                    "ssh_public_keys": ["ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQC7 test@host"],
                     "image": {
                         "publisher": "Canonical",
                         "offer": "0001-com-ubuntu-server-jammy",

@@ -58,9 +58,11 @@ class TestAzureProviderConfig:
 class TestTemplateValidation:
     def test_valid_template(self):
         result = validate_azure_template({
+            "template_id": "t1",
             "vm_size": "Standard_D4s_v5",
             "resource_group": "rg",
             "location": "eastus2",
+            "ssh_public_keys": ["ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQC7 test@host"],
             "image": {"publisher": "C", "offer": "o", "sku": "s"},
         })
         assert result["valid"] is True
@@ -74,9 +76,11 @@ class TestTemplateValidation:
 
     def test_uncommon_vm_size_warning(self):
         result = validate_azure_template({
+            "template_id": "t1",
             "vm_size": "custom_vm_size",
             "resource_group": "rg",
             "location": "eastus2",
+            "ssh_public_keys": ["ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQC7 test@host"],
             "image": {"publisher": "C", "offer": "o", "sku": "s"},
         })
         assert result["valid"] is True
@@ -121,6 +125,7 @@ class TestAzureValidationAdapter:
 
         result = adapter.validate_template_configuration({
             "provider_api": "VMSS",
+            "template_id": "t1",
             "vm_size": "Standard_D4s_v5",
             "resource_group": "rg",
             "location": "eastus2",
@@ -136,6 +141,7 @@ class TestAzureValidationAdapter:
 
         result = adapter.validate_template_configuration({
             "provider_api": "BogusApi",
+            "template_id": "t1",
             "vm_size": "Standard_D4s_v5",
             "resource_group": "rg",
             "location": "eastus2",
@@ -157,6 +163,7 @@ class TestAzureValidationAdapter:
 
         result = adapter.validate_template_configuration({
             "provider_api": "VMSS",
+            "template_id": "t1",
             "orchestration_mode": "Uniform",
             "spot_percentage": 70,
             "vm_size": "Standard_D4s_v5",

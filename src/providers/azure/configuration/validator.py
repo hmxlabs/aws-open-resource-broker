@@ -2,8 +2,10 @@
 
 from typing import Any
 
+from pydantic import ValidationError
+
 from providers.azure.configuration.config import AzureProviderConfig
-from providers.azure.domain.template.value_objects import AzureProviderApi
+from providers.azure.domain.template.azure_template_aggregate import AzureTemplate
 
 
 def validate_azure_config(config: AzureProviderConfig) -> dict[str, Any]:
@@ -30,99 +32,33 @@ def validate_azure_config(config: AzureProviderConfig) -> dict[str, Any]:
 
 
 def validate_azure_template(template_config: dict[str, Any]) -> dict[str, Any]:
-    """Validate an Azure template configuration dict.
+    """Validate an Azure template configuration dict via ``AzureTemplate``.
 
-    Performs Azure-specific field checks without constructing the full
-    ``AzureTemplate`` aggregate (which has its own Pydantic validators).
-
-    Returns:
-        dict with keys: valid, errors, warnings, validated_fields
+    ``AzureTemplate`` is the authoritative validation path for Azure template
+    configuration. This helper exists only to normalize model-validation
+    failures into the validation result shape used by the strategy and
+    validation adapter.
     """
-    errors: list[str] = []
     warnings: list[str] = []
 
-    # Required fields --------------------------------------------------
-    if "vm_size" not in template_config:
-        errors.append("Missing required field: vm_size")
-
-    if "resource_group" not in template_config:
-        errors.append("Missing required field: resource_group")
-
-    if "location" not in template_config:
-        errors.append("Missing required field: location")
-
-    # Image must be specified via image dict or core image_id
-    has_image = bool(template_config.get("image"))
-    has_image_id = bool(template_config.get("image_id"))
-    if not has_image and not has_image_id:
-        errors.append(
-            "Missing image configuration: provide 'image' (publisher/offer/sku or image_id) "
-            "or the core 'image_id' field"
-        )
-
-    # VM size validation -----------------------------------------------
     vm_size = template_config.get("vm_size", "")
-    vm_sizes = template_config.get("vm_sizes") or []
     if vm_size and not vm_size.startswith("Standard_"):
         warnings.append(
             f"Uncommon VM size format: '{vm_size}'. "
             "Azure VM sizes typically start with 'Standard_'."
         )
 
-    # Provider API validation ------------------------------------------
-    provider_api = template_config.get("provider_api", "VMSS")
-    valid_apis = {e.value for e in AzureProviderApi}
-    if provider_api not in valid_apis:
-        errors.append(
-            f"Invalid provider_api '{provider_api}'. Must be one of: {sorted(valid_apis)}"
-        )
-
-    # Networking -------------------------------------------------------
-    network_config = template_config.get("network_config")
-    if network_config and isinstance(network_config, dict):
-        if "subnet_id" not in network_config:
-            errors.append("network_config.subnet_id is required when network_config is provided")
-
-    # Spot validation --------------------------------------------------
-    priority = template_config.get("priority", "Regular")
-    eviction_policy = template_config.get("eviction_policy")
-    billing_max_price = template_config.get("billing_profile_max_price")
-    spot_percentage = template_config.get("spot_percentage")
-    orchestration_mode = template_config.get("orchestration_mode", "Flexible")
-    single_placement_group = bool(template_config.get("single_placement_group", False))
-    allocation_strategy = template_config.get("allocation_strategy")
-
-    if allocation_strategy == "spotPlacementScore":
-        if priority != "Spot":
-            errors.append("spotPlacementScore requires Spot priority Azure VMs")
-        if len([vm_size, *vm_sizes]) < 2:
-            errors.append(
-                "spotPlacementScore requires at least two candidate vm sizes via vm_size/vm_sizes"
-            )
-
-    if priority == "Regular":
-        if eviction_policy is not None:
-            errors.append("eviction_policy is only valid for Spot or Low priority VMs")
-        if billing_max_price is not None:
-            errors.append("billing_profile_max_price is only valid for Spot priority VMs")
-
-    if spot_percentage is not None:
-        if not isinstance(spot_percentage, int) or not (0 <= spot_percentage <= 100):
-            errors.append("spot_percentage must be an integer between 0 and 100")
-        if provider_api not in {"VMSS", "VMSSUniform"}:
-            errors.append("spot_percentage is only supported for VMSS-based templates")
-        if orchestration_mode != "Flexible":
-            errors.append("spot_percentage requires Flexible orchestration mode")
-        if single_placement_group:
-            errors.append(
-                "spot_percentage is not supported when single_placement_group is enabled"
-            )
-        if priority == "Low":
-            errors.append("spot_percentage is not compatible with Low priority VMs")
-
-    # Zone balance requires zones
-    if template_config.get("zone_balance") and not template_config.get("zones"):
-        errors.append("zone_balance requires at least one availability zone")
+    try:
+        AzureTemplate.model_validate(template_config)
+        errors: list[str] = []
+    except ValidationError as exc:
+        errors = []
+        for issue in exc.errors():
+            message = issue.get("msg", "Validation error")
+            location = ".".join(str(part) for part in issue.get("loc", []))
+            errors.append(f"{location}: {message}" if location else message)
+    except Exception as exc:
+        errors = [str(exc)]
 
     return {
         "valid": len(errors) == 0,
