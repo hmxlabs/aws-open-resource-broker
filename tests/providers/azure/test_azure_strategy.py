@@ -623,6 +623,46 @@ class TestGetInstanceStatus:
         handler.check_hosts_status.assert_called_once()
         assert [m["instance_id"] for m in result.data["machines"]] == ["3"]
 
+    def test_vmss_resource_mapping_routes_status_via_handler_without_provider_api(self, azure_config, logger):
+        strategy = AzureProviderStrategy(config=azure_config, logger=logger)
+        strategy.initialize()
+
+        handler = MagicMock()
+        handler.check_hosts_status.return_value = [
+            {
+                "instance_id": "3",
+                "status": "running",
+                "private_ip": "10.0.0.7",
+                "public_ip": None,
+                "launch_time": None,
+                "instance_type": "Standard_D4s_v5",
+                "subnet_id": "/subscriptions/.../subnets/default",
+                "vpc_id": "/subscriptions/.../virtualNetworks/test-vnet",
+                "provider_type": "azure",
+                "provider_data": {
+                    "vmss_instance_id": "3",
+                    "vm_id": "vm-guid-3",
+                },
+            }
+        ]
+        strategy._handlers = {"VMSS": handler}
+
+        op = ProviderOperation(
+            operation_type=ProviderOperationType.GET_INSTANCE_STATUS,
+            parameters={
+                "instance_ids": ["3"],
+                "resource_group": "test-rg",
+                "resource_mapping": {"3": ("vmss-demo", 2)},
+            },
+        )
+
+        result = _run(strategy.execute_operation(op))
+
+        assert result.success
+        assert result.metadata["method"] == "handler"
+        handler.check_hosts_status.assert_called_once()
+        assert [m["instance_id"] for m in result.data["machines"]] == ["3"]
+
     def test_status_populates_network_identity(self, strategy):
         azure_client = MagicMock()
         strategy._client = azure_client

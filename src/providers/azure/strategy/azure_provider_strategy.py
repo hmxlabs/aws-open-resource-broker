@@ -1033,10 +1033,13 @@ class AzureProviderStrategy(ProviderStrategy):
         resource_group: str,
     ) -> Optional[list[dict[str, Any]]]:
         """Use Azure handlers for status queries when enough resource context is available."""
-        provider_api = operation.parameters.get("provider_api")
+        provider_api = self._resolve_status_provider_api(operation)
         provider_api_value = provider_api.value if hasattr(provider_api, "value") else provider_api
         raw_resource_mapping = operation.parameters.get("resource_mapping", {}) or {}
         grouped_resource_mapping = self._group_instance_ids_by_resource(instance_ids, raw_resource_mapping)
+
+        if not provider_api_value and grouped_resource_mapping:
+            provider_api_value = self._infer_grouped_status_provider_api(operation)
 
         if not provider_api_value and not grouped_resource_mapping:
             return None
@@ -1139,6 +1142,49 @@ class AzureProviderStrategy(ProviderStrategy):
         if provider_api_value == AzureProviderApi.SINGLE_VM.value:
             return handler.check_hosts_status(request)
         return self._filter_status_results(handler.check_hosts_status(request), instance_ids)
+
+    @staticmethod
+    def _resolve_status_provider_api(operation: ProviderOperation) -> Optional[Any]:
+        for source in (
+            operation.parameters,
+            operation.parameters.get("request_metadata", {}) or {},
+            operation.context or {},
+        ):
+            if not isinstance(source, dict):
+                continue
+            provider_api = source.get("provider_api")
+            if provider_api not in (None, ""):
+                return provider_api
+        return None
+
+    @staticmethod
+    def _infer_grouped_status_provider_api(operation: ProviderOperation) -> str:
+        """Infer a grouped-resource status handler when provider_api was not persisted."""
+        for source in (
+            operation.parameters.get("request_metadata", {}) or {},
+            operation.context or {},
+            operation.parameters,
+        ):
+            if not isinstance(source, dict):
+                continue
+            if any(
+                source.get(key) not in (None, "")
+                for key in (
+                    "cluster_name",
+                    "node_array",
+                    "node_ids",
+                    "cyclecloud_url",
+                    "cyclecloud_username",
+                    "cyclecloud_password",
+                    "cyclecloud_verify_ssl",
+                    "cyclecloud_auth_mode",
+                    "cyclecloud_aad_scope",
+                )
+            ):
+                return AzureProviderApi.CYCLECLOUD.value
+
+        # Grouped resource mappings in Azure are most commonly VMSS-backed.
+        return AzureProviderApi.VMSS.value
 
     @staticmethod
     def _filter_status_results(
