@@ -143,7 +143,9 @@ class CLICommandFactoryOrchestrator:
 
     def create_get_configuration_query(self, key: str, default: "Any | None" = None, **kwargs: Any):
         """Create query to get configuration value."""
-        return self._system_factory.create_get_configuration_query(key=key, default=default, **kwargs)
+        return self._system_factory.create_get_configuration_query(
+            key=key, default=default, **kwargs
+        )
 
     def create_set_configuration_command(self, key: str, value: str, **kwargs: Any):
         """Create command to set configuration value."""

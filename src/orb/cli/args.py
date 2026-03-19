@@ -209,9 +209,7 @@ def add_request_actions(subparsers):
 
     requests_list_returns = subparsers.add_parser("list-returns", help="List return requests")
     add_global_arguments(requests_list_returns)
-    requests_list_returns.add_argument(
-        "--status", help="Filter by return request status"
-    )
+    requests_list_returns.add_argument("--status", help="Filter by return request status")
 
 
 def add_infrastructure_actions(subparsers):
