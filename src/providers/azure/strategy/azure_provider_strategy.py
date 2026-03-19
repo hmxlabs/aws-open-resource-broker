@@ -642,9 +642,11 @@ class AzureProviderStrategy(ProviderStrategy):
 
             # Build AzureTemplate domain object.
             # Azure-specific fields (vm_size, resource_group, location, image, …)
-            # survive the base Template round-trip inside metadata, so merge them
-            # back to the top level before constructing AzureTemplate.
-            # metadata wins for Azure fields; template_config wins for base fields.
+            # may survive the base Template round-trip inside metadata, so merge them
+            # back into the config before constructing AzureTemplate.
+            # Top-level template_config values remain authoritative; metadata only
+            # fills gaps and preserves provider-specific context when those fields
+            # are absent from the normalized template payload.
             enhanced_config = {
                 **template_config.get("metadata", {}),
                 **template_config,
