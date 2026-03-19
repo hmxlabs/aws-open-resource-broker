@@ -18,7 +18,11 @@ async def handle_provider_add(args) -> dict[str, Any]:
     try:
         config_file = get_config_location() / "config.json"
         if not config_file.exists():
-            return {"error": True, "message": "No configuration found. Run 'orb init' first.", "exit_code": 1}
+            return {
+                "error": True,
+                "message": "No configuration found. Run 'orb init' first.",
+                "exit_code": 1,
+            }
 
         with open(config_file) as f:
             config = json.load(f)
@@ -27,7 +31,11 @@ async def handle_provider_add(args) -> dict[str, Any]:
         spec = CLISpecRegistry.get(provider_type)
 
         if spec is None:
-            return {"error": True, "message": f"Unknown provider type: {provider_type}", "exit_code": 1}
+            return {
+                "error": True,
+                "message": f"Unknown provider type: {provider_type}",
+                "exit_code": 1,
+            }
 
         errors = spec.validate_add(args)
         if errors:
@@ -51,7 +59,11 @@ async def handle_provider_add(args) -> dict[str, Any]:
         # Check if provider already exists
         existing_providers = config.get("provider", {}).get("providers", [])
         if any(p["name"] == provider_name for p in existing_providers):
-            return {"error": True, "message": f"Provider '{provider_name}' already exists", "exit_code": 1}
+            return {
+                "error": True,
+                "message": f"Provider '{provider_name}' already exists",
+                "exit_code": 1,
+            }
 
         # Create provider instance
         provider_instance: dict[str, Any] = {
@@ -92,7 +104,11 @@ async def handle_provider_remove(args) -> dict[str, Any]:
         providers[:] = [p for p in providers if p["name"] != args.provider_name]
 
         if len(providers) == original_count:
-            return {"error": True, "message": f"Provider '{args.provider_name}' not found", "exit_code": 1}
+            return {
+                "error": True,
+                "message": f"Provider '{args.provider_name}' not found",
+                "exit_code": 1,
+            }
 
         if len(providers) == 0:
             return {"error": True, "message": "Cannot remove last provider", "exit_code": 1}
@@ -125,7 +141,11 @@ async def handle_provider_update(args) -> dict[str, Any]:
                 break
 
         if not provider:
-            return {"error": True, "message": f"Provider '{args.provider_name}' not found", "exit_code": 1}
+            return {
+                "error": True,
+                "message": f"Provider '{args.provider_name}' not found",
+                "exit_code": 1,
+            }
 
         # Infer provider type from stored record
         provider_type = provider.get("type", "aws")
@@ -177,7 +197,11 @@ async def handle_provider_set_default(args) -> dict[str, Any]:
 
         providers = config.get("provider", {}).get("providers", [])
         if not any(p["name"] == args.provider_name for p in providers):
-            return {"error": True, "message": f"Provider '{args.provider_name}' not found", "exit_code": 1}
+            return {
+                "error": True,
+                "message": f"Provider '{args.provider_name}' not found",
+                "exit_code": 1,
+            }
 
         config.setdefault("provider", {})["default_provider"] = args.provider_name
 
@@ -234,7 +258,11 @@ async def handle_provider_get(args) -> dict[str, Any]:
         providers = config.get("provider", {}).get("providers", [])
         provider = next((p for p in providers if p["name"] == provider_name), None)
         if not provider:
-            return {"error": True, "message": f"Provider '{provider_name}' not found", "exit_code": 1}
+            return {
+                "error": True,
+                "message": f"Provider '{provider_name}' not found",
+                "exit_code": 1,
+            }
 
         return {"provider": provider}
 

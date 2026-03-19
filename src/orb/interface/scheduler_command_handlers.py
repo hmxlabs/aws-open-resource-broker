@@ -66,8 +66,15 @@ async def handle_validate_scheduler_config(
     query = ValidateSchedulerConfigurationQuery()
     validation = await query_bus.execute(query)
 
-    validation_data = validation.model_dump() if hasattr(validation, "model_dump") else (validation if isinstance(validation, dict) else vars(validation))
-    raw = {"validation": validation_data, "message": "Scheduler configuration validated successfully"}
+    validation_data = (
+        validation.model_dump()
+        if hasattr(validation, "model_dump")
+        else (validation if isinstance(validation, dict) else vars(validation))
+    )
+    raw = {
+        "validation": validation_data,
+        "message": "Scheduler configuration validated successfully",
+    }
     if isinstance(validation, dict):
         is_valid = validation.get("valid", True)
     elif hasattr(validation, "model_dump"):
