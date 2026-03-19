@@ -47,6 +47,9 @@ async def execute_command(args, app, resource_parsers) -> Union[str, tuple[str, 
 
     result = await handler(args)
 
+    if isinstance(result, int):
+        return "", result
+
     from orb.application.dto.interface_response import InterfaceResponse
     from orb.cli.formatters import format_output
 
