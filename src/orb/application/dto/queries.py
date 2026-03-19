@@ -16,7 +16,7 @@ class GetRequestQuery(Query, BaseModel):
 
     provider_name: Optional[str] = None
     request_id: str
-    long: bool = False
+    verbose: bool = False
     lightweight: bool = False
 
 

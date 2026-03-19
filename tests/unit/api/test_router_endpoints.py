@@ -414,7 +414,7 @@ class TestRequestsRouter:
         client.get("/requests/req-123/status")
 
         inp: GetRequestStatusInput = orch.execute.call_args.args[0]
-        assert inp.detailed is True
+        assert inp.verbose is True
 
     def test_get_request_status_long_false(self, requests_app):
         output = GetRequestStatusOutput(requests=[])
@@ -422,10 +422,10 @@ class TestRequestsRouter:
         self._set_scheduler(requests_app)
         client = TestClient(requests_app, raise_server_exceptions=False)
 
-        client.get("/requests/req-123/status?long=false")
+        client.get("/requests/req-123/status?verbose=false")
 
         inp: GetRequestStatusInput = orch.execute.call_args.args[0]
-        assert inp.detailed is False
+        assert inp.verbose is False
 
     def test_get_request_details(self, requests_app):
         # GET /requests/{id} (no /status) was removed; expect 404 or 405

@@ -494,7 +494,7 @@ class ORBClient:
             GetRequestStatusInput(
                 request_ids=list(request_ids),
                 all_requests=kwargs.get("all_requests", False),
-                detailed=kwargs.get("detailed", False),
+                verbose=kwargs.get("verbose", False),
             )
         )
         scheduler = self._container.get_optional(SchedulerPort)
@@ -1062,7 +1062,7 @@ class ORBClient:
 
         deadline = asyncio.get_running_loop().time() + timeout
         while True:
-            status_result = await self.get_request_status(request_ids=[request_id], detailed=False)
+            status_result = await self.get_request_status(request_ids=[request_id], verbose=False)
             requests = status_result.get("requests", []) if isinstance(status_result, dict) else []
             result = requests[0] if requests else {}
             status_str = (

@@ -429,76 +429,76 @@ class TestHandleGetRequestStatus:
 
 
 # ---------------------------------------------------------------------------
-# handle_get_request_status — detailed flag (2010) + multi-ID paths (2014)
+# handle_get_request_status — verbose flag (2010) + multi-ID paths (2014)
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.unit
 class TestHandleGetRequestStatusDetailed:
-    """2010: --detailed flag must be respected, not hardcoded to True."""
+    """2010: --verbose flag must be respected, not hardcoded to True."""
 
     @pytest.mark.asyncio
     async def test_detailed_false_by_default(self):
-        """No --detailed on args → orchestrator receives detailed=False."""
+        """No --verbose on args → orchestrator receives verbose=False."""
         from orb.application.dto.interface_response import InterfaceResponse
 
         container, _scheduler, _, _, status_orch, *_, formatter = _mock_container()
         status_orch.execute.return_value = GetRequestStatusOutput(requests=[])
         formatter.format_request_status.return_value = InterfaceResponse(data={"requests": []})
 
-        args = _make_namespace(request_id="req-001", all=False, detailed=False)
+        args = _make_namespace(request_id="req-001", all=False, verbose=False)
 
         with patch("orb.interface.request_command_handlers.get_container", return_value=container):
             result = await handle_get_request_status(args)
 
         call_input = status_orch.execute.call_args[0][0]
-        assert call_input.detailed is False
+        assert call_input.verbose is False
         assert isinstance(result, InterfaceResponse)
 
     @pytest.mark.asyncio
     async def test_detailed_true_when_flag_set(self):
-        """--detailed set → orchestrator receives detailed=True."""
+        """--verbose set → orchestrator receives verbose=True."""
         container, scheduler, _, _, status_orch, *_ = _mock_container()
         status_orch.execute.return_value = GetRequestStatusOutput(requests=[])
         scheduler.format_request_status_response.return_value = {"requests": []}
 
-        args = _make_namespace(request_id="req-001", all=False, detailed=True)
+        args = _make_namespace(request_id="req-001", all=False, verbose=True)
 
         with patch("orb.interface.request_command_handlers.get_container", return_value=container):
             await handle_get_request_status(args)
 
         call_input = status_orch.execute.call_args[0][0]
-        assert call_input.detailed is True
+        assert call_input.verbose is True
 
     @pytest.mark.asyncio
     async def test_all_path_detailed_false_by_default(self):
-        """--all path also respects detailed flag defaulting to False."""
+        """--all path also respects verbose flag defaulting to False."""
         container, scheduler, _, _, status_orch, *_ = _mock_container()
         status_orch.execute.return_value = GetRequestStatusOutput(requests=[])
         scheduler.format_request_status_response.return_value = {"requests": []}
 
-        args = _make_namespace(all=True, detailed=False)
+        args = _make_namespace(all=True, verbose=False)
 
         with patch("orb.interface.request_command_handlers.get_container", return_value=container):
             await handle_get_request_status(args)
 
         call_input = status_orch.execute.call_args[0][0]
-        assert call_input.detailed is False
+        assert call_input.verbose is False
 
     @pytest.mark.asyncio
     async def test_all_path_detailed_true_when_flag_set(self):
-        """--all + --detailed → orchestrator receives detailed=True."""
+        """--all + --verbose → orchestrator receives verbose=True."""
         container, scheduler, _, _, status_orch, *_ = _mock_container()
         status_orch.execute.return_value = GetRequestStatusOutput(requests=[])
         scheduler.format_request_status_response.return_value = {"requests": []}
 
-        args = _make_namespace(all=True, detailed=True)
+        args = _make_namespace(all=True, verbose=True)
 
         with patch("orb.interface.request_command_handlers.get_container", return_value=container):
             await handle_get_request_status(args)
 
         call_input = status_orch.execute.call_args[0][0]
-        assert call_input.detailed is True
+        assert call_input.verbose is True
 
 
 @pytest.mark.unit
