@@ -114,8 +114,8 @@ async def test_update_file_not_found_returns_error() -> None:
     with _patch_container(bus), _patch_dry_run():
         result = await handle_update_template(args)
 
-    assert result["success"] is False
-    assert "not found" in result["error"].lower()
+    assert result.data["success"] is False
+    assert "not found" in result.data["error"].lower()
 
 
 @pytest.mark.asyncio
@@ -130,8 +130,8 @@ async def test_update_invalid_json_returns_error(tmp_path: Path) -> None:
     with _patch_container(bus), _patch_dry_run():
         result = await handle_update_template(args)
 
-    assert result["success"] is False
-    assert "invalid json" in result["error"].lower()
+    assert result.data["success"] is False
+    assert "invalid json" in result.data["error"].lower()
 
 
 @pytest.mark.asyncio
@@ -146,8 +146,8 @@ async def test_update_json_array_returns_error(tmp_path: Path) -> None:
     with _patch_container(bus), _patch_dry_run():
         result = await handle_update_template(args)
 
-    assert result["success"] is False
-    assert "json object" in result["error"].lower()
+    assert result.data["success"] is False
+    assert "json object" in result.data["error"].lower()
 
 
 @pytest.mark.asyncio

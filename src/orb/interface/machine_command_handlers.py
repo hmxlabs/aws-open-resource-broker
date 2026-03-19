@@ -43,10 +43,13 @@ async def handle_get_machine_status(
     has_specific_ids = bool(machine_ids_from_args)
 
     if has_all and has_specific_ids:
-        return {
-            "error": "Cannot use --all with specific machine IDs",
-            "message": "Use either --all or specific IDs, not both",
-        }
+        return InterfaceResponse(
+            data={
+                "error": "Cannot use --all with specific machine IDs",
+                "message": "Use either --all or specific IDs, not both",
+            },
+            exit_code=1,
+        )
 
     if has_all:
         orchestrator = container.get(ListMachinesOrchestrator)
@@ -54,7 +57,10 @@ async def handle_get_machine_status(
         return formatter.format_machine_list(result.machines)
 
     if not machine_ids_from_args:
-        return {"error": "No machine IDs provided", "message": "Machine IDs are required"}
+        return InterfaceResponse(
+            data={"error": "No machine IDs provided", "message": "Machine IDs are required"},
+            exit_code=1,
+        )
 
     orchestrator = container.get(GetMachineOrchestrator)
     results = await asyncio.gather(
@@ -125,24 +131,33 @@ async def handle_stop_machines(
     )
 
     if has_all and not has_force:
-        return {
-            "error": "Cannot use --all without --force flag",
-            "message": "Use --force with --all to confirm stopping all machines",
-        }
+        return InterfaceResponse(
+            data={
+                "error": "Cannot use --all without --force flag",
+                "message": "Use --force with --all to confirm stopping all machines",
+            },
+            exit_code=1,
+        )
 
     # Validation: Cannot use both --all and specific IDs
     if has_all and machine_ids_from_args:
-        return {
-            "error": "Cannot use --all with specific machine IDs",
-            "message": "Use either --all or specific IDs, not both",
-        }
+        return InterfaceResponse(
+            data={
+                "error": "Cannot use --all with specific machine IDs",
+                "message": "Use either --all or specific IDs, not both",
+            },
+            exit_code=1,
+        )
 
     # Validation: Must specify either --all or specific IDs
     if not has_all and not machine_ids_from_args:
-        return {
-            "error": "No machines specified",
-            "message": "Specify machine IDs or use --all --force",
-        }
+        return InterfaceResponse(
+            data={
+                "error": "No machines specified",
+                "message": "Specify machine IDs or use --all --force",
+            },
+            exit_code=1,
+        )
 
     from orb.application.services.orchestration.dtos import StopMachinesInput
     from orb.application.services.orchestration.stop_machines import StopMachinesOrchestrator
@@ -186,17 +201,23 @@ async def handle_start_machines(
     )
 
     if has_all and machine_ids_from_args:
-        return {
-            "error": "Cannot use --all with specific machine IDs",
-            "message": "Use either --all or specific IDs, not both",
-        }
+        return InterfaceResponse(
+            data={
+                "error": "Cannot use --all with specific machine IDs",
+                "message": "Use either --all or specific IDs, not both",
+            },
+            exit_code=1,
+        )
 
     # Validation: Must specify either --all or specific IDs
     if not has_all and not machine_ids_from_args:
-        return {
-            "error": "No machines specified",
-            "message": "Specify machine IDs or use --all",
-        }
+        return InterfaceResponse(
+            data={
+                "error": "No machines specified",
+                "message": "Specify machine IDs or use --all",
+            },
+            exit_code=1,
+        )
 
     from orb.application.services.orchestration.dtos import StartMachinesInput
     from orb.application.services.orchestration.start_machines import StartMachinesOrchestrator
