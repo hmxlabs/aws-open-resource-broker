@@ -90,7 +90,10 @@ async def handle_select_provider_strategy(args) -> dict[str, Any]:
     registry_service = get_container().get(ProviderRegistryService)
     registered_types = registry_service.get_available_strategies()
     if not registered_types:
-        return {"error": "No providers registered", "message": "No provider strategies are available"}
+        return {
+            "error": "No providers registered",
+            "message": "No provider strategies are available",
+        }
 
     provider = getattr(args, "provider", None) or registered_types[0]
     return {
