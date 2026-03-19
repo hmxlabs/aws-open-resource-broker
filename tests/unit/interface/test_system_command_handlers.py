@@ -299,7 +299,8 @@ class TestHandleSystemHealth:
             result = await handle_system_health(_ns())
 
         mock_hc.assert_called_once()
-        assert result["success"] is True
+        assert result.data["success"] is True
+        assert result.exit_code == 0
 
     @pytest.mark.asyncio
     async def test_returns_error_when_health_check_returns_nonzero(self):
@@ -311,7 +312,8 @@ class TestHandleSystemHealth:
         ):
             result = await handle_system_health(_ns())
 
-        assert result["success"] is False
+        assert result.data["success"] is False
+        assert result.exit_code == 1
 
 
 # ---------------------------------------------------------------------------
