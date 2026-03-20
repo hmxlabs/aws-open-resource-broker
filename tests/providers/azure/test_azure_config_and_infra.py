@@ -55,6 +55,36 @@ class TestAzureProviderConfig:
                 "subscription_id": "not-a-uuid",
             })
 
+    def test_cyclecloud_config_rejects_inline_basic_auth(self):
+        with pytest.raises(ValueError, match="credential_path"):
+            AzureProviderConfig(
+                subscription_id="12345678-1234-1234-1234-123456789012",
+                cyclecloud={
+                    "url": "https://cc.example.com",
+                    "username": "admin",
+                    "password": "secret",
+                },
+            )
+
+    def test_cyclecloud_config_accepts_credential_path_auth(self):
+        config = AzureProviderConfig(
+            subscription_id="12345678-1234-1234-1234-123456789012",
+            cyclecloud={
+                "url": "https://cc.example.com",
+                "credential_path": "config/cyclecloud-credentials.json",
+            },
+        )
+
+        assert config.cyclecloud is not None
+        assert config.cyclecloud.credential_path == "config/cyclecloud-credentials.json"
+
+    def test_azure_config_rejects_invalid_default_handler(self):
+        with pytest.raises(ValueError, match="default_handler"):
+            AzureProviderConfig(
+                subscription_id="12345678-1234-1234-1234-123456789012",
+                handlers={"defaults": {"default_handler": "AzureFleet"}},
+            )
+
 
 # ---------------------------------------------------------------------------
 # Template validation
@@ -411,6 +441,26 @@ class TestAzureValidationAdapter:
 
         with patch("config.manager.get_config_manager", side_effect=Exception("no config")):
             assert adapter.validate_provider_api("VMSSUniform") is True
+
+    def test_validate_provider_api_does_not_accept_dead_config_only_api_names(self):
+        adapter = AzureValidationAdapter(config=AzureProviderConfig(), logger=MagicMock())
+
+        fake_config_manager = MagicMock()
+        fake_config_manager.get_raw_config.return_value = {
+            "provider": {
+                "provider_defaults": {
+                    "azure": {
+                        "handlers": {
+                            "AzureFleet": {},
+                        }
+                    }
+                }
+            }
+        }
+
+        with patch("config.manager.get_config_manager", return_value=fake_config_manager):
+            assert adapter.validate_provider_api("AzureFleet") is False
+            assert "AzureFleet" not in adapter.get_supported_provider_apis()
 
     def test_validate_template_configuration_rejects_spot_percentage_for_uniform(self):
         adapter = AzureValidationAdapter(config=AzureProviderConfig(), logger=MagicMock())

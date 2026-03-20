@@ -50,22 +50,7 @@ class AzureValidationAdapter(BaseProviderValidationAdapter):
             True if the API is supported by azure configuration
         """
         try:
-            enum_supported_apis = {provider_api.value for provider_api in AzureProviderApi}
-            # Get supported APIs from configuration
-            from config.manager import get_config_manager
-
-            config_manager = get_config_manager()
-            raw_config = config_manager.get_raw_config()
-
-            # Navigate to azure handlers in configuration
-            azure_handlers = (
-                raw_config.get("provider", {})
-                .get("provider_defaults", {})
-                .get("azure", {})
-                .get("handlers", {})
-            )
-
-            supported_apis = enum_supported_apis | set(azure_handlers.keys())
+            supported_apis = {provider_api.value for provider_api in AzureProviderApi}
             is_valid = api in supported_apis
 
             if not is_valid:
@@ -86,22 +71,7 @@ class AzureValidationAdapter(BaseProviderValidationAdapter):
             List of supported azure provider API identifiers
         """
         try:
-            enum_supported_apis = {provider_api.value for provider_api in AzureProviderApi}
-            # Get supported APIs from configuration
-            from config.manager import get_config_manager
-
-            config_manager = get_config_manager()
-            raw_config = config_manager.get_raw_config()
-
-            # Navigate to azure handlers in configuration
-            azure_handlers = (
-                raw_config.get("provider", {})
-                .get("provider_defaults", {})
-                .get("azure", {})
-                .get("handlers", {})
-            )
-
-            return sorted(enum_supported_apis | set(azure_handlers.keys()))
+            return sorted(provider_api.value for provider_api in AzureProviderApi)
         except Exception as e:
             self._logger.error("Error getting supported azure APIs: %s", e)
             # Fallback to hardcoded list for safety

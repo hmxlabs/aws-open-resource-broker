@@ -3,7 +3,7 @@
 from enum import Enum
 from typing import Optional
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from infrastructure.interfaces.provider import BaseProviderConfig
 
@@ -52,7 +52,6 @@ class HandlerCapabilityConfig(BaseModel):
     """Advertised handler capabilities for this provider instance."""
 
     vmss: bool = Field(True, description="VMSS handler available")
-    fleet: bool = Field(True, description="Azure Compute Fleet handler available")
 
 
 class HandlerDefaultsConfig(BaseModel):
@@ -60,8 +59,18 @@ class HandlerDefaultsConfig(BaseModel):
 
     default_handler: str = Field(
         "VMSS",
-        description="Handler to use when template does not specify one ('VMSS' or 'AzureFleet')",
+        description="Handler to use when template does not specify one.",
     )
+
+    @field_validator("default_handler")
+    @classmethod
+    def validate_default_handler(cls, value: str) -> str:
+        valid_handlers = {"VMSS", "VMSSUniform", "SingleVM", "CycleCloud"}
+        if value not in valid_handlers:
+            raise ValueError(
+                f"default_handler must be one of {sorted(valid_handlers)}, got '{value}'"
+            )
+        return value
 
 
 class HandlersConfig(BaseModel):
@@ -124,15 +133,35 @@ class CycleCloudSSHConfig(BaseModel):
 class CycleCloudConfig(BaseModel):
     """CycleCloud connection configuration."""
 
+    model_config = ConfigDict(extra="allow")
+
     url: Optional[str] = Field(None, description="CycleCloud REST API base URL")
     credential_path: Optional[str] = Field(
         None,
         description="Path to a JSON file containing CycleCloud credentials and optional auth overrides",
     )
-    username: Optional[str] = Field(None, description="CycleCloud API username")
-    password: Optional[str] = Field(None, description="CycleCloud API password")
     verify_ssl: bool = Field(True, description="Verify CycleCloud TLS certs")
     ssh: Optional[CycleCloudSSHConfig] = Field(None, description="Optional SSH connection settings")
+
+    @model_validator(mode="before")
+    @classmethod
+    def reject_inline_basic_auth(cls, data: object) -> object:
+        if not isinstance(data, dict):
+            return data
+
+        forbidden_fields = {
+            "username",
+            "password",
+            "cyclecloud_username",
+            "cyclecloud_password",
+        }
+        present = [field for field in forbidden_fields if data.get(field) not in (None, "")]
+        if present:
+            raise ValueError(
+                "CycleCloud inline username/password config is not supported; "
+                "use credential_path instead."
+            )
+        return data
 
 
 # ---------------------------------------------------------------------------
