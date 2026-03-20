@@ -240,7 +240,7 @@ class ProviderCapabilityService:
                             "supported_fleet_types": [],
                             "supports_spot": True,
                             "supports_on_demand": True,
-                            "max_instances": 1,
+                            "max_instances": 1000,
                         },
                     },
                     "spot_instances": True,

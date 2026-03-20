@@ -446,11 +446,7 @@ class AzureProviderStrategy(ProviderStrategy):
                         "supported_fleet_types": [],
                         "supports_spot": True,
                         "supports_on_demand": True,
-                        # SingleVMHandler can loop over requested_count and
-                        # create more than one VM. But if you are creating multiple
-                        # you should probably use a different handler? Not sure what
-                        # this should be
-                        "max_instances": 1,
+                        "max_instances": 1000,
                     },
                     AzureProviderApi.CYCLECLOUD.value: {
                         "supported_fleet_types": [],

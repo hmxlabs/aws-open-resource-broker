@@ -832,6 +832,6 @@ class SingleVMHandler(AzureHandler):
                     "sku": "22_04-lts-gen2",
                     "version": "latest",
                 },
-                "max_instances": 1,
+                "max_instances": 5,
             },
         ]
