@@ -141,6 +141,63 @@ def test_single_vm_acquire_hosts_returns_immediately_after_submitting_lros():
     assert result["provider_data"]["operation_status"] == "submitted"
 
 
+def test_single_vm_acquire_hosts_creates_public_ip_when_enabled():
+    azure_client = MagicMock()
+    logger = MagicMock()
+    handler = SingleVMHandler(azure_client=azure_client, logger=logger)
+
+    public_ip_result = MagicMock()
+    public_ip_result.id = "/subscriptions/.../publicIPAddresses/pip-vm-1"
+    public_ip_poller = MagicMock()
+    public_ip_poller.result.return_value = public_ip_result
+    azure_client.network_client.public_ip_addresses.begin_create_or_update.return_value = public_ip_poller
+
+    nic_result = MagicMock()
+    nic_result.id = "/subscriptions/.../networkInterfaces/nic-vm-1"
+    nic_poller = MagicMock()
+    nic_poller.result.return_value = nic_result
+    azure_client.network_client.network_interfaces.begin_create_or_update.return_value = nic_poller
+
+    vm_poller = MagicMock()
+    vm_poller.continuation_token.return_value = "single-vm-lro-token"
+    azure_client.compute_client.virtual_machines.begin_create_or_update.return_value = vm_poller
+
+    request = MagicMock()
+    request.requested_count = 1
+    request.request_id = "req-pip"
+    request.metadata = {}
+
+    template = AzureTemplate(
+        template_id="azure-singlevm-test",
+        provider_api="SingleVM",
+        vm_size="Standard_D4s_v5",
+        resource_group="test-rg",
+        location="eastus2",
+        network_config={
+            "subnet_id": "/subscriptions/.../subnets/default",
+            "public_ip_enabled": True,
+        },
+        ssh_public_keys=["ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQC7 test@host"],
+        image={
+            "publisher": "Canonical",
+            "offer": "0001-com-ubuntu-server-jammy",
+            "sku": "22_04-lts-gen2",
+            "version": "latest",
+        },
+    )
+
+    result = handler.acquire_hosts(request, template)
+
+    assert result["success"] is True
+    azure_client.network_client.public_ip_addresses.begin_create_or_update.assert_called_once()
+    nic_params = azure_client.network_client.network_interfaces.begin_create_or_update.call_args.kwargs[
+        "parameters"
+    ]
+    public_ip_ref = nic_params["properties"]["ipConfigurations"][0]["properties"]["publicIPAddress"]
+    assert public_ip_ref["id"] == "/subscriptions/.../publicIPAddresses/pip-vm-1"
+    assert public_ip_ref["deleteOption"] == "Delete"
+
+
 def test_single_vm_partial_failure_returns_structured_errors():
     azure_client = MagicMock()
     logger = MagicMock()
@@ -594,3 +651,50 @@ def test_single_vm_create_sets_native_delete_options():
     assert nic_ref["properties"]["deleteOption"] == "Delete"
     assert vm_params["properties"]["storageProfile"]["osDisk"]["deleteOption"] == "Delete"
     assert vm_params["properties"]["storageProfile"]["dataDisks"][0]["deleteOption"] == "Delete"
+
+
+def test_single_vm_create_nic_attaches_public_ip_when_enabled():
+    azure_client = MagicMock()
+    logger = MagicMock()
+    handler = SingleVMHandler(azure_client=azure_client, logger=logger)
+
+    public_ip_result = MagicMock()
+    public_ip_result.id = "/subscriptions/.../publicIPAddresses/pip-vm-test"
+    public_ip_poller = MagicMock()
+    public_ip_poller.result.return_value = public_ip_result
+    azure_client.network_client.public_ip_addresses.begin_create_or_update.return_value = public_ip_poller
+
+    nic_result = MagicMock()
+    nic_result.id = "/subscriptions/.../networkInterfaces/nic-vm-test"
+    nic_poller = MagicMock()
+    nic_poller.result.return_value = nic_result
+    azure_client.network_client.network_interfaces.begin_create_or_update.return_value = nic_poller
+
+    nic_id = handler._create_nic(
+        vm_name="vm-test",
+        resource_group="test-rg",
+        location="eastus2",
+        subnet_id="/subscriptions/.../subnets/default",
+        public_ip_enabled=True,
+    )
+
+    assert nic_id == "/subscriptions/.../networkInterfaces/nic-vm-test"
+    azure_client.network_client.public_ip_addresses.begin_create_or_update.assert_called_once_with(
+        resource_group_name="test-rg",
+        public_ip_address_name="pip-vm-test",
+        parameters={
+            "location": "eastus2",
+            "sku": {"name": "Standard"},
+            "properties": {
+                "publicIPAllocationMethod": "Static",
+                "deleteOption": "Delete",
+            },
+        },
+    )
+    nic_params = azure_client.network_client.network_interfaces.begin_create_or_update.call_args.kwargs[
+        "parameters"
+    ]
+    assert nic_params["properties"]["ipConfigurations"][0]["properties"]["publicIPAddress"] == {
+        "id": "/subscriptions/.../publicIPAddresses/pip-vm-test",
+        "deleteOption": "Delete",
+    }

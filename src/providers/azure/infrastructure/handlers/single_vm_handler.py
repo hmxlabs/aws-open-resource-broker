@@ -121,6 +121,10 @@ class SingleVMHandler(AzureHandler):
             template.network_config.application_gateway_backend_pool_ids
             if template.network_config else []
         )
+        public_ip_enabled = bool(
+            template.network_config.public_ip_enabled
+            if template.network_config else False
+        )
 
         # Resolve ssh_key_name → actual key data if needed.
         # Done once before the loop so
@@ -134,6 +138,7 @@ class SingleVMHandler(AzureHandler):
             vm_name = f"vm-{template.template_id}-{uuid.uuid4().hex[:8]}"
             nic_name = f"nic-{vm_name}"
             nic_id: Optional[str] = None
+            public_ip_name: Optional[str] = None
             try:
                 # Step 1: create NIC
                 nic_id = self._create_nic(
@@ -141,12 +146,15 @@ class SingleVMHandler(AzureHandler):
                     resource_group=resource_group,
                     location=location,
                     subnet_id=subnet_id,
+                    public_ip_enabled=public_ip_enabled,
                     enable_accelerated_networking=accel_net,
                     nsg_id=nsg_id,
                     load_balancer_backend_pool_ids=backend_pool_ids,
                     load_balancer_inbound_nat_pool_ids=inbound_nat_pool_ids,
                     application_gateway_backend_pool_ids=app_gateway_pool_ids,
                 )
+                if public_ip_enabled:
+                    public_ip_name = f"pip-{vm_name}"
                 created_nic_names.append(nic_name)
                 self._logger.debug("NIC '%s' created: %s", nic_name, nic_id)
 
@@ -252,6 +260,8 @@ class SingleVMHandler(AzureHandler):
                 if nic_id:
                     self._delete_nic(resource_group, nic_name)
                     created_nic_names = [n for n in created_nic_names if n != nic_name]
+                if public_ip_name:
+                    self._delete_public_ip(resource_group, public_ip_name)
 
         if not created_ids:
             raise LaunchError(
@@ -469,6 +479,7 @@ class SingleVMHandler(AzureHandler):
         resource_group: str,
         location: str,
         subnet_id: str,
+        public_ip_enabled: bool = False,
         enable_accelerated_networking: bool = False,
         nsg_id: Optional[str] = None,
         load_balancer_backend_pool_ids: Optional[list[str]] = None,
@@ -477,10 +488,21 @@ class SingleVMHandler(AzureHandler):
     ) -> str:
         """Create a NIC and return its ARM resource ID."""
         nic_name = f"nic-{vm_name}"
+        public_ip_name = f"pip-{vm_name}"
         ip_config_properties: dict[str, Any] = {
             "subnet": {"id": subnet_id},
             "privateIPAllocationMethod": "Dynamic",
         }
+        if public_ip_enabled:
+            public_ip_id = self._create_public_ip(
+                resource_group=resource_group,
+                location=location,
+                public_ip_name=public_ip_name,
+            )
+            ip_config_properties["publicIPAddress"] = {
+                "id": public_ip_id,
+                "deleteOption": "Delete",
+            }
         if load_balancer_backend_pool_ids:
             ip_config_properties["loadBalancerBackendAddressPools"] = [
                 {"id": pool_id} for pool_id in load_balancer_backend_pool_ids
@@ -517,6 +539,29 @@ class SingleVMHandler(AzureHandler):
         )
         nic_result = poller.result()
         return nic_result.id
+
+    def _create_public_ip(
+        self,
+        resource_group: str,
+        location: str,
+        public_ip_name: str,
+    ) -> str:
+        """Create a Public IP resource and return its ARM resource ID."""
+        params: dict[str, Any] = {
+            "location": location,
+            "sku": {"name": "Standard"},
+            "properties": {
+                "publicIPAllocationMethod": "Static",
+                "deleteOption": "Delete",
+            },
+        }
+        poller = self.azure_client.network_client.public_ip_addresses.begin_create_or_update(
+            resource_group_name=resource_group,
+            public_ip_address_name=public_ip_name,
+            parameters=params,
+        )
+        public_ip = poller.result()
+        return public_ip.id
 
     @staticmethod
     def _build_vm_params(
@@ -678,6 +723,16 @@ class SingleVMHandler(AzureHandler):
             ).result()
         except Exception as exc:
             self._logger.warning("Could not delete NIC '%s': %s", nic_name, exc)
+
+    def _delete_public_ip(self, resource_group: str, public_ip_name: str) -> None:
+        """Best-effort rollback for Public IPs created before VM submission fails."""
+        try:
+            self.azure_client.network_client.public_ip_addresses.begin_delete(
+                resource_group_name=resource_group,
+                public_ip_address_name=public_ip_name,
+            ).result()
+        except Exception as exc:
+            self._logger.warning("Could not delete Public IP '%s': %s", public_ip_name, exc)
 
     @classmethod
     def get_example_templates(cls) -> list[dict[str, Any]]:
