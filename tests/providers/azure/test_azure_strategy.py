@@ -754,7 +754,7 @@ class TestTerminateInstances:
             "delete_vmss_when_empty": False,
         }
 
-    def test_terminate_instances_forwards_cyclecloud_secret_reference_context(self, azure_config, logger):
+    def test_terminate_instances_forwards_cyclecloud_secret_reference_request_metadata(self, azure_config, logger):
         strategy = AzureProviderStrategy(config=azure_config, logger=logger, provider_instance_name="azure-default")
         strategy.initialize()
 
@@ -767,13 +767,13 @@ class TestTerminateInstances:
                 "instance_ids": ["node-1"],
                 "provider_api": "CycleCloud",
                 "resource_id": "my-cluster",
-            },
-            context={
-                "cyclecloud_url": "https://cc.example.com",
-                "cyclecloud_credential_path": "config/cc.json",
-                "cyclecloud_verify_ssl": False,
-                "cyclecloud_auth_mode": "bearer",
-                "cyclecloud_aad_scope": "https://cc.example.com/.default",
+                "request_metadata": {
+                    "cyclecloud_url": "https://cc.example.com",
+                    "cyclecloud_credential_path": "config/cc.json",
+                    "cyclecloud_verify_ssl": False,
+                    "cyclecloud_auth_mode": "bearer",
+                    "cyclecloud_aad_scope": "https://cc.example.com/.default",
+                },
             },
         )
 
@@ -1015,10 +1015,10 @@ class TestGetInstanceStatus:
                 "instance_ids": ["node-1"],
                 "provider_api": "CycleCloud",
                 "resource_id": "my-cluster",
-                "request_metadata": {"resource_group": "test-rg"},
-            },
-            context={
-                "cyclecloud_url": "https://cc.example.com",
+                "request_metadata": {
+                    "resource_group": "test-rg",
+                    "cyclecloud_url": "https://cc.example.com",
+                },
             },
         )
 

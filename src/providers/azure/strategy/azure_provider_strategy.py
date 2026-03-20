@@ -1135,13 +1135,15 @@ class AzureProviderStrategy(ProviderStrategy):
         return self._filter_status_results(handler.check_hosts_status(request), instance_ids)
 
     @staticmethod
+    def _request_metadata(operation: ProviderOperation) -> dict[str, Any]:
+        return dict(operation.parameters.get("request_metadata") or {})
+
+    @staticmethod
     def _resolve_status_provider_api(operation: ProviderOperation) -> Optional[Any]:
-        request_metadata = operation.parameters.get("request_metadata") or {}
-        context = operation.context or {}
+        request_metadata = AzureProviderStrategy._request_metadata(operation)
         for source in (
             operation.parameters,
             request_metadata,
-            context,
         ):
             provider_api = source.get("provider_api")
             if provider_api not in (None, ""):
@@ -1151,29 +1153,23 @@ class AzureProviderStrategy(ProviderStrategy):
     @staticmethod
     def _infer_grouped_status_provider_api(operation: ProviderOperation) -> str:
         """Infer a grouped-resource status handler when provider_api was not persisted."""
-        request_metadata = operation.parameters.get("request_metadata") or {}
-        context = operation.context or {}
-        for source in (
-            request_metadata,
-            context,
-            operation.parameters,
+        request_metadata = AzureProviderStrategy._request_metadata(operation)
+        if any(
+            request_metadata.get(key) not in (None, "")
+            for key in (
+                "cluster_name",
+                "node_array",
+                "node_ids",
+                "operation_id",
+                "operation_location",
+                "cyclecloud_url",
+                "cyclecloud_credential_path",
+                "cyclecloud_verify_ssl",
+                "cyclecloud_auth_mode",
+                "cyclecloud_aad_scope",
+            )
         ):
-            if any(
-                source.get(key) not in (None, "")
-                for key in (
-                    "cluster_name",
-                    "node_array",
-                    "node_ids",
-                    "operation_id",
-                    "operation_location",
-                    "cyclecloud_url",
-                    "cyclecloud_credential_path",
-                    "cyclecloud_verify_ssl",
-                    "cyclecloud_auth_mode",
-                    "cyclecloud_aad_scope",
-                )
-            ):
-                return AzureProviderApi.CYCLECLOUD.value
+            return AzureProviderApi.CYCLECLOUD.value
 
         # Grouped resource mappings in Azure are most commonly VMSS-backed.
         return AzureProviderApi.VMSS.value
@@ -1222,24 +1218,18 @@ class AzureProviderStrategy(ProviderStrategy):
         resource_group: Optional[str],
     ) -> dict[str, Any]:
         metadata: dict[str, Any] = {"resource_group": resource_group}
-        request_metadata = operation.parameters.get("request_metadata") or {}
-        context = operation.context or {}
-        for source in (
-            request_metadata,
-            context,
-            operation.parameters,
-        ):
-            for key in self._cyclecloud_metadata_keys():
-                value = source.get(key)
-                if value not in (None, ""):
-                    metadata[key] = value
+        request_metadata = self._request_metadata(operation)
+        for key in self._cyclecloud_metadata_keys():
+            value = request_metadata.get(key)
+            if value not in (None, ""):
+                metadata[key] = value
         return metadata
 
     def _resolve_operation_resource_group(
         self,
         operation: ProviderOperation,
     ) -> Optional[str]:
-        request_metadata = operation.parameters.get("request_metadata") or {}
+        request_metadata = self._request_metadata(operation)
         request_resource_group = request_metadata.get("resource_group")
         if request_resource_group not in (None, ""):
             return str(request_resource_group)
