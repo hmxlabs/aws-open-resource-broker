@@ -94,6 +94,22 @@ class TestAzureTemplateConstruction:
         )
         assert t.image.image_id is not None
 
+    def test_vmss_uniform_rejects_flexible_orchestration_mode(self):
+        with pytest.raises(ValueError, match="VMSSUniform"):
+            AzureTemplate(
+                **_BASE_FIELDS,
+                provider_api=AzureProviderApi.VMSS_UNIFORM,
+            )
+
+    def test_vmss_uniform_accepts_uniform_orchestration_mode(self):
+        t = AzureTemplate(
+            **_BASE_FIELDS,
+            provider_api=AzureProviderApi.VMSS_UNIFORM,
+            orchestration_mode=AzureVMSSOrchestrationMode.UNIFORM,
+        )
+        assert t.provider_api == AzureProviderApi.VMSS_UNIFORM
+        assert t.orchestration_mode == AzureVMSSOrchestrationMode.UNIFORM
+
     def test_provider_type_forced_to_azure(self):
         t = AzureTemplate(**_BASE_FIELDS, provider_type="wrong")
         assert t.provider_type == "azure"

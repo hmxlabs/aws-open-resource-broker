@@ -406,6 +406,12 @@ class AzureTemplate(Template):
     @model_validator(mode="after")
     def validate_azure_template(self) -> "AzureTemplate":
         """Azure-specific template validation."""
+        if self.provider_api == AzureProviderApi.VMSS_UNIFORM:
+            if self.orchestration_mode != AzureVMSSOrchestrationMode.UNIFORM:
+                raise ValueError(
+                    "provider_api 'VMSSUniform' requires orchestration_mode 'Uniform'"
+                )
+
         if self.allocation_strategy == AllocationStrategy.SPOT_PLACEMENT_SCORE.value:
             candidate_sizes = [self.vm_size, *(self.vm_sizes or [])]
             if len(candidate_sizes) < 2:
