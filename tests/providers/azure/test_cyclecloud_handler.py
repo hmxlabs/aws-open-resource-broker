@@ -163,6 +163,7 @@ class TestCycleCloudHandlerAcquire:
 
         node_create_resp = MagicMock()
         node_create_resp.status_code = 200
+        node_create_resp.headers = {"Location": "https://cc.example.com/operations/op-123"}
         node_create_resp.content = b'{"operationId": "op-123", "sets": [{"added": 2, "nodes": [{"name": "node-1", "status": "Acquiring"}, {"name": "node-2", "status": "Acquiring"}]}]}'
         node_create_resp.json.return_value = {
             "operationId": "op-123",
@@ -184,15 +185,15 @@ class TestCycleCloudHandlerAcquire:
 
         assert result["success"] is True
         assert result["resource_ids"] == ["my-cluster"]
-        assert len(result["instances"]) == 2
-        assert result["instances"][0]["instance_id"] == "node-1"
-        assert result["instances"][0]["status"] == "pending"
+        assert result["instances"] == []
         assert result["provider_data"]["cluster_name"] == "my-cluster"
         assert result["provider_data"]["operation_id"] == "op-123"
+        assert result["provider_data"]["operation_location"] == "https://cc.example.com/operations/op-123"
+        assert result["provider_data"]["added_count"] == 2
 
     @patch("providers.azure.infrastructure.handlers.cyclecloud_handler.requests.Session")
     def test_acquire_hosts_placeholder_nodes(self, mock_session_cls):
-        """When CycleCloud returns added count but no inline node details."""
+        """When CycleCloud returns added count but no inline node details, tracking stays resource-level."""
         handler = _make_handler()
         template = _make_template()
         request = _make_request(count=3)
@@ -218,8 +219,8 @@ class TestCycleCloudHandlerAcquire:
         result = handler.acquire_hosts(request, template)
 
         assert result["success"] is True
-        assert len(result["instances"]) == 3
-        assert all(instance["status"] == "pending" for instance in result["instances"])
+        assert result["instances"] == []
+        assert result["provider_data"]["added_count"] == 3
 
     def test_acquire_hosts_missing_cluster_name(self):
         """Should raise CycleCloudNodeError if cluster_name is missing."""
@@ -279,9 +280,9 @@ class TestCycleCloudHandlerAcquire:
 
         result = handler.acquire_hosts(request, template)
 
-        assert result["instances"][0]["status"] == "failed"
-        assert result["instances"][0]["provider_data"]["fleet_errors"][0]["error_code"] == "NodeFailed"
+        assert result["instances"] == []
         assert result["provider_data"]["fleet_errors"][0]["error_message"] == "Quota exhausted"
+        assert result["provider_data"]["fleet_errors"][0]["error_code"] == "NodeFailed"
 
 
 # ---------------------------------------------------------------------------
@@ -340,6 +341,51 @@ class TestCycleCloudHandlerStatus:
         assert results[0]["status"] == "running"
         assert results[0]["private_ip"] == "10.0.0.1"
         assert results[1]["status"] == "pending"
+
+    @patch("providers.azure.infrastructure.handlers.cyclecloud_handler.requests.Session")
+    def test_check_hosts_status_prefers_operation_location(self, mock_session_cls):
+        handler = _make_handler()
+
+        mock_session = MagicMock()
+        mock_session_cls.return_value = mock_session
+
+        operation_resp = MagicMock()
+        operation_resp.content = b'{"nodes": [{"Name": "node-1", "NodeId": "id-1", "NodeArray": "execute", "State": "Ready"}]}'
+        operation_resp.json.return_value = {
+            "nodes": [
+                {
+                    "Name": "node-1",
+                    "NodeId": "id-1",
+                    "NodeArray": "execute",
+                    "State": "Ready",
+                }
+            ]
+        }
+        operation_resp.raise_for_status = MagicMock()
+        mock_session.request.return_value = operation_resp
+
+        request = _make_request(
+            resource_ids=["my-cluster"],
+            metadata={
+                "cluster_name": "my-cluster",
+                "node_array": "execute",
+                "operation_id": "op-123",
+                "operation_location": "https://cc.example.com/operations/op-123",
+                "cyclecloud_url": "https://cc.example.com",
+                "cyclecloud_username": "admin",
+                "cyclecloud_password": "secret",
+            },
+        )
+
+        results = handler.check_hosts_status(request)
+
+        assert len(results) == 1
+        assert results[0]["instance_id"] == "node-1"
+        mock_session.request.assert_called_once_with(
+            "GET",
+            "https://cc.example.com/operations/op-123",
+            timeout=30,
+        )
 
     def test_check_hosts_status_no_resource_ids(self):
         handler = _make_handler()

@@ -387,18 +387,30 @@ class CycleCloudHandler(AzureHandler):
         )
 
     @staticmethod
-    def _cc_request(
-            session: requests.Session,
+    def _cc_request_raw(
+        session: requests.Session,
         method: str,
         url: str,
         **kwargs: Any,
-    ) -> Any:
+    ) -> dict[str, Any]:
         try:
             response = session.request(method, url, timeout=30, **kwargs)
             response.raise_for_status()
+            body: Any = {}
             if response.content:
-                return response.json()
-            return {}
+                try:
+                    body = response.json()
+                except requests.exceptions.JSONDecodeError as exc:
+                    raise CycleCloudConnectionError(
+                        f"CycleCloud API returned invalid JSON from {url}: {exc}",
+                        url=url,
+                    ) from exc
+            return {
+                "body": body,
+                "headers": dict(response.headers),
+                "status_code": response.status_code,
+                "url": url,
+            }
         except requests.exceptions.ConnectionError as exc:
             raise CycleCloudConnectionError(
                 f"Cannot connect to CycleCloud at {url}: {exc}",
@@ -409,13 +421,10 @@ class CycleCloudHandler(AzureHandler):
             body = ""
             body_json: dict[str, Any] | None = None
             if exc.response is not None:
-                try:
-                    body = exc.response.text
-                except Exception:
-                    pass
+                body = exc.response.text
                 try:
                     body_json = exc.response.json()
-                except Exception:
+                except requests.exceptions.JSONDecodeError:
                     body_json = None
 
             error_code = None
@@ -441,6 +450,24 @@ class CycleCloudHandler(AzureHandler):
                 f"CycleCloud API request failed: {exc}",
                 url=url,
             ) from exc
+
+    @staticmethod
+    def _cc_request(
+        session: requests.Session,
+        method: str,
+        url: str,
+        **kwargs: Any,
+    ) -> Any:
+        return CycleCloudHandler._cc_request_raw(session, method, url, **kwargs)["body"]
+
+    @staticmethod
+    def _cc_request_with_metadata(
+        session: requests.Session,
+        method: str,
+        url: str,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        return CycleCloudHandler._cc_request_raw(session, method, url, **kwargs)
 
     def _resolve_release_node_names(
         self,
@@ -608,12 +635,13 @@ class CycleCloudHandler(AzureHandler):
             )
 
         try:
-            result = self._cc_request(
+            create_response = self._cc_request_with_metadata(
                 session,
                 "POST",
                 f"{base_url}/clusters/{cluster_name}/nodes/create",
                 json=node_params,
             )
+            result = create_response.get("body") or {}
         except CycleCloudConnectionError as exc:
             raise CycleCloudNodeError(
                 f"Failed to add nodes to cluster '{cluster_name}': {exc}",
@@ -621,19 +649,20 @@ class CycleCloudHandler(AzureHandler):
                 node_array=node_array,
             ) from exc
 
-        # Extract created node IDs from the response
-        # CycleCloud returns a sets list with operation details
+        # Extract request tracking metadata from the response.
+        # CycleCloud create is asynchronous; real node identities are discovered later
+        # via the operation URL or filtered node-list APIs.
         operation_id = result.get("operationId", "")
+        operation_location = create_response.get("headers", {}).get("Location")
         created_sets = result.get("sets", [])
-        node_ids: list[str] = []
-        instances: list[dict[str, Any]] = []
         fleet_errors: list[dict[str, Any]] = []
+        added_count = 0
 
         for node_set in created_sets:
             added = node_set.get("added", 0)
+            added_count += int(added or 0)
             set_nodes = node_set.get("nodes", [])
             for node in set_nodes:
-                node_id = node.get("name") or node.get("nodeId", "")
                 node_errors = self._extract_cyclecloud_node_errors(
                     node,
                     cluster_name=cluster_name,
@@ -642,77 +671,29 @@ class CycleCloudHandler(AzureHandler):
                 for error in node_errors:
                     if error not in fleet_errors:
                         fleet_errors.append(error)
-                if node_id:
-                    node_ids.append(node_id)
-                    instances.append({
-                        "instance_id": node_id,
-                        "status": _resolve_cc_state(node.get("status", "Acquiring")),
-                        "private_ip": node.get("privateIp"),
-                        "public_ip": node.get("publicIp"),
-                        "launch_time": None,
-                        "instance_type": (
-                            node.get("machineType")
-                            or node.get("MachineType")
-                            or definition.get("machineType")
-                        ),
-                        "subnet_id": None,
-                        "vpc_id": None,
-                        "provider_type": "azure",
-                        "provider_data": {
-                            "cluster_name": cluster_name,
-                            "node_array": node_array,
-                            "node_id": node_id,
-                            "operation_id": operation_id,
-                            "cc_state": node.get("status", "Acquiring"),
-                            "fleet_errors": node_errors,
-                        },
-                    })
-
-            # If node details are not returned inline, create placeholder entries
-            if added and not set_nodes:
-                for i in range(added):
-                    placeholder_id = f"{cluster_name}-{node_array}-{operation_id}-{i}"
-                    node_ids.append(placeholder_id)
-                    instances.append({
-                        "instance_id": placeholder_id,
-                        "status": "pending",
-                        "private_ip": None,
-                        "public_ip": None,
-                        "launch_time": None,
-                        "instance_type": definition.get("machineType"),
-                        "subnet_id": None,
-                        "vpc_id": None,
-                        "provider_type": "azure",
-                        "provider_data": {
-                            "cluster_name": cluster_name,
-                            "node_array": node_array,
-                            "operation_id": operation_id,
-                            "cc_state": "Acquiring",
-                        },
-                    })
 
         self._logger.info(
-            "CycleCloud node request accepted for cluster '%s': "
-            "operation_id=%s, node_ids=%s",
+            "CycleCloud node request accepted for cluster '%s': operation_id=%s, added=%d",
             cluster_name,
             operation_id,
-            node_ids,
+            added_count,
         )
 
-        # resource_ids: use cluster_name as the primary resource identifier
-        # (analogous to VMSS name).  Individual node IDs are tracked in instances.
+        # resource_ids: use cluster_name as the primary resource identifier.
+        # Individual node identities are discovered later via status queries.
         resource_ids = [cluster_name]
 
         return {
             "success": True,
             "resource_ids": resource_ids,
-            "instances": instances,
+            "instances": [],
             "error_message": None,
             "provider_data": {
                 "cluster_name": cluster_name,
                 "node_array": node_array,
                 "operation_id": operation_id,
-                "node_ids": node_ids,
+                "operation_location": operation_location,
+                "added_count": added_count,
                 "resource_group": template.resource_group,
                 "location": template.location,
                 "fleet_errors": fleet_errors,
@@ -744,6 +725,8 @@ class CycleCloudHandler(AzureHandler):
         cluster_name = metadata.get("cluster_name")
         node_array = metadata.get("node_array")
         node_ids = metadata.get("node_ids", [])
+        operation_id = metadata.get("operation_id")
+        operation_location = metadata.get("operation_location")
 
         if not cluster_name:
             # resource_ids[0] is the cluster name for CycleCloud
@@ -775,21 +758,45 @@ class CycleCloudHandler(AzureHandler):
             )
             raise
 
-        try:
-            nodes_response = self._cc_request(
-                session,
-                "GET",
-                f"{base_url}/clusters/{cluster_name}/nodes",
-            )
-        except CycleCloudConnectionError as exc:
-            self._logger.error(
-                "Failed to get node status for cluster '%s': %s",
-                cluster_name,
-                exc,
-            )
-            raise
+        all_nodes: list[dict[str, Any]] = []
 
-        all_nodes = nodes_response.get("nodes", [])
+        if operation_location:
+            try:
+                operation_response = self._cc_request(
+                    session,
+                    "GET",
+                    str(operation_location),
+                )
+                if isinstance(operation_response, dict):
+                    all_nodes = operation_response.get("nodes", []) or []
+            except CycleCloudConnectionError as exc:
+                self._logger.debug(
+                    "Failed to query CycleCloud operation URL '%s': %s",
+                    operation_location,
+                    exc,
+                )
+
+        if not all_nodes:
+            try:
+                nodes_url = f"{base_url}/clusters/{cluster_name}/nodes"
+                request_kwargs: dict[str, Any] = {}
+                if operation_id:
+                    request_kwargs["params"] = {"operation": operation_id}
+                nodes_response = self._cc_request(
+                    session,
+                    "GET",
+                    nodes_url,
+                    **request_kwargs,
+                )
+            except CycleCloudConnectionError as exc:
+                self._logger.error(
+                    "Failed to get node status for cluster '%s': %s",
+                    cluster_name,
+                    exc,
+                )
+                raise
+
+            all_nodes = nodes_response.get("nodes", [])
         results: list[dict[str, Any]] = []
 
         for node in all_nodes:
@@ -855,7 +862,7 @@ class CycleCloudHandler(AzureHandler):
         machine_ids: list[str],
         resource_id: str,
         context: Optional[dict[str, Any]] = None,
-    ) -> None:
+    ) -> Optional[dict[str, Any]]:
         """Remove/terminate nodes from a CycleCloud cluster.
 
         Uses CycleCloud REST API to deallocate and remove specific nodes.
@@ -911,7 +918,7 @@ class CycleCloudHandler(AzureHandler):
             deallocate_payload: dict[str, Any] = {
                 "names": node_names,
             }
-            self._cc_request(
+            deallocate_response = self._cc_request_with_metadata(
                 session,
                 "POST",
                 f"{base_url}/clusters/{cluster_name}/nodes/deallocate",
@@ -925,7 +932,7 @@ class CycleCloudHandler(AzureHandler):
             remove_payload: dict[str, Any] = {
                 "names": node_names,
             }
-            self._cc_request(
+            remove_response = self._cc_request_with_metadata(
                 session,
                 "POST",
                 f"{base_url}/clusters/{cluster_name}/nodes/remove",
@@ -936,6 +943,18 @@ class CycleCloudHandler(AzureHandler):
                 len(machine_ids),
                 cluster_name,
             )
+            return {
+                "provider_data": {
+                    "cluster_name": cluster_name,
+                    "deallocate_operation_location": (
+                        deallocate_response.get("headers", {}).get("Location")
+                    ),
+                    "remove_operation_location": (
+                        remove_response.get("headers", {}).get("Location")
+                    ),
+                    "operation_status": "submitted",
+                }
+            }
 
         except CycleCloudConnectionError as exc:
             raise TerminationError(

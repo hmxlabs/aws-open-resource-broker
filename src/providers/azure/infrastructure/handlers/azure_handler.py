@@ -65,8 +65,8 @@ class AzureHandler(ABC):
         machine_ids: list[str],
         resource_id: str,
         context: Optional[dict[str, Any]] = None,
-    ) -> None:
-        """Delete / deallocate cloud resources."""
+    ) -> Optional[dict[str, Any]]:
+        """Delete / deallocate cloud resources and optionally return provider metadata."""
 
     # ------------------------------------------------------------------
     # Optional helpers

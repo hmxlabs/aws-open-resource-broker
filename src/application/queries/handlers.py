@@ -202,6 +202,7 @@ class GetRequestHandler(BaseQueryHandler[GetRequestQuery, RequestDTO]):
                 "resource_ids": request.resource_ids,
                 "provider_api": request.metadata.get("provider_api"),
                 "template_id": request.template_id,
+                "request_metadata": request.metadata or {},
             }
         else:
             # Prefer instance ids from existing machine aggregates
@@ -248,6 +249,7 @@ class GetRequestHandler(BaseQueryHandler[GetRequestQuery, RequestDTO]):
             parameters = {
                 "instance_ids": instance_ids,
                 "template_id": request.template_id,
+                "request_metadata": request.metadata or {},
             }
 
         operation = ProviderOperation(

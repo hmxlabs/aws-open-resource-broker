@@ -225,6 +225,28 @@ class CreateMachineRequestHandler(BaseCommandHandler[CreateRequestCommand, str])
                             if provider_errors and not request.metadata.get("fleet_errors"):
                                 request.metadata["fleet_errors"] = provider_errors
 
+                        if (
+                            request.metadata.get("provider_api") == "CycleCloud"
+                            and isinstance(provider_data, dict)
+                        ):
+                            for key in (
+                                "cluster_name",
+                                "node_array",
+                                "operation_id",
+                                "operation_location",
+                                "cyclecloud_url",
+                                "cyclecloud_credential_path",
+                                "cyclecloud_username",
+                                "cyclecloud_password",
+                                "cyclecloud_verify_ssl",
+                                "cyclecloud_auth_mode",
+                                "cyclecloud_aad_scope",
+                                "cyclecloud_bearer_token",
+                            ):
+                                value = provider_data.get(key)
+                                if value not in (None, ""):
+                                    request.metadata[key] = value
+
                         has_api_errors = bool(request.metadata.get("fleet_errors"))
                         error_summary = None
                         if has_api_errors:
@@ -411,6 +433,18 @@ class CreateMachineRequestHandler(BaseCommandHandler[CreateRequestCommand, str])
             metadata=instance_data.get("metadata", {}),
         )
 
+    @staticmethod
+    def _flatten_provider_metadata(metadata: dict[str, Any] | None) -> dict[str, Any]:
+        """Normalize strategy metadata so callers receive a single provider_data payload."""
+        if not isinstance(metadata, dict):
+            return {}
+
+        flattened = dict(metadata)
+        nested_provider_data = flattened.pop("provider_data", None)
+        if isinstance(nested_provider_data, dict):
+            flattened.update(nested_provider_data)
+        return flattened
+
     async def _execute_provisioning(self, template, request, selection_result) -> dict[str, Any]:
         """Execute provisioning via selected provider using existing ProviderContext."""
         try:
@@ -480,7 +514,7 @@ class CreateMachineRequestHandler(BaseCommandHandler[CreateRequestCommand, str])
                     "success": True,
                     "resource_ids": resource_ids,
                     "instances": instances,
-                    "provider_data": result.metadata or {},
+                    "provider_data": self._flatten_provider_metadata(result.metadata),
                     "error_message": None,
                 }
             else:
@@ -488,7 +522,7 @@ class CreateMachineRequestHandler(BaseCommandHandler[CreateRequestCommand, str])
                     "success": False,
                     "resource_ids": [],
                     "instances": [],
-                    "provider_data": result.metadata or {},
+                    "provider_data": self._flatten_provider_metadata(result.metadata),
                     "error_message": result.error_message,
                 }
 
