@@ -79,22 +79,10 @@ async def handle_validate_provider_config(args) -> dict[str, Any]:
 
 @handle_interface_exceptions(context="select_provider_strategy", interface_type="cli")
 async def handle_select_provider_strategy(args) -> dict[str, Any]:
-    """Handle select provider strategy operations."""
-    from orb.application.services.provider_registry_service import ProviderRegistryService
+    """Handle select provider strategy — delegates to set-default config write."""
+    from orb.interface.provider_config_handler import handle_provider_set_default
 
-    registry_service = get_container().get(ProviderRegistryService)
-    registered_types = registry_service.get_available_strategies()
-    if not registered_types:
-        return {
-            "error": "No providers registered",
-            "message": "No provider strategies are available",
-        }
-
-    provider = getattr(args, "provider", None) or registered_types[0]
-    return {
-        "result": {"selected_provider": provider},
-        "message": "Provider strategy selected successfully",
-    }
+    return await handle_provider_set_default(args)
 
 
 @handle_interface_exceptions(context="execute_provider_operation", interface_type="cli")

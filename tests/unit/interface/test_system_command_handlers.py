@@ -379,39 +379,32 @@ class TestHandleSystemMetrics:
 @pytest.mark.unit
 class TestHandleSelectProviderStrategy:
     @pytest.mark.asyncio
-    async def test_returns_selected_provider_from_args(self):
-        from orb.interface.system_command_handlers import handle_select_provider_strategy
-
-        with patch("orb.providers.registry.get_provider_registry") as mock_registry_fn:
-            mock_registry = MagicMock()
-            mock_registry.get_registered_providers.return_value = ["aws"]
-            mock_registry_fn.return_value = mock_registry
-
-            result = await handle_select_provider_strategy(_ns(provider="gcp"))
-
-        assert result["result"]["selected_provider"] == "gcp"
-
-    @pytest.mark.asyncio
-    async def test_falls_back_to_first_registered_provider_when_no_args(self):
-        from orb.application.services.provider_registry_service import ProviderRegistryService
-        from orb.interface.system_command_handlers import handle_select_provider_strategy
-
-        mock_service = MagicMock(spec=ProviderRegistryService)
-        mock_service.get_available_strategies.return_value = ["aws"]
-
-        with patch("orb.interface.system_command_handlers.get_container") as mock_get_container:
-            mock_get_container.return_value.get.return_value = mock_service
-            result = await handle_select_provider_strategy(_ns())
-
-        assert result["result"]["selected_provider"] == "aws"
-
-    @pytest.mark.asyncio
-    async def test_returns_error_when_registry_raises(self):
+    async def test_delegates_to_set_default(self):
+        """handle_select_provider_strategy delegates to handle_provider_set_default."""
         from orb.interface.system_command_handlers import handle_select_provider_strategy
 
         with patch(
-            "orb.interface.system_command_handlers.get_container",
-            side_effect=RuntimeError("registry unavailable"),
+            "orb.interface.system_command_handlers.handle_select_provider_strategy"
         ):
-            with pytest.raises(Exception):
-                await handle_select_provider_strategy(_ns())
+            with patch(
+                "orb.interface.provider_config_handler.handle_provider_set_default",
+                new_callable=AsyncMock,
+                return_value={"message": "Default provider set", "provider": "aws"},
+            ) as mock_set_default:
+                result = await handle_select_provider_strategy(_ns(provider_name="aws"))
+
+        mock_set_default.assert_called_once()
+        assert result["provider"] == "aws"
+
+    @pytest.mark.asyncio
+    async def test_propagates_error_from_set_default(self):
+        from orb.interface.system_command_handlers import handle_select_provider_strategy
+
+        with patch(
+            "orb.interface.provider_config_handler.handle_provider_set_default",
+            new_callable=AsyncMock,
+            return_value={"error": True, "message": "Provider 'bad' not found", "exit_code": 1},
+        ):
+            result = await handle_select_provider_strategy(_ns(provider_name="bad"))
+
+        assert result["error"] is True
