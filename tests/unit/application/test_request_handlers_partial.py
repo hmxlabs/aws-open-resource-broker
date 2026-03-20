@@ -4,7 +4,10 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
-from application.commands.request_handlers import CreateMachineRequestHandler
+from application.commands.request_handlers import (
+    CreateMachineRequestHandler,
+    CreateReturnRequestHandler,
+)
 from application.dto.commands import CreateRequestCommand
 from application.services.provider_capability_service import ProviderCapabilityService
 from application.services.provider_selection_service import ProviderSelectionService
@@ -417,3 +420,61 @@ class TestCreateMachineRequestHandlerPartial:
         assert saved_request.metadata["provider_api"] == "VMSS"
         assert saved_request.metadata["resource_group"] == "custom-rg"
         assert saved_request.status == RequestStatus.IN_PROGRESS
+
+    @pytest.mark.asyncio
+    async def test_cyclecloud_return_forwards_bearer_auth_context(self):
+        mock_logger = Mock()
+        mock_container = Mock()
+        mock_event_publisher = Mock()
+        mock_error_handler = Mock()
+        mock_uow_factory = Mock()
+        mock_uow = Mock()
+        mock_uow_factory.create_unit_of_work.return_value.__enter__ = Mock(return_value=mock_uow)
+        mock_uow_factory.create_unit_of_work.return_value.__exit__ = Mock(return_value=None)
+
+        mock_query_bus = Mock(spec=QueryBus)
+        mock_query_bus.execute = AsyncMock(
+            return_value=Mock(provider_api="CycleCloud")
+        )
+
+        scheduler = Mock()
+        scheduler.format_template_for_provider.return_value = {
+            "cyclecloud_url": "https://cc.example.com",
+            "cyclecloud_auth_mode": "bearer",
+            "cyclecloud_aad_scope": "https://cc.example.com/.default",
+            "cyclecloud_bearer_token": "tok-123",
+        }
+        mock_container.get.return_value = scheduler
+
+        mock_provider_context = Mock(spec=ProviderContext)
+        mock_provider_context.terminate_resources = AsyncMock(
+            return_value={"success": True, "error_message": None}
+        )
+
+        handler = CreateReturnRequestHandler(
+            uow_factory=mock_uow_factory,
+            logger=mock_logger,
+            container=mock_container,
+            event_publisher=mock_event_publisher,
+            error_handler=mock_error_handler,
+            provider_port=mock_provider_context,
+            query_bus=mock_query_bus,
+        )
+
+        request = Mock()
+        request.request_id = "ret-12345678-1234-1234-1234-123456789012"
+        request.metadata = {}
+
+        result = await handler._process_template_group(
+            template_id="tmpl-1",
+            instance_group=["node-1"],
+            request=request,
+            resource_mapping={"node-1": ("my-cluster", 1)},
+        )
+
+        assert result["success"] is True
+        operation = mock_provider_context.terminate_resources.call_args.args[1]
+        assert operation.context["cyclecloud_url"] == "https://cc.example.com"
+        assert operation.context["cyclecloud_auth_mode"] == "bearer"
+        assert operation.context["cyclecloud_aad_scope"] == "https://cc.example.com/.default"
+        assert operation.context["cyclecloud_bearer_token"] == "tok-123"

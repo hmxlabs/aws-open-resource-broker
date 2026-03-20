@@ -889,6 +889,9 @@ class CreateReturnRequestHandler(BaseCommandHandler[CreateReturnRequestCommand, 
                 "cyclecloud_username",
                 "cyclecloud_password",
                 "cyclecloud_verify_ssl",
+                "cyclecloud_auth_mode",
+                "cyclecloud_aad_scope",
+                "cyclecloud_bearer_token",
             ):
                 value = None
                 if isinstance(template_config, dict):
