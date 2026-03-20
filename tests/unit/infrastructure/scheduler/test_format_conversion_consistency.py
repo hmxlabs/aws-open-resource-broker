@@ -126,7 +126,6 @@ class TestExplicitFieldExtraction:
 
     def test_format_system_status_response_extracts_known_fields(self):
         """Base strategy must extract all SystemStatusDTO fields explicitly — not passthrough raw."""
-        from orb.infrastructure.scheduler.base.strategy import BaseSchedulerStrategy
 
         strategy = DefaultSchedulerStrategy()
         raw = {
