@@ -152,8 +152,10 @@ class CycleCloudConfig(BaseModel):
         forbidden_fields = {
             "username",
             "password",
+            "bearer_token",
             "cyclecloud_username",
             "cyclecloud_password",
+            "cyclecloud_bearer_token",
         }
         present = [field for field in forbidden_fields if data.get(field) not in (None, "")]
         if present:

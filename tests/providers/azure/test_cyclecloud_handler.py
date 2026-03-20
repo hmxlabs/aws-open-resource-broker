@@ -33,7 +33,7 @@ _CC_TEMPLATE_FIELDS = {
     "node_array": "execute",
     "cyclecloud_url": "https://cc.example.com",
     "cyclecloud_auth_mode": "bearer",
-    "cyclecloud_bearer_token": "tok-123",
+    "cyclecloud_aad_scope": "https://cc.example.com/.default",
     "cyclecloud_verify_ssl": False,
 }
 
@@ -71,26 +71,27 @@ class TestCycleCloudTemplate:
         assert t.cyclecloud_url == "https://cc.example.com"
         assert t.cyclecloud_credential_path is None
         assert t.cyclecloud_auth_mode == "bearer"
-        assert t.cyclecloud_bearer_token == "tok-123"
+        assert t.cyclecloud_aad_scope == "https://cc.example.com/.default"
         assert t.cyclecloud_verify_ssl is False
 
     def test_cyclecloud_template_accepts_credential_path(self):
         t = _make_template(
             cyclecloud_auth_mode=None,
-            cyclecloud_bearer_token=None,
             cyclecloud_credential_path="config/cyclecloud-credentials.json",
         )
         assert t.cyclecloud_credential_path == "config/cyclecloud-credentials.json"
 
-    def test_cyclecloud_template_accepts_explicit_auth_fields(self):
+    def test_cyclecloud_template_accepts_aad_scope_auth_fields(self):
         t = _make_template(
             cyclecloud_auth_mode="bearer",
-            cyclecloud_bearer_token="token-123",
             cyclecloud_aad_scope="https://example/.default",
         )
         assert t.cyclecloud_auth_mode == "bearer"
-        assert t.cyclecloud_bearer_token == "token-123"
         assert t.cyclecloud_aad_scope == "https://example/.default"
+
+    def test_cyclecloud_template_rejects_inline_bearer_token_field(self):
+        with pytest.raises(ValueError, match="Extra inputs are not permitted"):
+            _make_template(cyclecloud_bearer_token="token-123")
 
     def test_cyclecloud_template_no_ssh_required(self):
         """CycleCloud manages SSH internally — no ssh_key_name or ssh_public_keys needed."""
@@ -337,7 +338,7 @@ class TestCycleCloudHandlerStatus:
                 "node_array": "execute",
                 "cyclecloud_url": "https://cc.example.com",
                 "cyclecloud_auth_mode": "bearer",
-                "cyclecloud_bearer_token": "tok-123",
+                "cyclecloud_aad_scope": "https://cc.example.com/.default",
             },
         )
 
@@ -380,7 +381,7 @@ class TestCycleCloudHandlerStatus:
                 "operation_location": "https://cc.example.com/operations/op-123",
                 "cyclecloud_url": "https://cc.example.com",
                 "cyclecloud_auth_mode": "bearer",
-                "cyclecloud_bearer_token": "tok-123",
+                "cyclecloud_aad_scope": "https://cc.example.com/.default",
             },
         )
 
@@ -532,7 +533,7 @@ class TestCycleCloudHandlerRelease:
             context={
                 "cyclecloud_url": "https://cc.example.com",
                 "cyclecloud_auth_mode": "bearer",
-                "cyclecloud_bearer_token": "tok-123",
+                "cyclecloud_aad_scope": "https://cc.example.com/.default",
             },
         )
 
@@ -571,7 +572,7 @@ class TestCycleCloudHandlerRelease:
             context={
                 "cyclecloud_url": "https://cc.example.com",
                 "cyclecloud_auth_mode": "bearer",
-                "cyclecloud_bearer_token": "tok-123",
+                "cyclecloud_aad_scope": "https://cc.example.com/.default",
             },
         )
 
@@ -677,15 +678,16 @@ class TestCycleCloudAuthModes:
     def test_build_session_parses_verify_ssl_string_from_metadata(self):
         handler = _make_handler()
 
-        session_context = handler._build_cc_session(
-            cc_url="https://cc.example.com",
-            verify_ssl=None,
-            metadata={
-                "cyclecloud_verify_ssl": "false",
-                "cyclecloud_auth_mode": "bearer",
-                "cyclecloud_bearer_token": "tok-123",
-            },
-        )
+        with patch.object(handler, "_get_azure_bearer_token", return_value="tok-123"):
+            session_context = handler._build_cc_session(
+                cc_url="https://cc.example.com",
+                verify_ssl=None,
+                metadata={
+                    "cyclecloud_verify_ssl": "false",
+                    "cyclecloud_auth_mode": "bearer",
+                    "cyclecloud_aad_scope": "https://cc.example.com/.default",
+                },
+            )
 
         assert session_context.session.verify is False
 
@@ -727,7 +729,6 @@ class TestCycleCloudAuthModes:
         template = _make_template(
             cyclecloud_url=None,
             cyclecloud_auth_mode=None,
-            cyclecloud_bearer_token=None,
             cyclecloud_credential_path=str(credential_file),
         )
 
@@ -755,7 +756,6 @@ class TestCycleCloudAuthModes:
         )
         template = _make_template(
             cyclecloud_auth_mode=None,
-            cyclecloud_bearer_token=None,
             cyclecloud_credential_path=str(credential_file),
         )
         request = _make_request(count=1)
@@ -815,7 +815,6 @@ class TestCycleCloudAuthModes:
         template = _make_template(
             cyclecloud_url=None,
             cyclecloud_auth_mode=None,
-            cyclecloud_bearer_token=None,
             cyclecloud_credential_path=None,
         )
         request = _make_request(count=1)

@@ -285,17 +285,7 @@ class CycleCloudHandler(AzureHandler):
         )
         auth_mode = str(auth_mode).strip().lower() if auth_mode else None
 
-        explicit_bearer = self._resolve_cc_config_value(
-            template=template,
-            metadata=metadata,
-            context=context,
-            provider_cfg=provider_cfg,
-            template_attr="cyclecloud_bearer_token",
-            metadata_key="cyclecloud_bearer_token",
-            context_key="cyclecloud_bearer_token",
-            provider_path=("cyclecloud", "bearer_token"),
-        )
-        explicit_bearer = explicit_bearer or self._credential_file_value(
+        explicit_bearer = self._credential_file_value(
             credential_file_data,
             "cyclecloud_bearer_token",
             "bearer_token",

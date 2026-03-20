@@ -1211,7 +1211,6 @@ class AzureProviderStrategy(ProviderStrategy):
             "cyclecloud_verify_ssl",
             "cyclecloud_auth_mode",
             "cyclecloud_aad_scope",
-            "cyclecloud_bearer_token",
         )
 
     def _build_cyclecloud_request_metadata(

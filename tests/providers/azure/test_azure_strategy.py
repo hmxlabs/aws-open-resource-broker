@@ -774,7 +774,6 @@ class TestTerminateInstances:
                 "cyclecloud_verify_ssl": False,
                 "cyclecloud_auth_mode": "bearer",
                 "cyclecloud_aad_scope": "https://cc.example.com/.default",
-                "cyclecloud_bearer_token": "tok-123",
             },
         )
 
@@ -792,7 +791,6 @@ class TestTerminateInstances:
                 "cyclecloud_verify_ssl": False,
                 "cyclecloud_auth_mode": "bearer",
                 "cyclecloud_aad_scope": "https://cc.example.com/.default",
-                "cyclecloud_bearer_token": "tok-123",
             },
         )
 
@@ -1154,7 +1152,6 @@ class TestDescribeResourceInstances:
                     "cyclecloud_url": "https://cc.example.com",
                     "cyclecloud_auth_mode": "bearer",
                     "cyclecloud_aad_scope": "https://cc.example.com/.default",
-                    "cyclecloud_bearer_token": "tok-123",
                     "cyclecloud_verify_ssl": False,
                 },
             },
@@ -1174,7 +1171,6 @@ class TestDescribeResourceInstances:
             forwarded_request.metadata["cyclecloud_aad_scope"]
             == "https://cc.example.com/.default"
         )
-        assert forwarded_request.metadata["cyclecloud_bearer_token"] == "tok-123"
         assert forwarded_request.metadata["cyclecloud_verify_ssl"] is False
 
     def test_dry_run_short_circuits_resource_discovery(self, azure_config, logger):

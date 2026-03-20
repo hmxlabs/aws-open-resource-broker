@@ -442,7 +442,6 @@ class TestCreateMachineRequestHandlerPartial:
             "cyclecloud_url": "https://cc.example.com",
             "cyclecloud_auth_mode": "bearer",
             "cyclecloud_aad_scope": "https://cc.example.com/.default",
-            "cyclecloud_bearer_token": "tok-123",
         }
         mock_container.get.return_value = scheduler
 
@@ -477,4 +476,3 @@ class TestCreateMachineRequestHandlerPartial:
         assert operation.context["cyclecloud_url"] == "https://cc.example.com"
         assert operation.context["cyclecloud_auth_mode"] == "bearer"
         assert operation.context["cyclecloud_aad_scope"] == "https://cc.example.com/.default"
-        assert operation.context["cyclecloud_bearer_token"] == "tok-123"

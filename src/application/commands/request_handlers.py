@@ -244,7 +244,6 @@ class CreateMachineRequestHandler(BaseCommandHandler[CreateRequestCommand, str])
                                 "cyclecloud_verify_ssl",
                                 "cyclecloud_auth_mode",
                                 "cyclecloud_aad_scope",
-                                "cyclecloud_bearer_token",
                             ):
                                 value = provider_data.get(key)
                                 if value not in (None, ""):
@@ -887,7 +886,6 @@ class CreateReturnRequestHandler(BaseCommandHandler[CreateReturnRequestCommand, 
                 "cyclecloud_verify_ssl",
                 "cyclecloud_auth_mode",
                 "cyclecloud_aad_scope",
-                "cyclecloud_bearer_token",
             ):
                 value = None
                 if isinstance(template_config, dict):

@@ -384,11 +384,6 @@ class AzureTemplate(Template):
         description="CycleCloud auth mode override, e.g. 'basic' or 'bearer'.",
         validation_alias=AliasChoices("cyclecloud_auth_mode", "cyclecloudAuthMode"),
     )
-    cyclecloud_bearer_token: Optional[str] = Field(
-        default=None,
-        description="Explicit bearer token for CycleCloud API authentication.",
-        validation_alias=AliasChoices("cyclecloud_bearer_token", "cyclecloudBearerToken"),
-    )
     cyclecloud_aad_scope: Optional[str] = Field(
         default=None,
         description="AAD scope used to resolve a bearer token for CycleCloud.",
