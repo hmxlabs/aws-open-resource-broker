@@ -485,7 +485,27 @@ class AzureProviderStrategy(ProviderStrategy):
                 # Rough VMSS-oriented metadata; real Azure ceilings also depend on image type,
                 # quota, throttling, and which handler/provider_api is actually used.
                 "max_instances_per_request": 1000,
-                "supports_windows": True,
+                # Windows is intentionally unsupported for Azure.
+                #
+                # Current provider payload generation does not model a usable Windows auth/bootstrap path.
+                #
+                # If we implement Windows later, the two viable Azure-native
+                # directions we found are:
+                # 1. Bootstrap with a securely supplied local admin password,
+                #    then use Microsoft Entra sign-in for ongoing access:
+                #    https://learn.microsoft.com/en-us/entra/identity/devices/howto-vm-sign-in-azure-ad-windows
+                # 2. Bootstrap Windows OpenSSH, then push/install SSH keys
+                #    after provisioning; Azure docs note keys are not
+                #    auto-provisioned for Windows at deploy time:
+                #    https://learn.microsoft.com/en-us/azure/virtual-machines/windows/connect-ssh
+                #
+                # These are both ugly in comparison to AWS/Linux auth
+                #
+                # Relevant Azure compute schema docs for a future Windows
+                # implementation:
+                # https://learn.microsoft.com/en-us/azure/templates/microsoft.compute/2018-06-01/virtualmachines
+                # https://learn.microsoft.com/en-us/azure/templates/microsoft.compute/2018-04-01/virtualmachinescalesets
+                "supports_windows": False,
                 "supports_linux": True,
             },
             limitations={
