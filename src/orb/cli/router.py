@@ -47,7 +47,7 @@ async def execute_command(args, app, resource_parsers) -> Union[str, tuple[str, 
 
     result = await handler(args)
 
-    if isinstance(result, int):
+    if isinstance(result, int):  # handle_init returns a bare int exit code
         return "", result
 
     from orb.application.dto.interface_response import InterfaceResponse
