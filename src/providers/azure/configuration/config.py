@@ -16,7 +16,6 @@ class CycleCloudConfig(BaseModel):
         None,
         description="Path to a JSON file containing CycleCloud credentials and optional auth overrides",
     )
-    verify_ssl: bool = Field(True, description="Verify CycleCloud TLS certs")
 
     @model_validator(mode="before")
     @classmethod
