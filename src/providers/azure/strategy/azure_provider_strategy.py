@@ -454,7 +454,7 @@ class AzureProviderStrategy(ProviderStrategy):
                         "supports_spot": False,
                         "supports_on_demand": True,
                         "requires_existing_cluster": True,
-                        "required_create_fields": ["nodearray", "count"],
+                        "required_create_fields": ["cluster_name", "node_array"],
                         "capacity_limit_source": "cluster_status.maxCount",
                         "supports_async_operations": True,
                     },

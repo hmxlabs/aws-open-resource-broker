@@ -6,19 +6,6 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from infrastructure.interfaces.provider import BaseProviderConfig
 
-# ---------------------------------------------------------------------------
-# CycleCloud provider models
-# ---------------------------------------------------------------------------
-
-class CycleCloudSSHConfig(BaseModel):
-    """SSH connectivity configuration for CycleCloud server."""
-
-    host: Optional[str] = Field(None, description="CycleCloud SSH host or IP")
-    user: Optional[str] = Field(None, description="SSH username")
-    port: int = Field(22, description="SSH port")
-    key_path: Optional[str] = Field(None, description="Path to private key file")
-
-
 class CycleCloudConfig(BaseModel):
     """CycleCloud connection configuration."""
 
@@ -30,7 +17,6 @@ class CycleCloudConfig(BaseModel):
         description="Path to a JSON file containing CycleCloud credentials and optional auth overrides",
     )
     verify_ssl: bool = Field(True, description="Verify CycleCloud TLS certs")
-    ssh: Optional[CycleCloudSSHConfig] = Field(None, description="Optional SSH connection settings")
 
     @model_validator(mode="before")
     @classmethod
@@ -107,7 +93,7 @@ class AzureProviderConfig(BaseProviderConfig):
     # ------------------------------------------------------------------
     cyclecloud: Optional[CycleCloudConfig] = Field(
         default=None,
-        description="CycleCloud integration configuration (URL, credentials, SSH)",
+        description="CycleCloud integration configuration (URL, credentials, TLS verification)",
     )
 
     # ------------------------------------------------------------------
