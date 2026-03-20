@@ -146,6 +146,49 @@ class TestCapacityMetadata:
         )
         assert metadata["fleet_capacity_fulfilment"]["target_capacity_units"] == 4
 
+    def test_vmss_capacity_aggregates_multiple_resources(self, strategy):
+        strategy._resource_manager = MagicMock()
+        strategy._resource_manager.get_vmss_capacity.side_effect = [
+            {
+                "capacity": 4,
+                "provisioned_instance_count": 2,
+                "provisioning_state": "Updating",
+            },
+            {
+                "capacity": 3,
+                "provisioned_instance_count": 1,
+                "provisioning_state": "Updating",
+            },
+        ]
+
+        metadata = {}
+        strategy._augment_vmss_capacity_metadata(
+            metadata,
+            ["vmss-a", "vmss-b"],
+            resource_group="override-rg",
+        )
+
+        assert metadata["fleet_capacity_fulfilment"] == {
+            "target_capacity_units": 7,
+            "fulfilled_capacity_units": 3,
+            "provisioned_instance_count": 3,
+            "state": "Updating",
+        }
+        assert metadata["fleet_capacity_fulfilment_by_resource"] == {
+            "vmss-a": {
+                "target_capacity_units": 4,
+                "fulfilled_capacity_units": 2,
+                "provisioned_instance_count": 2,
+                "state": "Updating",
+            },
+            "vmss-b": {
+                "target_capacity_units": 3,
+                "fulfilled_capacity_units": 1,
+                "provisioned_instance_count": 1,
+                "state": "Updating",
+            },
+        }
+
     def test_describe_resource_instances_surfaces_vmss_errors_without_instances(self, strategy):
         handler = MagicMock()
         handler.check_hosts_status.return_value = []
@@ -288,6 +331,59 @@ class TestCapacityMetadata:
             "context-rg",
             "vmss-demo",
         )
+
+    def test_describe_resource_instances_aggregates_capacity_for_multiple_vmss(self, strategy):
+        handler = MagicMock()
+        handler.check_hosts_status.return_value = []
+        handler.get_vmss_resource_errors.return_value = []
+        strategy._handlers["VMSS"] = handler
+        strategy._resource_manager = MagicMock()
+        strategy._resource_manager.get_vmss_capacity.side_effect = [
+            {
+                "capacity": 4,
+                "provisioned_instance_count": 2,
+                "provisioning_state": "Updating",
+            },
+            {
+                "capacity": 3,
+                "provisioned_instance_count": 1,
+                "provisioning_state": "Updating",
+            },
+        ]
+
+        op = ProviderOperation(
+            operation_type=ProviderOperationType.DESCRIBE_RESOURCE_INSTANCES,
+            parameters={
+                "resource_ids": ["vmss-a", "vmss-b"],
+                "provider_api": "VMSS",
+                "template_id": "tmpl-1",
+                "request_metadata": {"resource_group": "test-rg"},
+            },
+        )
+
+        result = _run(strategy.execute_operation(op))
+
+        assert result.success
+        assert result.metadata["fleet_capacity_fulfilment"] == {
+            "target_capacity_units": 7,
+            "fulfilled_capacity_units": 3,
+            "provisioned_instance_count": 3,
+            "state": "Updating",
+        }
+        assert result.metadata["fleet_capacity_fulfilment_by_resource"] == {
+            "vmss-a": {
+                "target_capacity_units": 4,
+                "fulfilled_capacity_units": 2,
+                "provisioned_instance_count": 2,
+                "state": "Updating",
+            },
+            "vmss-b": {
+                "target_capacity_units": 3,
+                "fulfilled_capacity_units": 1,
+                "provisioned_instance_count": 1,
+                "state": "Updating",
+            },
+        }
 
 
 # ---------------------------------------------------------------------------

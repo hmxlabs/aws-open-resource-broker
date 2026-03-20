@@ -1595,26 +1595,60 @@ class AzureProviderStrategy(ProviderStrategy):
         if not resource_ids or not self.resource_manager:
             return
 
-        vmss_name = resource_ids[0]
         resource_group = resource_group or self._azure_config.resource_group
         if not resource_group:
             return
 
-        try:
-            capacity_info = self.resource_manager.get_vmss_capacity(
-                resource_group, vmss_name
+        aggregated_target_capacity = 0
+        aggregated_fulfilled_capacity = 0
+        per_resource_capacity: dict[str, dict[str, Any]] = {}
+        capacity_states: list[str] = []
+
+        for vmss_name in resource_ids:
+            try:
+                capacity_info = self.resource_manager.get_vmss_capacity(
+                    resource_group, vmss_name
+                )
+                provisioned_instance_count = int(
+                    capacity_info.get("provisioned_instance_count", 0) or 0
+                )
+                target_capacity = int(capacity_info.get("capacity", 0) or 0)
+                provisioning_state = capacity_info.get("provisioning_state")
+
+                per_resource_capacity[str(vmss_name)] = {
+                    "target_capacity_units": target_capacity,
+                    "fulfilled_capacity_units": provisioned_instance_count,
+                    "provisioned_instance_count": provisioned_instance_count,
+                    "state": provisioning_state,
+                }
+                aggregated_target_capacity += target_capacity
+                aggregated_fulfilled_capacity += provisioned_instance_count
+                if provisioning_state not in (None, ""):
+                    capacity_states.append(str(provisioning_state))
+            except Exception as exc:
+                self._logger.warning(
+                    "Could not fetch VMSS capacity for %s: %s", vmss_name, exc
+                )
+
+        if not per_resource_capacity:
+            return
+
+        if len(per_resource_capacity) == 1:
+            aggregate_state = next(iter(per_resource_capacity.values())).get("state")
+        else:
+            aggregate_state = (
+                capacity_states[0]
+                if capacity_states and len(set(capacity_states)) == 1
+                else "multiple"
             )
-            provisioned_instance_count = capacity_info.get("provisioned_instance_count", 0)
-            metadata["fleet_capacity_fulfilment"] = {
-                "target_capacity_units": capacity_info.get("capacity", 0),
-                "fulfilled_capacity_units": provisioned_instance_count,
-                "provisioned_instance_count": provisioned_instance_count,
-                "state": capacity_info.get("provisioning_state"),
-            }
-        except Exception as exc:
-            self._logger.warning(
-                "Could not fetch VMSS capacity for %s: %s", vmss_name, exc
-            )
+            metadata["fleet_capacity_fulfilment_by_resource"] = per_resource_capacity
+
+        metadata["fleet_capacity_fulfilment"] = {
+            "target_capacity_units": aggregated_target_capacity,
+            "fulfilled_capacity_units": aggregated_fulfilled_capacity,
+            "provisioned_instance_count": aggregated_fulfilled_capacity,
+            "state": aggregate_state,
+        }
 
     @staticmethod
     def _augment_shortfall_metadata(metadata: dict[str, Any]) -> None:
