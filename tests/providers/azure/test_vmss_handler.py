@@ -510,6 +510,53 @@ def test_single_vm_release_submits_deletes_without_waiting():
     )
 
     assert result["provider_data"]["operation_status"] == "submitted"
-    assert result["provider_data"]["cleanup_deferred"] is True
     assert len(result["provider_data"]["submitted_deletions"]) == 2
     assert azure_client.compute_client.virtual_machines.begin_delete.call_count == 2
+
+
+def test_single_vm_create_sets_native_delete_options():
+    azure_client = MagicMock()
+    logger = MagicMock()
+    handler = SingleVMHandler(azure_client=azure_client, logger=logger)
+
+    nic_result = MagicMock()
+    nic_result.id = "/subscriptions/.../networkInterfaces/nic-vm-1"
+    nic_poller = MagicMock()
+    nic_poller.result.return_value = nic_result
+    azure_client.network_client.network_interfaces.begin_create_or_update.return_value = nic_poller
+
+    vm_poller = MagicMock()
+    vm_poller.continuation_token.return_value = "single-vm-lro-token"
+    azure_client.compute_client.virtual_machines.begin_create_or_update.return_value = vm_poller
+
+    request = MagicMock()
+    request.requested_count = 1
+    request.request_id = "req-5"
+    request.metadata = {}
+
+    template = AzureTemplate(
+        template_id="azure-singlevm-test",
+        provider_api="SingleVM",
+        vm_size="Standard_D4s_v5",
+        resource_group="test-rg",
+        location="eastus2",
+        network_config={"subnet_id": "/subscriptions/.../subnets/default"},
+        ssh_public_keys=["ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQC7 test@host"],
+        image={
+            "publisher": "Canonical",
+            "offer": "0001-com-ubuntu-server-jammy",
+            "sku": "22_04-lts-gen2",
+            "version": "latest",
+        },
+        data_disks=[{"lun": 0, "disk_size_gb": 128}],
+    )
+
+    handler.acquire_hosts(request, template)
+
+    vm_params = azure_client.compute_client.virtual_machines.begin_create_or_update.call_args.kwargs[
+        "parameters"
+    ]
+    nic_ref = vm_params["properties"]["networkProfile"]["networkInterfaces"][0]
+    assert nic_ref["properties"]["deleteOption"] == "Delete"
+    assert vm_params["properties"]["storageProfile"]["osDisk"]["deleteOption"] == "Delete"
+    assert vm_params["properties"]["storageProfile"]["dataDisks"][0]["deleteOption"] == "Delete"

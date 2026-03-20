@@ -16,7 +16,6 @@ from providers.azure.configuration.validator import (
 from providers.azure.configuration.template_extension import AzureTemplateExtensionConfig
 from providers.azure.exceptions.azure_exceptions import (
     AzureError,
-    ResourceCleanupError,
     VMNotFoundError,
 )
 from providers.azure.infrastructure.adapters.machine_adapter import AzureMachineAdapter
@@ -454,58 +453,6 @@ class TestAzureMachineAdapter:
 
         with pytest.raises(VMNotFoundError):
             adapter.perform_health_check(machine)
-
-    def test_cleanup_machine_resources_deletes_known_dependencies(self):
-        azure_client = MagicMock()
-        azure_client.resource_group = "rg"
-        nic_poller = MagicMock()
-        disk_poller = MagicMock()
-        azure_client.network_client.network_interfaces.begin_delete.return_value = nic_poller
-        azure_client.compute_client.disks.begin_delete.return_value = disk_poller
-
-        adapter = AzureMachineAdapter(azure_client=azure_client, logger=MagicMock())
-        machine = Machine(
-            instance_id=InstanceId(value="vm-1"),
-            template_id="tpl-1",
-            provider_type="azure",
-            instance_type=InstanceType(value="Standard_D4s_v5"),
-            image_id="img-1",
-            provider_data={
-                "resource_group": "rg",
-                "nic_name": "nic-vm-1",
-                "disk_names": ["osdisk-vm-1"],
-            },
-        )
-
-        result = adapter.cleanup_machine_resources(machine)
-
-        assert result["network_interfaces"]["success"] == ["nic-vm-1"]
-        assert result["disks"]["success"] == ["osdisk-vm-1"]
-
-    def test_cleanup_machine_resources_raises_on_partial_failure(self):
-        azure_client = MagicMock()
-        azure_client.resource_group = "rg"
-        azure_client.network_client.network_interfaces.begin_delete.side_effect = Exception(
-            "delete failed"
-        )
-        azure_client.compute_client.disks.begin_delete.return_value = MagicMock()
-
-        adapter = AzureMachineAdapter(azure_client=azure_client, logger=MagicMock())
-        machine = Machine(
-            instance_id=InstanceId(value="vm-1"),
-            template_id="tpl-1",
-            provider_type="azure",
-            instance_type=InstanceType(value="Standard_D4s_v5"),
-            image_id="img-1",
-            provider_data={
-                "resource_group": "rg",
-                "nic_name": "nic-vm-1",
-            },
-        )
-
-        with pytest.raises(ResourceCleanupError):
-            adapter.cleanup_machine_resources(machine)
-
 
 class TestAzureClientNetworkResolution:
     def test_resolve_network_identity_from_vm_populates_ips_and_subnet(self):

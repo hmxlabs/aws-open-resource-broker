@@ -76,6 +76,7 @@ class TestAzureTemplateConstruction:
     def test_with_image(self):
         t = AzureTemplate(
             **_BASE_FIELDS,
+            network_config={"subnet_id": "/subscriptions/.../subnets/default"},
             image={
                 "publisher": "Canonical",
                 "offer": "0001-com-ubuntu-server-jammy",
@@ -210,6 +211,7 @@ class TestArmPayload:
     def test_basic_arm_payload(self):
         t = AzureTemplate(
             **_BASE_FIELDS,
+            network_config={"subnet_id": "/subscriptions/.../subnets/default"},
             image={
                 "publisher": "Canonical",
                 "offer": "0001-com-ubuntu-server-jammy",
@@ -223,6 +225,10 @@ class TestArmPayload:
         assert arm["location"] == "eastus2"
         assert arm["sku"]["name"] == "Standard_D4s_v5"
         assert "virtualMachineProfile" in arm["properties"]
+        vm_profile = arm["properties"]["virtualMachineProfile"]
+        assert vm_profile["storageProfile"]["osDisk"]["deleteOption"] == "Delete"
+        nic_config = vm_profile["networkProfile"]["networkInterfaceConfigurations"][0]
+        assert nic_config["properties"]["deleteOption"] == "Delete"
 
     def test_spot_arm_payload(self):
         t = AzureTemplate(
@@ -325,6 +331,7 @@ class TestValueObjects:
         )
         arm = disk.to_arm_dict()
         assert arm["diskSizeGB"] == 128
+        assert arm["deleteOption"] == "Delete"
         assert arm["managedDisk"]["storageAccountType"] == "Premium_LRS"
 
     def test_data_disk(self):
@@ -333,20 +340,24 @@ class TestValueObjects:
         assert arm["lun"] == 0
         assert arm["diskSizeGB"] == 256
         assert arm["createOption"] == "Empty"
+        assert arm["deleteOption"] == "Delete"
 
     def test_network_config(self):
         nc = AzureNetworkConfig(
             subnet_id="/subscriptions/.../subnets/default",
+            public_ip_enabled=True,
             load_balancer_backend_pool_ids=["/subscriptions/.../backendAddressPools/pool-a"],
             load_balancer_inbound_nat_pool_ids=["/subscriptions/.../inboundNatPools/nat-a"],
             application_gateway_backend_pool_ids=["/subscriptions/.../backendAddressPools/appgw-a"],
         )
         arm = nc.to_arm_dict()
+        assert arm["properties"]["deleteOption"] == "Delete"
         assert arm["properties"]["primary"] is True
         ip_config = arm["properties"]["ipConfigurations"][0]["properties"]
         assert ip_config["subnet"]["id"] == (
             "/subscriptions/.../subnets/default"
         )
+        assert ip_config["publicIPAddressConfiguration"]["properties"]["deleteOption"] == "Delete"
         assert ip_config["loadBalancerBackendAddressPools"][0]["id"].endswith("/pool-a")
         assert ip_config["loadBalancerInboundNatPools"][0]["id"].endswith("/nat-a")
         assert ip_config["applicationGatewayBackendAddressPools"][0]["id"].endswith("/appgw-a")

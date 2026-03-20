@@ -234,11 +234,13 @@ class AzureNetworkConfig(ValueObject):
         if self.public_ip_enabled:
             ip_config["properties"]["publicIPAddressConfiguration"] = {
                 "name": "publicip",
+                "properties": {"deleteOption": "Delete"},
             }
 
         nic: dict[str, Any] = {
             "name": "nic-config",
             "properties": {
+                "deleteOption": "Delete",
                 "primary": True,
                 "ipConfigurations": [ip_config],
             },
@@ -278,6 +280,7 @@ class AzureOSDiskConfig(ValueObject):
         """Serialise to the ARM osDisk format."""
         disk: dict[str, Any] = {
             "createOption": "FromImage",
+            "deleteOption": "Delete",
             "caching": self.caching.value,
             "managedDisk": {
                 "storageAccountType": self.storage_account_type.value,
@@ -308,6 +311,7 @@ class AzureDataDisk(ValueObject):
         return {
             "lun": self.lun,
             "createOption": "Empty",
+            "deleteOption": "Delete",
             "diskSizeGB": self.disk_size_gb,
             "caching": self.caching.value,
             "managedDisk": {

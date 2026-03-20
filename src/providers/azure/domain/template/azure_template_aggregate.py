@@ -634,6 +634,7 @@ class AzureTemplate(Template):
             # Sensible default
             storage_profile["osDisk"] = {
                 "createOption": "FromImage",
+                "deleteOption": "Delete",
                 "caching": AzureCachingType.READ_WRITE.value,
                 "managedDisk": {
                     "storageAccountType": AzureOSDiskType.PREMIUM_LRS.value,

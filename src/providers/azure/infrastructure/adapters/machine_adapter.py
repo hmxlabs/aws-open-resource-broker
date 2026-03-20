@@ -15,7 +15,6 @@ from providers.azure.exceptions.azure_exceptions import (
     AzureError,
     NetworkError,
     RateLimitError,
-    ResourceCleanupError,
     VMNotFoundError,
 )
 from providers.azure.infrastructure.azure_client import AzureClient
@@ -161,68 +160,6 @@ class AzureMachineAdapter:
             },
         }
 
-    def cleanup_machine_resources(self, machine: Machine) -> dict[str, Any]:
-        """Best-effort cleanup for Azure resources referenced by machine metadata."""
-        self._logger.debug("Cleaning up Azure resources for machine: %s", machine.instance_id)
-
-        provider_data = dict(machine.provider_data or {})
-        cleanup_results = {
-            "network_interfaces": {"success": [], "failed": []},
-            "disks": {"success": [], "failed": []},
-        }
-
-        resource_group = self._resolve_resource_group(machine)
-        network_client = self._azure_client.network_client
-        compute_client = self._azure_client.compute_client
-
-        nic_names = self._as_list(provider_data.get("nic_names"))
-        if not nic_names and provider_data.get("nic_name"):
-            nic_names = [str(provider_data["nic_name"])]
-
-        disk_names = self._as_list(provider_data.get("disk_names"))
-
-        for nic_name in nic_names:
-            try:
-                poller = network_client.network_interfaces.begin_delete(
-                    resource_group_name=resource_group,
-                    network_interface_name=nic_name,
-                )
-                poller.result()
-                cleanup_results["network_interfaces"]["success"].append(nic_name)
-            except Exception as exc:
-                cleanup_results["network_interfaces"]["failed"].append({
-                    "name": nic_name,
-                    "error": str(exc),
-                })
-
-        for disk_name in disk_names:
-            try:
-                poller = compute_client.disks.begin_delete(
-                    resource_group_name=resource_group,
-                    disk_name=disk_name,
-                )
-                poller.result()
-                cleanup_results["disks"]["success"].append(disk_name)
-            except Exception as exc:
-                cleanup_results["disks"]["failed"].append({
-                    "name": disk_name,
-                    "error": str(exc),
-                })
-
-        failed_count = (
-            len(cleanup_results["network_interfaces"]["failed"])
-            + len(cleanup_results["disks"]["failed"])
-        )
-        if failed_count:
-            raise ResourceCleanupError(
-                "Failed to clean up one or more Azure machine resources",
-                resource_id=str(machine.instance_id),
-                resource_type="machine",
-                details=cleanup_results,
-            )
-
-        return cleanup_results
-
     @staticmethod
     def _find_status_code(statuses: list[Any], prefix: str) -> Optional[str]:
         for status in statuses:
@@ -230,14 +167,6 @@ class AzureMachineAdapter:
             if code and str(code).startswith(prefix):
                 return str(code)
         return None
-
-    @staticmethod
-    def _as_list(value: Any) -> list[str]:
-        if not value:
-            return []
-        if isinstance(value, list):
-            return [str(item) for item in value if item]
-        return [str(value)]
 
     def _resolve_resource_group(self, machine: Machine) -> str:
         resource_group = (

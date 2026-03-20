@@ -339,13 +339,9 @@ class SingleVMHandler(AzureHandler):
     ) -> Optional[dict[str, Any]]:
         """Submit deletion for individual VMs.
 
-        Important limitation:
-        - Azure VM deletion is now submit-and-return to align with the async
-          behavior used elsewhere in the provider and with AWS termination.
-        - Linked NIC/public IP/disk cleanup is therefore no longer performed
-          inline here, because those resources may still be attached while the
-          VM delete LRO is in progress.
-        - Cleanup remains a follow-up concern for later reconciliation work.
+        Azure-native delete options are set on attached resources during
+        provisioning, so termination can remain submit-and-return without ORB
+        performing dependent-resource cleanup.
         """
         context = context or {}
         resource_group = (
@@ -398,7 +394,6 @@ class SingleVMHandler(AzureHandler):
                 "resource_group": resource_group,
                 "operation_status": "submitted",
                 "submitted_deletions": submitted_deletions,
-                "cleanup_deferred": True,
             }
         }
 
@@ -539,7 +534,13 @@ class SingleVMHandler(AzureHandler):
                 },
                 "networkProfile": {
                     "networkInterfaces": [
-                        {"id": nic_id, "properties": {"primary": True}}
+                        {
+                            "id": nic_id,
+                            "properties": {
+                                "primary": True,
+                                "deleteOption": "Delete",
+                            },
+                        }
                     ]
                 },
             },
@@ -564,6 +565,7 @@ class SingleVMHandler(AzureHandler):
         else:
             params["properties"]["storageProfile"]["osDisk"] = {
                 "createOption": "FromImage",
+                "deleteOption": "Delete",
                 "managedDisk": {"storageAccountType": "Standard_LRS"},
             }
 
@@ -654,165 +656,14 @@ class SingleVMHandler(AzureHandler):
         return params
 
     def _delete_nic(self, resource_group: str, nic_name: str) -> None:
-        """Delete a NIC and any linked public IPs if they are not attached."""
+        """Best-effort rollback for NICs created before VM submission fails."""
         try:
-            network = self.azure_client.network_client
-            nic = network.network_interfaces.get(
-                resource_group_name=resource_group,
-                network_interface_name=nic_name,
-            )
-
-            attached_vm = getattr(nic, "virtual_machine", None)
-            if attached_vm and getattr(attached_vm, "id", None):
-                self._logger.info(
-                    "Skipping NIC '%s' deletion because it is still attached to VM '%s'",
-                    nic_name,
-                    getattr(attached_vm, "id", "unknown"),
-                )
-                return
-
-            public_ip_targets: list[tuple[str, str]] = []
-            for ip_cfg in getattr(nic, "ip_configurations", []) or []:
-                ip_props = getattr(ip_cfg, "public_ip_address", None)
-                pip_id = getattr(ip_props, "id", None)
-                if pip_id:
-                    rg_name = self._extract_resource_group_and_name_from_arm_id(str(pip_id))
-                    if rg_name:
-                        public_ip_targets.append(rg_name)
-
-            network.network_interfaces.begin_delete(
+            self.azure_client.network_client.network_interfaces.begin_delete(
                 resource_group_name=resource_group,
                 network_interface_name=nic_name,
             ).result()
-
-            for pip_rg, pip_name in public_ip_targets:
-                self._delete_public_ip_if_unattached(pip_rg, pip_name)
         except Exception as exc:
             self._logger.warning("Could not delete NIC '%s': %s", nic_name, exc)
-
-    def _collect_vm_cleanup_targets(
-        self,
-        resource_group: str,
-        vm_name: str,
-    ) -> dict[str, list[tuple[str, str]]]:
-        """Collect linked NIC and managed-disk names for post-VM deletion cleanup."""
-        cleanup: dict[str, list[tuple[str, str]]] = {"nics": [], "disks": []}
-        try:
-            compute = self.azure_client.compute_client
-            vm = compute.virtual_machines.get(
-                resource_group_name=resource_group,
-                vm_name=vm_name,
-            )
-
-            net_profile = getattr(vm, "network_profile", None)
-            for nic_ref in getattr(net_profile, "network_interfaces", []) or []:
-                nic_id = getattr(nic_ref, "id", None)
-                if nic_id:
-                    rg_name = self._extract_resource_group_and_name_from_arm_id(str(nic_id))
-                    if rg_name:
-                        cleanup["nics"].append(rg_name)
-
-            storage_profile = getattr(vm, "storage_profile", None)
-            os_disk = getattr(storage_profile, "os_disk", None)
-            os_managed_disk = getattr(os_disk, "managed_disk", None) if os_disk else None
-            os_disk_id = getattr(os_managed_disk, "id", None)
-            if os_disk_id:
-                rg_name = self._extract_resource_group_and_name_from_arm_id(str(os_disk_id))
-                if rg_name:
-                    cleanup["disks"].append(rg_name)
-
-            for data_disk in getattr(storage_profile, "data_disks", []) or []:
-                managed_disk = getattr(data_disk, "managed_disk", None)
-                data_disk_id = getattr(managed_disk, "id", None)
-                if data_disk_id:
-                    rg_name = self._extract_resource_group_and_name_from_arm_id(
-                        str(data_disk_id)
-                    )
-                    if rg_name:
-                        cleanup["disks"].append(rg_name)
-        except Exception as exc:
-            self._logger.warning(
-                "Failed to collect cleanup targets for VM '%s': %s",
-                vm_name,
-                exc,
-            )
-
-        return {
-            "nics": list(dict.fromkeys(cleanup["nics"])),
-            "disks": list(dict.fromkeys(cleanup["disks"])),
-        }
-
-    def _delete_public_ip_if_unattached(self, resource_group: str, ip_name: str) -> None:
-        """Delete a public IP only when it is detached from all configurations."""
-        try:
-            network = self.azure_client.network_client
-            public_ip = network.public_ip_addresses.get(
-                resource_group_name=resource_group,
-                public_ip_address_name=ip_name,
-            )
-            if getattr(public_ip, "ip_configuration", None):
-                self._logger.info(
-                    "Skipping public IP '%s' deletion because it is still attached",
-                    ip_name,
-                )
-                return
-
-            network.public_ip_addresses.begin_delete(
-                resource_group_name=resource_group,
-                public_ip_address_name=ip_name,
-            ).result()
-        except Exception as exc:
-            self._logger.warning("Could not delete public IP '%s': %s", ip_name, exc)
-
-    def _delete_managed_disk_if_unattached(
-        self,
-        resource_group: str,
-        disk_name: str,
-    ) -> None:
-        """Delete a managed disk if it is not currently attached to a VM."""
-        try:
-            compute = self.azure_client.compute_client
-            disk = compute.disks.get(
-                resource_group_name=resource_group,
-                disk_name=disk_name,
-            )
-            if getattr(disk, "managed_by", None):
-                self._logger.info(
-                    "Skipping disk '%s' deletion because it is still attached to '%s'",
-                    disk_name,
-                    getattr(disk, "managed_by", "unknown"),
-                )
-                return
-
-            compute.disks.begin_delete(
-                resource_group_name=resource_group,
-                disk_name=disk_name,
-            ).result()
-        except Exception as exc:
-            self._logger.warning("Could not delete managed disk '%s': %s", disk_name, exc)
-
-    def _extract_resource_group_and_name_from_arm_id(
-        self,
-        arm_id: str,
-    ) -> Optional[tuple[str, str]]:
-        """Extract (resource_group, name) from a standard ARM resource ID."""
-        parts = [segment for segment in arm_id.split("/") if segment]
-        if not parts:
-            return None
-
-        try:
-            rg_index = next(
-                idx
-                for idx, value in enumerate(parts)
-                if value.lower() == "resourcegroups"
-            )
-            resource_group = parts[rg_index + 1]
-            resource_name = parts[-1]
-            if resource_group and resource_name:
-                return resource_group, resource_name
-            return None
-        except Exception:
-            return None
 
     @classmethod
     def get_example_templates(cls) -> list[dict[str, Any]]:
