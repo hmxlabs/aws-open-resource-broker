@@ -68,17 +68,6 @@ def create_azure_config(data: dict[str, Any]) -> Any:
     except Exception as exc:
         raise RuntimeError(f"Failed to create Azure config: {exc!s}")
 
-
-def create_azure_resolver() -> Any:
-    """Create an Azure template resolver (placeholder)."""
-    return None
-
-
-def create_azure_validator() -> Any:
-    """Create an Azure template validator (placeholder)."""
-    return None
-
-
 # ------------------------------------------------------------------
 # Provider registration
 # ------------------------------------------------------------------
@@ -105,8 +94,6 @@ def register_azure_provider(
                     provider_instance_name=instance_name,
                 ),
                 config_factory=create_azure_config,
-                resolver_factory=create_azure_resolver,
-                validator_factory=create_azure_validator,
             )
         else:
             registry.register_provider(
@@ -116,8 +103,6 @@ def register_azure_provider(
                     provider_instance_name="azure-default",
                 ),
                 config_factory=create_azure_config,
-                resolver_factory=create_azure_resolver,
-                validator_factory=create_azure_validator,
             )
 
         if logger:
