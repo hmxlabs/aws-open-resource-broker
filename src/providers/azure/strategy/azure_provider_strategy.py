@@ -1297,6 +1297,21 @@ class AzureProviderStrategy(ProviderStrategy):
             or bool(pending.get("delete_vmss_when_empty", False)),
         }
 
+    def _has_pending_vmss_reconciliation(
+        self,
+        *,
+        resource_group: Optional[str],
+        resource_ids: list[str],
+    ) -> bool:
+        if not resource_group:
+            return False
+
+        for resource_id in resource_ids:
+            key = (str(resource_group), str(resource_id))
+            if key in self._pending_vmss_termination_reconciliations:
+                return True
+        return False
+
     def _maybe_reconcile_pending_vmss_termination(
         self,
         *,
@@ -1410,6 +1425,18 @@ class AzureProviderStrategy(ProviderStrategy):
                 operation.context.get("request_id") if operation.context else None
             )
             resource_group = self._resolve_operation_resource_group(operation)
+            request_metadata = self._build_cyclecloud_request_metadata(
+                operation=operation,
+                resource_group=resource_group,
+            )
+            if provider_api_value in (
+                AzureProviderApi.VMSS.value,
+                AzureProviderApi.VMSS_UNIFORM.value,
+            ) and self._has_pending_vmss_reconciliation(
+                resource_group=resource_group,
+                resource_ids=resource_ids,
+            ):
+                request_metadata["fail_on_partial_status_error"] = True
             request = Request.create_new_request(
                 request_type=RequestType.ACQUIRE,
                 template_id=operation.parameters.get("template_id", "unknown"),
@@ -1417,10 +1444,7 @@ class AzureProviderStrategy(ProviderStrategy):
                 provider_type="azure",
                 provider_instance=self.provider_instance_name,
                 request_id=request_id,
-                metadata=self._build_cyclecloud_request_metadata(
-                    operation=operation,
-                    resource_group=resource_group,
-                ),
+                metadata=request_metadata,
             )
             request.resource_ids = resource_ids
             if provider_api_value == AzureProviderApi.CYCLECLOUD.value and resource_ids:

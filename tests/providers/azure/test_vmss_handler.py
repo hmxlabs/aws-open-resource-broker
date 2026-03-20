@@ -1,5 +1,6 @@
 """Focused tests for VMSS handler behavior."""
 
+import pytest
 from unittest.mock import MagicMock
 
 from providers.azure.domain.template.value_objects import AzureVMSSOrchestrationMode
@@ -364,6 +365,24 @@ def test_vmss_instance_status_includes_structured_provisioning_errors():
     assert result[0]["status"] == "failed"
     assert result[0]["provider_data"]["fleet_errors"][0]["error_code"] == "ProvisioningStateFailed"
     assert "Allocation failed" in result[0]["provider_data"]["fleet_errors"][0]["error_message"]
+
+
+def test_vmss_status_raises_when_strict_mode_and_listing_fails():
+    azure_client = MagicMock()
+    logger = MagicMock()
+    handler = VMSSHandler(azure_client=azure_client, logger=logger)
+
+    azure_client.compute_client.virtual_machine_scale_sets.get.side_effect = Exception("transient ARM failure")
+
+    request = MagicMock()
+    request.resource_ids = ["vmss-azure-test"]
+    request.metadata = {
+        "resource_group": "test-rg",
+        "fail_on_partial_status_error": True,
+    }
+
+    with pytest.raises(RuntimeError, match="Failed to list instances for VMSS 'vmss-azure-test'"):
+        handler.check_hosts_status(request)
 
 
 def test_vmss_status_populates_network_identity():

@@ -271,6 +271,10 @@ class VMSSHandler(AzureHandler):
             return []
 
         all_instances: list[dict[str, Any]] = []
+        status_errors: list[str] = []
+        fail_on_partial_status_error = bool(
+            (request.metadata or {}).get("fail_on_partial_status_error", False)
+        )
 
         for vmss_name in resource_ids:
             # We need the resource group.  Convention: stored on request metadata
@@ -291,9 +295,12 @@ class VMSSHandler(AzureHandler):
                 )
                 all_instances.extend(instances)
             except Exception as exc:
-                self._logger.error(
-                    "Failed to list instances for VMSS '%s': %s", vmss_name, exc
-                )
+                error_message = f"Failed to list instances for VMSS '{vmss_name}': {exc}"
+                self._logger.error(error_message)
+                status_errors.append(error_message)
+
+        if fail_on_partial_status_error and status_errors:
+            raise RuntimeError("; ".join(status_errors))
 
         return all_instances
 

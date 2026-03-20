@@ -1142,6 +1142,43 @@ class TestDescribeResourceInstances:
         )
         assert ("test-rg", "vmss-demo") not in strategy._pending_vmss_termination_reconciliations
 
+    def test_describe_resource_instances_does_not_reconcile_when_strict_vmss_status_fails(
+        self, strategy
+    ):
+        handler = MagicMock()
+        handler.check_hosts_status.side_effect = RuntimeError(
+            "Failed to list instances for VMSS 'vmss-demo': transient ARM failure"
+        )
+        strategy._handlers["VMSS"] = handler
+        strategy._resource_manager = MagicMock()
+        strategy._pending_vmss_termination_reconciliations[("test-rg", "vmss-demo")] = {
+            "resource_group": "test-rg",
+            "vmss_name": "vmss-demo",
+            "machine_ids": ["vm-a"],
+            "target_capacity": 2,
+            "orchestration_mode": "Flexible",
+            "delete_vmss_when_empty": False,
+        }
+
+        op = ProviderOperation(
+            operation_type=ProviderOperationType.DESCRIBE_RESOURCE_INSTANCES,
+            parameters={
+                "resource_ids": ["vmss-demo"],
+                "provider_api": "VMSS",
+                "template_id": "tmpl-1",
+                "request_metadata": {"resource_group": "test-rg"},
+            },
+        )
+
+        result = _run(strategy.execute_operation(op))
+
+        assert not result.success
+        assert result.error_code == "DESCRIBE_RESOURCE_INSTANCES_ERROR"
+        strategy._resource_manager.scale_vmss.assert_not_called()
+        assert ("test-rg", "vmss-demo") in strategy._pending_vmss_termination_reconciliations
+        forwarded_request = handler.check_hosts_status.call_args.args[0]
+        assert forwarded_request.metadata["fail_on_partial_status_error"] is True
+
     def test_describe_resource_instances_reconciles_pending_flexible_vmss_scale_down_for_all_resources(
         self, strategy
     ):
