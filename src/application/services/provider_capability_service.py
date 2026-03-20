@@ -242,6 +242,19 @@ class ProviderCapabilityService:
                             "supports_on_demand": True,
                             "max_instances": 1000,
                         },
+                        "CycleCloud": {
+                            "supported_fleet_types": [],
+                            "supports_spot": False,
+                            "supports_on_demand": True,
+                            # Azure docs show CycleCloud node creation targets an existing
+                            # cluster/nodearray and that effective capacity is surfaced by
+                            # cluster status (`maxCount`, nodearray bucket availability),
+                            # not a provider-wide static limit.
+                            "requires_existing_cluster": True,
+                            "required_create_fields": ["nodearray", "count"],
+                            "capacity_limit_source": "cluster_status.maxCount",
+                            "supports_async_operations": True,
+                        },
                     },
                     "spot_instances": True,
                     "fleet_management": True,

@@ -453,9 +453,10 @@ class AzureProviderStrategy(ProviderStrategy):
                         "supported_fleet_types": [],
                         "supports_spot": False,
                         "supports_on_demand": True,
-                        # Repo-local placeholder, not a verified CycleCloud platform limit.
-                        "max_instances": 10000,
                         "requires_existing_cluster": True,
+                        "required_create_fields": ["nodearray", "count"],
+                        "capacity_limit_source": "cluster_status.maxCount",
+                        "supports_async_operations": True,
                     },
                 },
                 "instance_management": True,
