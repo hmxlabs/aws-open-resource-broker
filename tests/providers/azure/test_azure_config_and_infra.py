@@ -18,7 +18,10 @@ from providers.azure.exceptions.azure_exceptions import (
 )
 from providers.azure.infrastructure.adapters.machine_adapter import AzureMachineAdapter
 from providers.azure.infrastructure.azure_client import AzureClient
-from providers.azure.registration import create_azure_config
+from providers.azure.registration import (
+    create_azure_config,
+    register_azure_provider,
+)
 from providers.azure.infrastructure.adapters.azure_validation_adapter import (
     AzureValidationAdapter,
 )
@@ -143,6 +146,39 @@ class TestConfigValidation:
         assert client.subscription_id == azure_config.subscription_id
         assert client.resource_group == "rg-explicit"
         assert client.region_name == "westeurope"
+
+    def test_registry_created_strategy_gets_azure_client_resolver(self):
+        registry = ProviderRegistry()
+        registry.clear_registrations()
+        register_azure_provider(registry=registry)
+
+        azure_config = AzureProviderConfig(
+            subscription_id="12345678-1234-1234-1234-123456789012",
+            resource_group="rg-explicit",
+            region="westeurope",
+        )
+        config_port = MagicMock()
+        config_port.get_typed.return_value = azure_config
+        config_port.get_provider_config.return_value = None
+        azure_client = AzureClient(config=config_port, logger=MagicMock())
+        container = MagicMock()
+        container.get.return_value = azure_client
+
+        with patch("infrastructure.di.container.get_container", return_value=container):
+            strategy = registry.create_strategy(
+                "azure",
+                {
+                    "provider_type": "azure",
+                    "subscription_id": "12345678-1234-1234-1234-123456789012",
+                    "resource_group": "rg-explicit",
+                    "region": "westeurope",
+                },
+            )
+
+            assert isinstance(strategy.azure_client, AzureClient)
+            assert strategy.azure_client.subscription_id == "12345678-1234-1234-1234-123456789012"
+            assert strategy.azure_client.resource_group == "rg-explicit"
+            assert "VMSS" in strategy.handlers
 
 
 class TestAzureValidationAdapter:

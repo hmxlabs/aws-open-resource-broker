@@ -613,6 +613,7 @@ def _register_provider_specific_services(container: DIContainer) -> None:
             from providers.azure.registration import register_azure_services_with_di
 
             register_azure_services_with_di(container)
+            _register_azure_services(container)
         else:
             logger.debug("Azure provider not available, skipping Azure service registration")
     except ImportError:
@@ -803,3 +804,64 @@ def _create_aws_client(container: DIContainer):
     from providers.aws.infrastructure.aws_client import AWSClient
 
     return AWSClient(config=config, logger=logger, metrics=metrics)
+
+
+def _register_azure_services(container: DIContainer) -> None:
+    """Register Azure-specific services."""
+    logger = get_logger(__name__)
+
+    try:
+        from providers.azure.infrastructure.azure_client import AzureClient
+
+        if not container.is_registered(AzureClient):
+            container.register_factory(AzureClient, lambda c: _create_azure_client(c))
+
+        logger.info("Azure services registered successfully")
+    except ImportError as e:
+        logger.warning("Failed to import Azure classes: %s", str(e))
+    except Exception as e:
+        logger.warning("Failed to register Azure services: %s", str(e))
+
+
+def _create_azure_client(container: DIContainer, azure_config_override=None):
+    """Create Azure client without circular dependency."""
+    try:
+        logger = container.get(LoggingPort)
+    except Exception:
+        from infrastructure.logging.logger import get_logger as _get_logger
+
+        logger = _get_logger(__name__)
+
+    try:
+        config = container.get(ConfigurationPort)
+    except Exception:
+        from unittest.mock import Mock
+
+        config = Mock()
+        config.get.return_value = {}
+
+    metrics = (
+        container.get_optional(MetricsCollector) if hasattr(container, "get_optional") else None
+    )
+    if metrics is None:
+        try:
+            metrics = container.get(MetricsCollector)
+        except Exception as e:
+            if hasattr(logger, "warning"):
+                logger.warning(
+                    "MetricsCollector not available; Azure API metrics will be disabled: %s", e
+                )
+            metrics = None
+
+    if azure_config_override is not None:
+        from unittest.mock import Mock
+
+        config_port = Mock()
+        config_port.get_typed.side_effect = lambda t: azure_config_override if t is type(azure_config_override) else None
+        config_port.get_provider_config.return_value = None
+        config_port.get.side_effect = lambda key, default=None: getattr(azure_config_override, key, default)
+        config = config_port
+
+    from providers.azure.infrastructure.azure_client import AzureClient
+
+    return AzureClient(config=config, logger=logger, metrics=metrics)

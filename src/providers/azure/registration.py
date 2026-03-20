@@ -17,6 +17,13 @@ from domain.template.factory import TemplateFactory
 from providers.azure.configuration.template_extension import AzureTemplateExtensionConfig
 
 
+def _resolve_azure_client_from_container() -> Any:
+    from infrastructure.di.container import get_container
+    from providers.azure.infrastructure.azure_client import AzureClient
+
+    return get_container().get(AzureClient)
+
+
 # ------------------------------------------------------------------
 # Factory functions
 # ------------------------------------------------------------------
@@ -36,7 +43,11 @@ def create_azure_strategy(provider_config: Any) -> Any:
         )
         azure_config = AzureProviderConfig(**config_data)
         logger = LoggingAdapter()
-        strategy = AzureProviderStrategy(config=azure_config, logger=logger)
+        strategy = AzureProviderStrategy(
+            config=azure_config,
+            logger=logger,
+            azure_client_resolver=_resolve_azure_client_from_container,
+        )
 
         if hasattr(strategy, "name") and hasattr(provider_config, "name"):
             strategy.name = provider_config.name
@@ -164,7 +175,7 @@ def _register_azure_components_with_di(
     from domain.base.ports import LoggingPort
     from providers.azure.infrastructure.azure_client import AzureClient
 
-    def azure_client_factory(container_instance: Any) -> AzureClient:
+    def azure_client_factory(container_instance: Any) -> Any:
         logger_port = container_instance.get(LoggingPort)
 
         class AzureInstanceConfigPort:
@@ -184,8 +195,7 @@ def _register_azure_components_with_di(
             def get_provider_config(self) -> Any:
                 return None
 
-        config_port = AzureInstanceConfigPort(azure_config)
-        client = AzureClient(config=config_port, logger=logger_port)
+        client = AzureClient(config=AzureInstanceConfigPort(azure_config), logger=logger_port)
         logger_port.info(
             "Azure client initialized for %s: region=%s",
             instance_name,
