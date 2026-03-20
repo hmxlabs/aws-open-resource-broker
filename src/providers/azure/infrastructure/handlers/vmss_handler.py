@@ -14,8 +14,11 @@ Important limitation:
   requested, so Flexible VMSS termination in this provider submits explicit VM
   deletes first and reconciles VMSS capacity later.
 - That deferred reconciliation is currently tracked in process memory by the
-  Azure strategy. This is intentionally a best-effort follow-up, not a durable workflow
-  guarantee across process restarts.
+  Azure strategy. This is intentional current behavior: a narrow best-effort
+  operational follow-up, not a durable workflow guarantee across process
+  restarts.
+- If we need durable reconciliation later, treat that as explicit future work
+  and persist only the minimal reconciliation reference needed to resume it.
 """
 
 from __future__ import annotations
