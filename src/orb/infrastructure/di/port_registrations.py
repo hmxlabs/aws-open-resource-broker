@@ -124,4 +124,3 @@ def register_port_adapters(container):
         ResponseFormattingService,
         lambda c: ResponseFormattingService(c.get(SchedulerPort)),
     )
-

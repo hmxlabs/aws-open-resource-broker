@@ -383,9 +383,7 @@ class TestHandleSelectProviderStrategy:
         """handle_select_provider_strategy delegates to handle_provider_set_default."""
         from orb.interface.system_command_handlers import handle_select_provider_strategy
 
-        with patch(
-            "orb.interface.system_command_handlers.handle_select_provider_strategy"
-        ):
+        with patch("orb.interface.system_command_handlers.handle_select_provider_strategy"):
             with patch(
                 "orb.interface.provider_config_handler.handle_provider_set_default",
                 new_callable=AsyncMock,

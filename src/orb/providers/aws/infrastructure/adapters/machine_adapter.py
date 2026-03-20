@@ -85,8 +85,8 @@ class AWSMachineAdapter:
             return private_ip
 
         # 4. Fallback to instance ID
-        instance_id = (
-            aws_instance_data.get("instance_id") or aws_instance_data.get("InstanceId", "")
+        instance_id = aws_instance_data.get("instance_id") or aws_instance_data.get(
+            "InstanceId", ""
         )
         self._logger.info("Using instance ID fallback for machine: %s", instance_id)
         return instance_id
