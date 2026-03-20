@@ -565,6 +565,7 @@ def _register_azure_provider_to_context(
         azure_strategy = AzureProviderStrategy(
             config=azure_config,
             logger=logger,
+            provider_instance_name=provider_instance.name,
             azure_client_resolver=_make_azure_client,
         )
 

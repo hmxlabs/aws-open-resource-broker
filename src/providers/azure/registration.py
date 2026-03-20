@@ -29,7 +29,7 @@ def _resolve_azure_client_from_container() -> Any:
 # ------------------------------------------------------------------
 
 
-def create_azure_strategy(provider_config: Any) -> Any:
+def create_azure_strategy(provider_config: Any, *, provider_instance_name: str) -> Any:
     """Create an ``AzureProviderStrategy`` from provider configuration."""
     from infrastructure.adapters.logging_adapter import LoggingAdapter
     from providers.azure.configuration.config import AzureProviderConfig
@@ -46,11 +46,9 @@ def create_azure_strategy(provider_config: Any) -> Any:
         strategy = AzureProviderStrategy(
             config=azure_config,
             logger=logger,
+            provider_instance_name=provider_instance_name,
             azure_client_resolver=_resolve_azure_client_from_container,
         )
-
-        if hasattr(strategy, "name") and hasattr(provider_config, "name"):
-            strategy.name = provider_config.name
 
         return strategy
     except ImportError as exc:
@@ -102,7 +100,10 @@ def register_azure_provider(
             registry.register_provider_instance(
                 provider_type="azure",
                 instance_name=instance_name,
-                strategy_factory=create_azure_strategy,
+                strategy_factory=lambda provider_config: create_azure_strategy(
+                    provider_config,
+                    provider_instance_name=instance_name,
+                ),
                 config_factory=create_azure_config,
                 resolver_factory=create_azure_resolver,
                 validator_factory=create_azure_validator,
@@ -110,7 +111,10 @@ def register_azure_provider(
         else:
             registry.register_provider(
                 provider_type="azure",
-                strategy_factory=create_azure_strategy,
+                strategy_factory=lambda provider_config: create_azure_strategy(
+                    provider_config,
+                    provider_instance_name="azure-default",
+                ),
                 config_factory=create_azure_config,
                 resolver_factory=create_azure_resolver,
                 validator_factory=create_azure_validator,
@@ -220,6 +224,7 @@ def _create_azure_strategy_with_di(
     return AzureProviderStrategy(
         config=azure_config,
         logger=logger,
+        provider_instance_name=instance_name,
         azure_client_resolver=lambda: azure_client,
     )
 

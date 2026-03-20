@@ -63,6 +63,7 @@ class AzureProviderStrategy(ProviderStrategy):
         self,
         config: AzureProviderConfig,
         logger: LoggingPort,
+        provider_instance_name: str,
         azure_provisioning_port: Optional[Any] = None,
         azure_provisioning_port_resolver: Optional[Callable[[], Any]] = None,
         azure_client_resolver: Optional[Callable[[], AzureClient]] = None,
@@ -73,6 +74,7 @@ class AzureProviderStrategy(ProviderStrategy):
         super().__init__(config)
         self._logger = logger
         self._azure_config = config
+        self._provider_instance_name = provider_instance_name
         self._client: Optional[AzureClient] = None
         self._azure_client_resolver = azure_client_resolver
         self._resource_manager: Optional[AzureResourceManager] = None
@@ -90,6 +92,10 @@ class AzureProviderStrategy(ProviderStrategy):
     @property
     def provider_type(self) -> str:
         return "azure"
+
+    @property
+    def provider_instance_name(self) -> str:
+        return self._provider_instance_name
 
     @property
     def azure_client(self) -> Optional[AzureClient]:
@@ -276,7 +282,7 @@ class AzureProviderStrategy(ProviderStrategy):
                 template_id=azure_template.template_id,
                 count=requested_for_entry,
                 provider_type="azure",
-                provider_instance="azure-default",
+                provider_instance=self.provider_instance_name,
                 provider_api=provider_api,
                 request_metadata=request_metadata,
                 parent_request_id=base_request_id,
@@ -703,7 +709,7 @@ class AzureProviderStrategy(ProviderStrategy):
                 template_id=azure_template.template_id,
                 machine_count=count,
                 provider_type="azure",
-                provider_instance="azure-default",
+                provider_instance=self.provider_instance_name,
                 metadata=request_metadata,
                 request_id=request_id,
             )
@@ -1077,7 +1083,7 @@ class AzureProviderStrategy(ProviderStrategy):
                 template_id=operation.parameters.get("template_id", "unknown"),
                 machine_count=1,
                 provider_type="azure",
-                provider_instance="azure-default",
+                provider_instance=self.provider_instance_name,
                 request_id=request_id,
                 metadata=metadata,
             )
@@ -1417,7 +1423,7 @@ class AzureProviderStrategy(ProviderStrategy):
                 template_id=operation.parameters.get("template_id", "unknown"),
                 machine_count=1,
                 provider_type="azure",
-                provider_instance="azure-default",
+                provider_instance=self.provider_instance_name,
                 request_id=request_id,
                 metadata=self._build_cyclecloud_request_metadata(
                     operation=operation,

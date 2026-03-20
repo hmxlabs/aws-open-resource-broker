@@ -47,7 +47,7 @@ def logger():
 
 @pytest.fixture
 def strategy(azure_config, logger):
-    s = AzureProviderStrategy(config=azure_config, logger=logger)
+    s = AzureProviderStrategy(config=azure_config, logger=logger, provider_instance_name="azure-default")
     s.initialize()
     return s
 
@@ -69,10 +69,14 @@ def _run(coro):
 class TestInitialization:
     def test_requires_azure_config(self, logger):
         with pytest.raises(ValueError, match="AzureProviderConfig"):
-            AzureProviderStrategy(config={"region": "x"}, logger=logger)
+            AzureProviderStrategy(
+                config={"region": "x"},
+                logger=logger,
+                provider_instance_name="azure-default",
+            )
 
     def test_not_initialized_returns_error(self, azure_config, logger):
-        s = AzureProviderStrategy(config=azure_config, logger=logger)
+        s = AzureProviderStrategy(config=azure_config, logger=logger, provider_instance_name="azure-default")
         # Do NOT call s.initialize()
         op = ProviderOperation(
             operation_type=ProviderOperationType.HEALTH_CHECK,
@@ -387,7 +391,7 @@ class TestCreateInstances:
         assert result.error_code == "MISSING_TEMPLATE_CONFIG"
 
     def test_dry_run_short_circuits_before_handler(self, azure_config, logger):
-        strategy = AzureProviderStrategy(config=azure_config, logger=logger)
+        strategy = AzureProviderStrategy(config=azure_config, logger=logger, provider_instance_name="azure-default")
         strategy.initialize()
 
         handler = MagicMock()
@@ -426,6 +430,58 @@ class TestCreateInstances:
         assert result.metadata["provider_data"] == {"dry_run": True}
         handler.acquire_hosts.assert_not_called()
 
+    def test_create_instances_preserves_named_provider_instance_on_synthesized_request(
+        self, azure_config, logger
+    ):
+        strategy = AzureProviderStrategy(
+            config=azure_config,
+            logger=logger,
+            provider_instance_name="azure-test",
+        )
+        strategy.initialize()
+
+        def acquire_hosts(request, _template):
+            assert request.provider_instance == "azure-test"
+            return {
+                "success": True,
+                "resource_ids": ["vmss-demo"],
+                "instances": [],
+                "provider_data": {"resource_group": "test-rg"},
+            }
+
+        handler = MagicMock()
+        handler.acquire_hosts.side_effect = acquire_hosts
+        strategy._handlers = {"VMSS": handler}
+
+        op = ProviderOperation(
+            operation_type=ProviderOperationType.CREATE_INSTANCES,
+            parameters={
+                "template_config": {
+                    "template_id": "azure-vmss-test",
+                    "provider_api": "VMSS",
+                    "vm_size": "Standard_D4s_v5",
+                    "resource_group": "test-rg",
+                    "location": "eastus2",
+                    "ssh_public_keys": [
+                        "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQC7 test@host"
+                    ],
+                    "image": {
+                        "publisher": "Canonical",
+                        "offer": "0001-com-ubuntu-server-jammy",
+                        "sku": "22_04-lts-gen2",
+                        "version": "latest",
+                    },
+                },
+                "count": 1,
+                "request_id": "12345678-1234-1234-1234-123456789012",
+            },
+        )
+
+        result = _run(strategy.execute_operation(op))
+
+        assert result.success
+        assert result.data["resource_ids"] == ["vmss-demo"]
+
 
 # ---------------------------------------------------------------------------
 # TERMINATE_INSTANCES (with missing ids → error path)
@@ -443,7 +499,7 @@ class TestTerminateInstances:
         assert result.error_code == "MISSING_INSTANCE_IDS"
 
     def test_fallback_handler_uses_grouped_resource_ids(self, azure_config, logger):
-        strategy = AzureProviderStrategy(config=azure_config, logger=logger)
+        strategy = AzureProviderStrategy(config=azure_config, logger=logger, provider_instance_name="azure-default")
         strategy.initialize()
 
         handler = MagicMock()
@@ -470,7 +526,7 @@ class TestTerminateInstances:
         )
 
     def test_dry_run_short_circuits_before_release(self, azure_config, logger):
-        strategy = AzureProviderStrategy(config=azure_config, logger=logger)
+        strategy = AzureProviderStrategy(config=azure_config, logger=logger, provider_instance_name="azure-default")
         strategy.initialize()
 
         handler = MagicMock()
@@ -493,7 +549,7 @@ class TestTerminateInstances:
         handler.release_hosts.assert_not_called()
 
     def test_terminate_instances_records_pending_vmss_reconciliation(self, azure_config, logger):
-        strategy = AzureProviderStrategy(config=azure_config, logger=logger)
+        strategy = AzureProviderStrategy(config=azure_config, logger=logger, provider_instance_name="azure-default")
         strategy.initialize()
 
         handler = MagicMock()
@@ -535,7 +591,7 @@ class TestTerminateInstances:
     def test_terminate_instances_merges_pending_vmss_reconciliation_for_same_vmss(
         self, azure_config, logger
     ):
-        strategy = AzureProviderStrategy(config=azure_config, logger=logger)
+        strategy = AzureProviderStrategy(config=azure_config, logger=logger, provider_instance_name="azure-default")
         strategy.initialize()
 
         handler = MagicMock()
@@ -603,7 +659,7 @@ class TestTerminateInstances:
         }
 
     def test_terminate_instances_forwards_full_cyclecloud_auth_context(self, azure_config, logger):
-        strategy = AzureProviderStrategy(config=azure_config, logger=logger)
+        strategy = AzureProviderStrategy(config=azure_config, logger=logger, provider_instance_name="azure-default")
         strategy.initialize()
 
         handler = MagicMock()
@@ -703,7 +759,7 @@ class TestGetInstanceStatus:
         assert request.metadata["resource_group"] == "context-rg"
 
     def test_dry_run_short_circuits_status_lookup(self, azure_config, logger):
-        strategy = AzureProviderStrategy(config=azure_config, logger=logger)
+        strategy = AzureProviderStrategy(config=azure_config, logger=logger, provider_instance_name="azure-default")
         strategy.initialize()
 
         op = ProviderOperation(
@@ -720,7 +776,7 @@ class TestGetInstanceStatus:
         assert result.metadata["method"] == "dry_run"
 
     def test_single_vm_provider_api_routes_status_via_handler(self, azure_config, logger):
-        strategy = AzureProviderStrategy(config=azure_config, logger=logger)
+        strategy = AzureProviderStrategy(config=azure_config, logger=logger, provider_instance_name="azure-default")
         strategy.initialize()
 
         handler = MagicMock()
@@ -757,7 +813,7 @@ class TestGetInstanceStatus:
         assert result.data["machines"][0]["instance_id"] == "vm-1"
 
     def test_vmss_provider_api_routes_status_via_handler_with_resource_mapping(self, azure_config, logger):
-        strategy = AzureProviderStrategy(config=azure_config, logger=logger)
+        strategy = AzureProviderStrategy(config=azure_config, logger=logger, provider_instance_name="azure-default")
         strategy.initialize()
 
         handler = MagicMock()
@@ -813,7 +869,7 @@ class TestGetInstanceStatus:
         assert [m["instance_id"] for m in result.data["machines"]] == ["3"]
 
     def test_vmss_resource_mapping_routes_status_via_handler_without_provider_api(self, azure_config, logger):
-        strategy = AzureProviderStrategy(config=azure_config, logger=logger)
+        strategy = AzureProviderStrategy(config=azure_config, logger=logger, provider_instance_name="azure-default")
         strategy.initialize()
 
         handler = MagicMock()
@@ -853,7 +909,7 @@ class TestGetInstanceStatus:
         assert [m["instance_id"] for m in result.data["machines"]] == ["3"]
 
     def test_cyclecloud_status_handler_failure_surfaces_error(self, azure_config, logger):
-        strategy = AzureProviderStrategy(config=azure_config, logger=logger)
+        strategy = AzureProviderStrategy(config=azure_config, logger=logger, provider_instance_name="azure-default")
         strategy.initialize()
 
         handler = MagicMock()
@@ -1030,7 +1086,7 @@ class TestDescribeResourceInstances:
         assert forwarded_request.metadata["cyclecloud_verify_ssl"] is False
 
     def test_dry_run_short_circuits_resource_discovery(self, azure_config, logger):
-        strategy = AzureProviderStrategy(config=azure_config, logger=logger)
+        strategy = AzureProviderStrategy(config=azure_config, logger=logger, provider_instance_name="azure-default")
         strategy.initialize()
 
         handler = MagicMock()
