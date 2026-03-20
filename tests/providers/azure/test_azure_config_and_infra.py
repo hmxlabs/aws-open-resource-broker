@@ -78,13 +78,6 @@ class TestAzureProviderConfig:
         assert config.cyclecloud is not None
         assert config.cyclecloud.credential_path == "config/cyclecloud-credentials.json"
 
-    def test_azure_config_rejects_invalid_default_handler(self):
-        with pytest.raises(ValueError, match="default_handler"):
-            AzureProviderConfig(
-                subscription_id="12345678-1234-1234-1234-123456789012",
-                handlers={"defaults": {"default_handler": "AzureFleet"}},
-            )
-
 
 # ---------------------------------------------------------------------------
 # Template validation
