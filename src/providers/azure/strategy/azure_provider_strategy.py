@@ -1781,6 +1781,7 @@ class AzureProviderStrategy(ProviderStrategy):
                 "vm_size": "Standard_D4s_v5",
                 "resource_group": "my-resource-group",
                 "location": "eastus2",
+                "ssh_key_name": "my-azure-ssh-key",
                 "image": {
                     "publisher": "Canonical",
                     "offer": "0001-com-ubuntu-server-jammy",
@@ -1798,6 +1799,7 @@ class AzureProviderStrategy(ProviderStrategy):
                 "vm_size": "Standard_D4s_v5",
                 "resource_group": "my-resource-group",
                 "location": "eastus2",
+                "ssh_key_name": "my-azure-ssh-key",
                 "priority": "Spot",
                 "eviction_policy": "Deallocate",
                 "billing_profile_max_price": -1.0,

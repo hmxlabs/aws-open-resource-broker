@@ -18,6 +18,7 @@ from providers.azure.infrastructure.services.spot_placement_score_adapter import
     AzureSpotPlacementScoreAdapter,
 )
 from providers.azure.configuration.config import AzureProviderConfig
+from providers.azure.domain.template.azure_template_aggregate import AzureTemplate
 from providers.azure.exceptions.azure_exceptions import CycleCloudConnectionError
 from providers.azure.strategy.azure_provider_strategy import AzureProviderStrategy
 from providers.base.strategy import (
@@ -453,6 +454,13 @@ class TestGetAvailableTemplates:
         assert result.success
         assert isinstance(result.data["templates"], list)
         assert result.data["count"] >= 1
+
+    def test_fallback_templates_validate_as_azure_templates(self, strategy):
+        for template in strategy._get_fallback_templates():
+            validated = AzureTemplate.model_validate(template)
+            assert validated.provider_type == "azure"
+            assert validated.provider_api.value == "VMSS"
+            assert validated.ssh_key_name == "my-azure-ssh-key"
 
 
 # ---------------------------------------------------------------------------
