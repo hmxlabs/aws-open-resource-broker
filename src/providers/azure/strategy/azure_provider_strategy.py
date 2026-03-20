@@ -1206,6 +1206,8 @@ class AzureProviderStrategy(ProviderStrategy):
             "cluster_name",
             "node_array",
             "node_ids",
+            "operation_id",
+            "operation_location",
             "cyclecloud_url",
             "cyclecloud_credential_path",
             "cyclecloud_verify_ssl",

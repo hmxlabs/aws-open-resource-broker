@@ -1149,6 +1149,8 @@ class TestDescribeResourceInstances:
                     "resource_group": "test-rg",
                     "node_array": "execute",
                     "node_ids": ["node-1"],
+                    "operation_id": "op-123",
+                    "operation_location": "https://cc.example.com/operations/op-123",
                     "cyclecloud_url": "https://cc.example.com",
                     "cyclecloud_auth_mode": "bearer",
                     "cyclecloud_aad_scope": "https://cc.example.com/.default",
@@ -1165,6 +1167,11 @@ class TestDescribeResourceInstances:
         assert forwarded_request.metadata["cluster_name"] == "my-cluster"
         assert forwarded_request.metadata["node_array"] == "execute"
         assert forwarded_request.metadata["node_ids"] == ["node-1"]
+        assert forwarded_request.metadata["operation_id"] == "op-123"
+        assert (
+            forwarded_request.metadata["operation_location"]
+            == "https://cc.example.com/operations/op-123"
+        )
         assert forwarded_request.metadata["cyclecloud_url"] == "https://cc.example.com"
         assert forwarded_request.metadata["cyclecloud_auth_mode"] == "bearer"
         assert (
