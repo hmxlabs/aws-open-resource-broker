@@ -22,6 +22,7 @@ def test_create_machine_from_provider_data_preserves_azure_provider_type():
     request.request_id = "req-1"
     request.template_id = "azure-vmss-test"
     request.provider_type = "azure"
+    request.resource_ids = ["vmss-a", "vmss-b"]
 
     machine = handler._create_machine_from_provider_data(
         {

@@ -759,6 +759,7 @@ class GetRequestHandler(BaseQueryHandler[GetRequestQuery, RequestDTO]):
             machine_data = dict(provider_instance)
         else:
             # Provider strategy format (typically PascalCase) - convert to snake_case
+            provider_data = dict(provider_instance.get("provider_data", {}) or {})
             machine_data = {
                 "instance_id": provider_instance.get("InstanceId"),
                 "status": provider_instance.get("State", {}).get("Name")
@@ -771,6 +772,7 @@ class GetRequestHandler(BaseQueryHandler[GetRequestQuery, RequestDTO]):
                 "launch_time": provider_instance.get("LaunchTime"),
                 "subnet_id": provider_instance.get("SubnetId"),
                 "security_group_ids": provider_instance.get("SecurityGroups", []),
+                "provider_data": provider_data,
                 "tags": {
                     "tags": {
                         tag.get("Key", ""): tag.get("Value", "")

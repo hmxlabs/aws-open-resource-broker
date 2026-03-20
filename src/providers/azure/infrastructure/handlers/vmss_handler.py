@@ -770,6 +770,7 @@ class VMSSHandler(AzureHandler):
             "availability_zone": availability_zone,
             "provider_type": "azure",
             "provider_data": {
+                "resource_id": vmss_name,
                 "vmss_name": vmss_name,
                 "resource_group": resource_group,
                 "vmss_instance_id": instance_id,

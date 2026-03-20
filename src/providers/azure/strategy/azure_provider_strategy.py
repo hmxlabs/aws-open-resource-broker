@@ -1462,6 +1462,7 @@ class AzureProviderStrategy(ProviderStrategy):
                     "InstanceType": inst.get("instance_type"),
                     "SubnetId": inst.get("subnet_id"),
                     "VpcId": inst.get("vpc_id"),
+                    "provider_data": provider_data,
                 })
 
             metadata: dict[str, Any] = {

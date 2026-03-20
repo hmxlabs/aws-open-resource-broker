@@ -836,6 +836,7 @@ class CycleCloudHandler(AzureHandler):
                 "availability_zone": None,
                 "provider_type": "azure",
                 "provider_data": {
+                    "resource_id": cluster_name,
                     "cluster_name": cluster_name,
                     "node_array": node_na,
                     "node_id": node_id,

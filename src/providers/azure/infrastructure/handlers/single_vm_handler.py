@@ -316,6 +316,7 @@ class SingleVMHandler(AzureHandler):
                     "availability_zone": (getattr(vm, "zones", None) or [None])[0],
                     "provider_type": "azure",
                     "provider_data": {
+                        "resource_id": getattr(vm, "name", vm_name),
                         "vm_name": getattr(vm, "name", vm_name),
                         "vm_id": getattr(vm, "vm_id", None),
                         "resource_group": resource_group,

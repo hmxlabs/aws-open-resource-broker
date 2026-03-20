@@ -419,6 +419,7 @@ class CreateMachineRequestHandler(BaseCommandHandler[CreateRequestCommand, str])
             except ValueError:
                 launch_time = None
         self.logger.debug("Creating machine aggregate instance_data: [%s]", instance_data)
+        provider_data = dict(instance_data.get("provider_data", {}) or {})
         return Machine(
             instance_id=InstanceId(value=instance_data["instance_id"]),
             request_id=str(request.request_id),
@@ -431,6 +432,7 @@ class CreateMachineRequestHandler(BaseCommandHandler[CreateRequestCommand, str])
             public_ip=instance_data.get("public_ip"),
             launch_time=launch_time,
             metadata=instance_data.get("metadata", {}),
+            provider_data=provider_data,
         )
 
     @staticmethod
@@ -760,6 +762,10 @@ class CreateReturnRequestHandler(BaseCommandHandler[CreateReturnRequestCommand, 
                     # Get the machine from database
                     machine = uow.machines.find_by_id(machine_id)
                     if machine and machine.request_id:
+                        provider_data = getattr(machine, "provider_data", {}) or {}
+                        provider_type = str(getattr(machine, "provider_type", "") or "").lower()
+                        resource_id = provider_data.get("resource_id")
+
                         # Get the request from database
                         from domain.request.value_objects import RequestId
 
@@ -767,8 +773,18 @@ class CreateReturnRequestHandler(BaseCommandHandler[CreateReturnRequestCommand, 
                         request = uow.requests.get_by_id(request_id)
 
                         if request:
-                            # Get first resource_id from the request
-                            if request.resource_ids:
+                            if resource_id not in (None, ""):
+                                self.logger.debug(
+                                    "Found machine-level resource_id %s for instance %s",
+                                    resource_id,
+                                    machine_id,
+                                )
+                            elif provider_type == "azure":
+                                self.logger.error(
+                                    "Azure machine %s is missing provider_data.resource_id",
+                                    machine_id,
+                                )
+                            elif request.resource_ids:
                                 resource_id = request.resource_ids[0]
                                 self.logger.debug(
                                     "Found resource_id %s for instance %s via request %s",
