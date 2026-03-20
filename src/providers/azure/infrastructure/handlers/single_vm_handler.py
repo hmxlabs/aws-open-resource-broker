@@ -575,6 +575,20 @@ class SingleVMHandler(AzureHandler):
                 disk.to_arm_dict() for disk in template.data_disks
             ]
 
+        if template.disk_encryption_set_id:
+            os_disk_managed = params["properties"]["storageProfile"].get("osDisk", {}).get("managedDisk")
+            if isinstance(os_disk_managed, dict):
+                os_disk_managed["diskEncryptionSet"] = {
+                    "id": template.disk_encryption_set_id,
+                }
+
+            for data_disk in params["properties"]["storageProfile"].get("dataDisks", []):
+                managed_disk = data_disk.get("managedDisk")
+                if isinstance(managed_disk, dict):
+                    managed_disk["diskEncryptionSet"] = {
+                        "id": template.disk_encryption_set_id,
+                    }
+
         # SSH keys
         if template.ssh_public_keys:
             params["properties"]["osProfile"]["linuxConfiguration"] = {

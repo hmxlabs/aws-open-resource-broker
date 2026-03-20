@@ -238,6 +238,40 @@ def test_single_vm_falls_back_to_alternate_vm_size():
     assert result["provider_data"]["submitted_vms"][0]["selected_vm_size"] == "Standard_D8s_v5"
 
 
+def test_single_vm_build_vm_params_applies_disk_encryption_set_to_os_and_data_disks():
+    template = AzureTemplate(
+        template_id="azure-singlevm-test",
+        provider_api="SingleVM",
+        vm_size="Standard_D4s_v5",
+        resource_group="test-rg",
+        location="eastus2",
+        network_config={"subnet_id": "/subscriptions/.../subnets/default"},
+        ssh_public_keys=["ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQC7 test@host"],
+        image={
+            "publisher": "Canonical",
+            "offer": "0001-com-ubuntu-server-jammy",
+            "sku": "22_04-lts-gen2",
+            "version": "latest",
+        },
+        disk_encryption_set_id="/subscriptions/sub/resourceGroups/rg/providers/Microsoft.Compute/diskEncryptionSets/des-1",
+        data_disks=[{"lun": 0, "disk_size_gb": 128}],
+    )
+
+    params = SingleVMHandler._build_vm_params(
+        template=template,
+        vm_name="vm-test",
+        nic_id="/subscriptions/.../networkInterfaces/nic-vm-test",
+    )
+    storage_profile = params["properties"]["storageProfile"]
+
+    assert storage_profile["osDisk"]["managedDisk"]["diskEncryptionSet"] == {
+        "id": "/subscriptions/sub/resourceGroups/rg/providers/Microsoft.Compute/diskEncryptionSets/des-1"
+    }
+    assert storage_profile["dataDisks"][0]["managedDisk"]["diskEncryptionSet"] == {
+        "id": "/subscriptions/sub/resourceGroups/rg/providers/Microsoft.Compute/diskEncryptionSets/des-1"
+    }
+
+
 def test_vmss_instance_status_includes_structured_provisioning_errors():
     azure_client = MagicMock()
     logger = MagicMock()

@@ -316,6 +316,22 @@ class TestArmPayload:
         arm = t.to_azure_api_format()
         assert arm["identity"]["type"] == "SystemAssigned, UserAssigned"
 
+    def test_disk_encryption_set_is_applied_to_vmss_os_and_data_disks(self):
+        t = AzureTemplate(
+            **_BASE_FIELDS,
+            disk_encryption_set_id="/subscriptions/sub/resourceGroups/rg/providers/Microsoft.Compute/diskEncryptionSets/des-1",
+            data_disks=[{"lun": 0, "disk_size_gb": 256}],
+        )
+        arm = t.to_azure_api_format()
+        storage_profile = arm["properties"]["virtualMachineProfile"]["storageProfile"]
+
+        assert storage_profile["osDisk"]["managedDisk"]["diskEncryptionSet"] == {
+            "id": "/subscriptions/sub/resourceGroups/rg/providers/Microsoft.Compute/diskEncryptionSets/des-1"
+        }
+        assert storage_profile["dataDisks"][0]["managedDisk"]["diskEncryptionSet"] == {
+            "id": "/subscriptions/sub/resourceGroups/rg/providers/Microsoft.Compute/diskEncryptionSets/des-1"
+        }
+
 
 # ---------------------------------------------------------------------------
 # Value objects

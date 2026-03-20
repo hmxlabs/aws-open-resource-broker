@@ -649,6 +649,20 @@ class AzureTemplate(Template):
         if self.data_disks:
             storage_profile["dataDisks"] = [d.to_arm_dict() for d in self.data_disks]
 
+        if self.disk_encryption_set_id:
+            os_disk_managed = storage_profile.get("osDisk", {}).get("managedDisk")
+            if isinstance(os_disk_managed, dict):
+                os_disk_managed["diskEncryptionSet"] = {
+                    "id": self.disk_encryption_set_id,
+                }
+
+            for data_disk in storage_profile.get("dataDisks", []):
+                managed_disk = data_disk.get("managedDisk")
+                if isinstance(managed_disk, dict):
+                    managed_disk["diskEncryptionSet"] = {
+                        "id": self.disk_encryption_set_id,
+                    }
+
         vm_profile["storageProfile"] = storage_profile
 
         # Network profile
