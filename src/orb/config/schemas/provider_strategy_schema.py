@@ -283,10 +283,6 @@ class ProviderConfig(BaseModel):
         if len(provider_names) != len(set(provider_names)):
             raise ValueError("Provider names must be unique")
 
-        # Validate at least one provider is configured
-        if not self.providers:
-            raise ValueError("At least one provider must be configured")
-
         return self
 
     def get_mode(self) -> ProviderMode:

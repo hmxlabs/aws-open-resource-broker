@@ -67,6 +67,8 @@ _KNOWN_VIOLATIONS: frozenset[tuple[str, str]] = frozenset(
             "orb.providers.aws.utilities.ec2.instances",
         ),
         ("config/schemas/cleanup_schema.py", "orb.providers.aws.configuration.cleanup_config"),
+        # loader collects strategy-contributed defaults at load time — intentional bootstrap wiring
+        ("config/loader.py", "orb.providers.registry"),
     }
 )
 

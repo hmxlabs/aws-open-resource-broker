@@ -22,3 +22,7 @@ class BaseProviderStrategy(ProviderPort, ABC):
     def get_provider_info(self) -> dict[str, Any]:
         """Get provider information."""
         return {"type": self.__class__.__name__, "config": self.config}
+
+    @classmethod
+    def get_defaults_config(cls) -> dict:
+        return {}

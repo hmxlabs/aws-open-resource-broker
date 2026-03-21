@@ -116,6 +116,28 @@ class SchedulerRegistry(BaseRegistry):
             type_name, strategy_factory, config_factory, strategy_class=strategy_class
         )
 
+    @staticmethod
+    def _deep_merge(base: dict, update: dict) -> None:
+        """Recursively merge update into base; arrays are replaced wholesale."""
+        for key, value in update.items():
+            if key in base and isinstance(base[key], dict) and isinstance(value, dict):
+                SchedulerRegistry._deep_merge(base[key], value)
+            else:
+                base[key] = value
+
+    def collect_defaults(self) -> dict:
+        """Collect and merge defaults contributed by all registered scheduler strategies."""
+        merged: dict = {}
+        for reg in self._type_registrations.values():
+            if isinstance(reg, SchedulerRegistration) and reg.strategy_class is not None:
+                try:
+                    defaults = reg.strategy_class.get_defaults_config()
+                    if defaults:
+                        self._deep_merge(merged, defaults)
+                except Exception:
+                    pass
+        return merged
+
 
 # Global singleton instance
 _scheduler_registry_instance: SchedulerRegistry | None = None
