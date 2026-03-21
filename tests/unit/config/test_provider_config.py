@@ -648,15 +648,15 @@ class TestProviderConfig:
             )
 
     def test_empty_configuration_validation(self):
-        """Test validation with empty configuration."""
-        with pytest.raises(ValueError, match="At least one provider must be configured"):
-            ProviderConfig(
-                selection_policy="FIRST_AVAILABLE",
-                active_provider=None,
-                default_provider_type=None,
-                default_provider_instance=None,
-                health_check_interval=300,
-            )
+        """Test validation with empty configuration — empty providers is valid (defaults come from strategy)."""
+        config = ProviderConfig(
+            selection_policy="FIRST_AVAILABLE",
+            active_provider=None,
+            default_provider_type=None,
+            default_provider_instance=None,
+            health_check_interval=300,
+        )
+        assert config.providers == []
 
 
 class TestAWSProviderConfigBaseSettings:

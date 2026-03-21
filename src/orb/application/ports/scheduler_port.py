@@ -125,3 +125,7 @@ class SchedulerPort(ABC):
     @abstractmethod
     def format_storage_test_response(self, raw: dict[str, Any]) -> dict[str, Any]:
         """Format storage test result dict for CLI display."""
+
+    @classmethod
+    def get_defaults_config(cls) -> dict:
+        return {}

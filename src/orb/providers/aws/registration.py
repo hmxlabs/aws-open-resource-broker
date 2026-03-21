@@ -216,6 +216,8 @@ def register_aws_provider(
         registry = get_provider_registry()
 
     try:
+        from orb.providers.aws.strategy.aws_provider_strategy import AWSProviderStrategy
+
         if instance_name:
             # Register as named instance
             registry.register_provider_instance(
@@ -234,6 +236,7 @@ def register_aws_provider(
                 config_factory=create_aws_config,
                 resolver_factory=create_aws_resolver,
                 validator_factory=create_aws_validator,
+                strategy_class=AWSProviderStrategy,
             )
 
         # Register AWS template store
@@ -310,12 +313,15 @@ def register_aws_provider_instance(provider_instance, logger=None) -> bool:
 
         # Register AWS as provider type if not already registered
         if not registry.is_provider_registered("aws"):
+            from orb.providers.aws.strategy.aws_provider_strategy import AWSProviderStrategy
+
             registry.register_provider(
                 provider_type="aws",
                 strategy_factory=create_aws_strategy,
                 config_factory=create_aws_config,
                 resolver_factory=create_aws_resolver,
                 validator_factory=create_aws_validator,
+                strategy_class=AWSProviderStrategy,
             )
 
         # Register the specific provider instance

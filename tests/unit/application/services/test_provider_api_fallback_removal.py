@@ -155,50 +155,38 @@ class TestMachineGroupingServiceSkipsMissingProviderApi:
         uow.machines.find_by_id.side_effect = lambda mid: machines_by_id.get(mid)
         self.uow_factory.create_unit_of_work.return_value = uow
 
-    def test_machine_with_no_provider_api_is_skipped(self):
+    def test_machine_with_no_provider_api_raises(self):
         m1 = self._make_machine("i-aaa", "aws-prod", "RunInstances", "asg-1")
         m2 = self._make_machine("i-bbb", "aws-prod", None, "asg-1")  # no provider_api
 
         self._setup_uow({"i-aaa": m1, "i-bbb": m2})
 
-        result = self.svc.group_by_resource(["i-aaa", "i-bbb"])
+        with pytest.raises(ValueError, match="no provider_api"):
+            self.svc.group_by_resource(["i-aaa", "i-bbb"])
 
-        # i-bbb must be absent from the result
-        all_machines = [m for machines in result.values() for m in machines]
-        machine_ids = [m.machine_id.value for m in all_machines]
-        assert "i-bbb" not in machine_ids
-
-    def test_machine_with_no_provider_api_triggers_warning_log(self):
+    def test_machine_with_no_provider_api_raises_single(self):
         m = self._make_machine("i-bbb", "aws-prod", None, "asg-1")
         self._setup_uow({"i-bbb": m})
 
-        self.svc.group_by_resource(["i-bbb"])
+        with pytest.raises(ValueError, match="no provider_api"):
+            self.svc.group_by_resource(["i-bbb"])
 
-        # A warning must have been logged
-        assert self.logger.warning.called
-
-    def test_machine_with_no_provider_api_does_not_raise(self):
+    def test_machine_with_no_provider_api_raises_on_single(self):
         m = self._make_machine("i-bbb", "aws-prod", None, "asg-1")
         self._setup_uow({"i-bbb": m})
 
-        # Must not raise — legacy rows should be skipped gracefully
-        result = self.svc.group_by_resource(["i-bbb"])
-        assert isinstance(result, dict)
+        with pytest.raises(ValueError, match="no provider_api"):
+            self.svc.group_by_resource(["i-bbb"])
 
-    def test_valid_machines_still_grouped_when_some_skipped(self):
+    def test_mixed_machines_raise_on_missing_provider_api(self):
         m1 = self._make_machine("i-aaa", "aws-prod", "RunInstances", "asg-1")
         m2 = self._make_machine("i-bbb", "aws-prod", None, "asg-1")
         m3 = self._make_machine("i-ccc", "aws-prod", "EC2Fleet", "fleet-1")
 
         self._setup_uow({"i-aaa": m1, "i-bbb": m2, "i-ccc": m3})
 
-        result = self.svc.group_by_resource(["i-aaa", "i-bbb", "i-ccc"])
-
-        all_machines = [m for machines in result.values() for m in machines]
-        machine_ids = {m.machine_id.value for m in all_machines}
-        assert "i-aaa" in machine_ids
-        assert "i-ccc" in machine_ids
-        assert "i-bbb" not in machine_ids
+        with pytest.raises(ValueError, match="no provider_api"):
+            self.svc.group_by_resource(["i-aaa", "i-bbb", "i-ccc"])
 
 
 # ---------------------------------------------------------------------------
