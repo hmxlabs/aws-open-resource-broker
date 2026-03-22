@@ -4,24 +4,7 @@
     "type": "default"
   },
   "provider": {
-    "providers": [
-      {
-        "name": "aws-default",
-        "type": "aws",
-        "enabled": true,
-        "config": {
-          "region": "us-east-1",
-          "profile": "default",
-          "storage": {
-            "dynamodb": {
-              "region": "us-east-1",
-              "profile": "default",
-              "table_prefix": "hostfactory"
-            }
-          }
-        }
-      }
-    ],
+    "providers": [],
     "selection_policy": "FIRST_AVAILABLE",
     "default_provider_type": "aws",
     "health_check_interval": 60,
@@ -31,95 +14,7 @@
       "recovery_timeout": 60,
       "half_open_max_calls": 3
     },
-    "provider_defaults": {
-      "aws": {
-        "handlers": {
-          "EC2Fleet": {
-            "handler_class": "EC2FleetHandler",
-            "supported_fleet_types": [
-              "instant",
-              "request",
-              "maintain"
-            ],
-            "default_fleet_type": "instant",
-            "supports_spot": true,
-            "supports_ondemand": true
-          },
-          "SpotFleet": {
-            "handler_class": "SpotFleetHandler",
-            "supported_fleet_types": [
-              "request",
-              "maintain"
-            ],
-            "default_fleet_type": "request",
-            "supports_spot": true,
-            "supports_ondemand": true
-          },
-          "ASG": {
-            "handler_class": "ASGHandler",
-            "supports_spot": true,
-            "supports_ondemand": true,
-            "max_instances": 10000
-          },
-          "RunInstances": {
-            "handler_class": "RunInstancesHandler",
-            "supports_spot": false,
-            "supports_ondemand": true
-          }
-        },
-        "template_defaults": {
-          "image_id": "/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-6.1-x86_64",
-          "instance_type": "t2.micro",
-          "security_group_ids": [
-            "sg-12345678"
-          ],
-          "subnet_ids": [
-            "subnet-12345678"
-          ],
-          "key_name": "",
-          "provider_api": "EC2Fleet",
-          "price_type": "ondemand",
-          "tags": {
-            "Environment": "development",
-            "Project": "hostfactory"
-          }
-        },
-        "launch_template": {
-          "create_per_request": true,
-          "naming_strategy": "request_based",
-          "version_strategy": "incremental",
-          "reuse_existing": true,
-          "cleanup_old_versions": false,
-          "max_versions_per_template": 10
-        },
-        "extensions": {
-          "ami_resolution": {
-            "enabled": true,
-            "fallback_on_failure": true
-          },
-          "native_spec": {
-            "spec_file_base_path": "config/specs/aws"
-          },
-          "allocation_strategy": "capacityOptimized",
-          "allocation_strategy_on_demand": "lowestPrice",
-          "volume_type": "gp3",
-          "spot_fleet_request_expiry": 30,
-          "percent_on_demand": 0,
-          "root_device_volume_size": 20
-        },
-        "cleanup": {
-          "enabled": true,
-          "delete_launch_template": true,
-          "dry_run": false,
-          "resources": {
-            "asg": true,
-            "ec2_fleet": true,
-            "spot_fleet": true,
-            "run_instances": true
-          }
-        }
-      }
-    }
+    "provider_defaults": {}
   },
   "native_spec": {
     "enabled": true,
@@ -181,13 +76,8 @@
       "spot_fleet": "^sfr-[a-f0-9]+$",
       "ec2_fleet": "^fleet-[a-f0-9]+$",
       "asg": "^[a-zA-Z0-9_-]+$",
-      "ami_id": "^ami-[a-f0-9]{8,17}$",
-      "subnet": "^subnet-[a-f0-9]{8,17}$",
-      "security_group": "^sg-[a-f0-9]{8,17}$",
       "instance_type": "^[a-z][0-9][a-z]?\\.[a-z0-9]+$",
       "region": "^[a-z]{2}-[a-z]+-\\d$",
-      "account_id": "^\\d{12}$",
-      "launch_template": "^lt-[a-f0-9]{8,17}$",
       "request_id": "^(req|ret)-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
     },
     "prefixes": {
@@ -226,11 +116,6 @@
     "default_grace_period": 300,
     "max_machines_per_request": 100
   },
-  "database": {
-    "connection_timeout": 30,
-    "query_timeout": 60,
-    "max_connections": 10
-  },
   "environment": "development",
   "debug": false,
   "performance": {
@@ -242,24 +127,8 @@
       "preload_critical": []
     },
     "enable_batching": true,
-    "batch_sizes": {
-      "terminate_instances": 25,
-      "create_tags": 20,
-      "describe_instances": 25,
-      "run_instances": 10,
-      "describe_spot_fleet_instances": 20,
-      "describe_auto_scaling_groups": 20,
-      "describe_launch_templates": 20,
-      "describe_spot_fleet_requests": 20,
-      "describe_ec2_fleet_instances": 20,
-      "describe_images": 15,
-      "describe_security_groups": 25,
-      "describe_subnets": 25
-    },
     "enable_parallel": true,
     "max_workers": 10,
-    "enable_caching": false,
-    "cache_ttl": 300,
     "enable_adaptive_batch_sizing": true,
     "adaptive_batch_sizing": {
       "initial_batch_size": 10,
@@ -314,7 +183,9 @@
           "requests": "requests.json",
           "machines": "machines.json"
         }
-      }
+      },
+      "backup_enabled": true,
+      "backup_count": 5
     },
     "sql_strategy": {
       "type": "sqlite",
@@ -324,6 +195,11 @@
       "pool_size": 5,
       "max_overflow": 10,
       "timeout": 30
+    },
+    "database": {
+      "connection_timeout": 30,
+      "query_timeout": 60,
+      "max_connections": 10
     }
   },
   "server": {
@@ -343,22 +219,6 @@
         "secret_key": "your-secret-key-change-in-production",
         "algorithm": "HS256",
         "token_expiry": 3600
-      },
-      "provider_auth": {
-        "iam": {
-          "region": "us-east-1",
-          "profile": null,
-          "required_actions": [
-            "ec2:DescribeInstances",
-            "ec2:RunInstances",
-            "ec2:TerminateInstances"
-          ]
-        },
-        "cognito": {
-          "user_pool_id": "us-east-1_XXXXXXXXX",
-          "client_id": "your-cognito-client-id",
-          "region": "us-east-1"
-        }
       }
     },
     "cors": {
@@ -389,8 +249,6 @@
     "recovery_timeout": 60,
     "half_open_max_calls": 3
   },
-  "request_timeout": 300,
-  "max_machines_per_request": 100,
   "resource": {
     "prefixes": {
       "default": "",

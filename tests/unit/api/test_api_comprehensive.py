@@ -132,7 +132,7 @@ class TestRequestStatusOrchestratorBehaviour:
 
         orchestrator = self._make_orchestrator(query_bus)
         result = await orchestrator.execute(
-            GetRequestStatusInput(request_ids=["req-1"], all_requests=False, detailed=False)
+            GetRequestStatusInput(request_ids=["req-1"], all_requests=False, verbose=False)
         )
 
         query_bus.execute.assert_awaited_once()
@@ -150,7 +150,7 @@ class TestRequestStatusOrchestratorBehaviour:
 
         orchestrator = self._make_orchestrator(query_bus)
         result = await orchestrator.execute(
-            GetRequestStatusInput(request_ids=[], all_requests=True, detailed=False)
+            GetRequestStatusInput(request_ids=[], all_requests=True, verbose=False)
         )
 
         query_bus.execute.assert_awaited_once()
@@ -158,7 +158,7 @@ class TestRequestStatusOrchestratorBehaviour:
         assert len(result.requests) == 1
 
     @pytest.mark.asyncio
-    async def test_detailed_flag_sets_long_on_query(self):
+    async def test_detailed_flag_sets_verbose_on_query(self):
         from orb.application.services.orchestration.dtos import GetRequestStatusInput
 
         query_bus = Mock()
@@ -166,12 +166,12 @@ class TestRequestStatusOrchestratorBehaviour:
 
         orchestrator = self._make_orchestrator(query_bus)
         await orchestrator.execute(
-            GetRequestStatusInput(request_ids=["req-3"], all_requests=False, detailed=True)
+            GetRequestStatusInput(request_ids=["req-3"], all_requests=False, verbose=True)
         )
 
         executed_query = query_bus.execute.call_args.args[0]
         assert isinstance(executed_query, GetRequestQuery)
-        assert executed_query.long is True
+        assert executed_query.verbose is True
 
 
 @pytest.mark.unit
@@ -284,9 +284,7 @@ class TestAPIModelsComprehensive:
                     if instance:
                         # Test serialization methods
                         serialization_methods = [
-                            "dict",
                             "model_dump",
-                            "json",
                             "model_dump_json",
                         ]
 

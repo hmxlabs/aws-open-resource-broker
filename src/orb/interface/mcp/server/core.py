@@ -56,7 +56,14 @@ class OpenResourceBrokerMCPServer:
 
     def _register_core_tools(self) -> None:
         """Register core MCP tools from CLI handlers."""
+        from orb.interface.machine_command_handlers import (
+            handle_get_machine_status,
+            handle_list_machines,
+            handle_start_machines,
+            handle_stop_machines,
+        )
         from orb.interface.request_command_handlers import (
+            handle_cancel_request,
             handle_get_request_status,
             handle_get_return_requests,
             handle_list_requests,
@@ -92,6 +99,13 @@ class OpenResourceBrokerMCPServer:
         self.tools["request_machines"] = handle_request_machines
         self.tools["list_return_requests"] = handle_get_return_requests
         self.tools["return_machines"] = handle_request_return_machines
+        self.tools["cancel_request"] = handle_cancel_request
+
+        # Machine tools
+        self.tools["list_machines"] = handle_list_machines
+        self.tools["get_machine_status"] = handle_get_machine_status
+        self.tools["stop_machines"] = handle_stop_machines
+        self.tools["start_machines"] = handle_start_machines
 
     def _register_core_resources(self) -> None:
         """Register core MCP resources."""
@@ -253,7 +267,7 @@ class OpenResourceBrokerMCPServer:
                 "inputSchema": {
                     "type": "object",
                     "properties": self._get_tool_schema(tool_name),
-                    "required": [],
+                    "required": self._TOOL_SCHEMAS.get(tool_name, {}).get("required", []),
                 },
             }
             tools_list.append(tool_def)
@@ -274,6 +288,8 @@ class OpenResourceBrokerMCPServer:
         # Call the tool function
         tool_func = self.tools[tool_name]
         result = await tool_func(args)
+        if hasattr(result, "data"):
+            result = result.data
 
         return {"content": [{"type": "text", "text": json.dumps(result, indent=2, default=str)}]}
 
@@ -369,46 +385,134 @@ class OpenResourceBrokerMCPServer:
             "messages": [{"role": "user", "content": {"type": "text", "text": content}}],
         }
 
-    def _get_tool_schema(self, tool_name: str) -> dict[str, Any]:
-        """Get JSON schema for tool parameters."""
-        # Basic schema - could be improved with actual parameter introspection
-        common_props = {
-            "template_id": {"type": "string", "description": "Template identifier"},
-            "request_id": {"type": "string", "description": "Request identifier"},
-            "count": {"type": "integer", "description": "Number of instances"},
-            "provider": {"type": "string", "description": "Provider name"},
-        }
+    _TOOL_SCHEMAS: dict[str, dict[str, Any]] = {
+        "check_provider_health": {"properties": {}, "required": []},
+        "list_providers": {"properties": {}, "required": []},
+        "get_provider_config": {"properties": {}, "required": []},
+        "get_provider_metrics": {
+            "properties": {"provider": {"type": "string"}},
+            "required": [],
+        },
+        "list_templates": {
+            "properties": {
+                "provider_name": {"type": "string"},
+                "active_only": {"type": "boolean"},
+                "limit": {"type": "integer"},
+                "offset": {"type": "integer"},
+                "provider_api": {"type": "string"},
+            },
+            "required": [],
+        },
+        "get_template": {
+            "properties": {"template_id": {"type": "string"}},
+            "required": ["template_id"],
+        },
+        "validate_template": {
+            "properties": {
+                "template_id": {"type": "string"},
+                "file": {"type": "string"},
+                "all": {"type": "boolean"},
+            },
+            "required": [],
+        },
+        "get_request_status": {
+            "properties": {
+                "request_id": {"type": "string"},
+                "all": {"type": "boolean"},
+                "verbose": {"type": "boolean"},
+            },
+            "required": [],
+        },
+        "list_requests": {
+            "properties": {
+                "status": {"type": "string"},
+                "limit": {"type": "integer"},
+                "offset": {"type": "integer"},
+            },
+            "required": [],
+        },
+        "request_machines": {
+            "properties": {
+                "template_id": {"type": "string"},
+                "machine_count": {"type": "integer"},
+            },
+            "required": ["template_id", "machine_count"],
+        },
+        "list_return_requests": {"properties": {}, "required": []},
+        "return_machines": {
+            "properties": {
+                "machine_ids": {"type": "array", "items": {"type": "string"}},
+                "all": {"type": "boolean"},
+                "force": {"type": "boolean"},
+            },
+            "required": [],
+        },
+        "cancel_request": {
+            "properties": {
+                "request_id": {"type": "string"},
+                "reason": {"type": "string"},
+            },
+            "required": ["request_id"],
+        },
+        "list_machines": {
+            "properties": {
+                "status": {"type": "string"},
+                "limit": {"type": "integer"},
+                "offset": {"type": "integer"},
+                "request_id": {"type": "string"},
+            },
+            "required": [],
+        },
+        "get_machine_status": {
+            "properties": {"machine_id": {"type": "string"}},
+            "required": ["machine_id"],
+        },
+        "stop_machines": {
+            "properties": {
+                "machine_ids": {"type": "array", "items": {"type": "string"}},
+                "all": {"type": "boolean"},
+                "force": {"type": "boolean"},
+            },
+            "required": [],
+        },
+        "start_machines": {
+            "properties": {
+                "machine_ids": {"type": "array", "items": {"type": "string"}},
+                "all": {"type": "boolean"},
+            },
+            "required": [],
+        },
+    }
 
-        if "template" in tool_name:
-            return {"template_id": common_props["template_id"]}
-        elif "machine" in tool_name:
-            return {
-                "template_id": common_props["template_id"],
-                "count": common_props["count"],
-            }
-        elif "request" in tool_name:
-            return {"request_id": common_props["request_id"]}
-        else:
-            return {"provider": common_props["provider"]}
+    def _get_tool_schema(self, tool_name: str) -> dict[str, Any]:
+        """Get JSON schema properties for tool parameters."""
+        return self._TOOL_SCHEMAS.get(tool_name, {}).get("properties", {})
+
+    @staticmethod
+    def _unwrap_result(result: Any) -> dict[str, Any]:
+        """Unwrap an InterfaceResponse or plain dict for JSON serialisation."""
+        if hasattr(result, "data"):
+            return result.data  # type: ignore[no-any-return]
+        return result  # type: ignore[return-value]
 
     async def _get_templates_resource(self, uri: str) -> dict[str, Any]:
         """Get templates resource data."""
         # Use the list_templates tool to get data
         args = type("Args", (), {})()
         result = await self.tools["list_templates"](args)
-        return result
+        return self._unwrap_result(result)
 
     async def _get_requests_resource(self, uri: str) -> dict[str, Any]:
         """Get requests resource data."""
         args = type("Args", (), {})()
         result = await self.tools["list_requests"](args)
-        return result
+        return self._unwrap_result(result)
 
     async def _get_machines_resource(self, uri: str) -> dict[str, Any]:
         """Get machines resource data."""
         args = type("Args", (), {})()
         result = await self.tools["list_machines"](args)
-        return result
+        return self._unwrap_result(result)
 
     async def _get_providers_resource(self, uri: str) -> dict[str, Any]:
         """Get providers resource data."""

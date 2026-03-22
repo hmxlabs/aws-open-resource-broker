@@ -237,6 +237,7 @@ class ProviderRegistry(BaseRegistry, ProviderRegistryPort):
         config_factory: Callable,
         resolver_factory: Optional[Callable] = None,
         validator_factory: Optional[Callable] = None,
+        strategy_class: Optional[type] = None,
         **kwargs: Any,
     ) -> None:
         """Register provider type - implements abstract method."""
@@ -247,6 +248,7 @@ class ProviderRegistry(BaseRegistry, ProviderRegistryPort):
                 config_factory,
                 resolver_factory=resolver_factory,
                 validator_factory=validator_factory,
+                strategy_class=strategy_class,
             )
         except ValueError as e:
             raise ConfigurationError(str(e))
@@ -258,6 +260,7 @@ class ProviderRegistry(BaseRegistry, ProviderRegistryPort):
         config_factory: Callable,
         resolver_factory: Optional[Callable] = None,
         validator_factory: Optional[Callable] = None,
+        strategy_class: Optional[type] = None,
     ) -> None:
         """
         Register a provider with its factory functions - backward compatibility method.
@@ -278,6 +281,7 @@ class ProviderRegistry(BaseRegistry, ProviderRegistryPort):
             config_factory,
             resolver_factory,
             validator_factory,
+            strategy_class=strategy_class,
         )
 
     def register_provider_instance(
@@ -848,7 +852,32 @@ class ProviderRegistry(BaseRegistry, ProviderRegistryPort):
             config_factory,
             additional_factories.get("resolver_factory"),
             additional_factories.get("validator_factory"),
+            strategy_class=additional_factories.get("strategy_class"),
         )
+
+    @staticmethod
+    def _deep_merge(base: dict, update: dict) -> None:
+        """Recursively merge update into base; arrays are replaced wholesale."""
+        for key, value in update.items():
+            if key in base and isinstance(base[key], dict) and isinstance(value, dict):
+                ProviderRegistry._deep_merge(base[key], value)
+            else:
+                base[key] = value
+
+    def collect_defaults(self) -> dict:
+        """Collect and merge defaults contributed by all registered provider strategies."""
+        merged: dict = {}
+        for reg in self._type_registrations.values():
+            if isinstance(reg, ProviderRegistration) and reg.strategy_class is not None:
+                try:
+                    defaults = reg.strategy_class.get_defaults_config()
+                    if defaults:
+                        self._deep_merge(merged, defaults)
+                except Exception as e:
+                    self._logger.warning(
+                        "Failed to collect defaults from %s: %s", reg.strategy_class, e
+                    )
+        return merged
 
 
 # Global registry instance

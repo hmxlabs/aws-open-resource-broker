@@ -48,13 +48,29 @@ class TestStubHandlers:
         assert result.get("error") == "Not implemented"
 
     @pytest.mark.asyncio
-    async def test_handle_reload_provider_config_returns_not_implemented(self):
+    async def test_handle_reload_provider_config_returns_interface_response(self):
+        from orb.application.dto.interface_response import InterfaceResponse
+        from orb.application.services.provider_registry_service import ProviderRegistryService
+        from orb.interface.response_formatting_service import ResponseFormattingService
         from orb.interface.system_command_handlers import handle_reload_provider_config
 
-        result = await handle_reload_provider_config(_ns())
+        mock_formatter = MagicMock(spec=ResponseFormattingService)
+        mock_formatter.format_error.return_value = InterfaceResponse(
+            data={"success": False, "error": "Reload not supported by current provider registry"},
+            exit_code=1,
+        )
+        mock_registry = MagicMock(spec=ProviderRegistryService)
+        mock_container = MagicMock()
+        mock_container.get.side_effect = lambda t: (
+            mock_formatter if t is ResponseFormattingService else mock_registry
+        )
 
-        assert isinstance(result, dict)
-        assert result.get("error") == "Not implemented"
+        with patch(
+            "orb.interface.system_command_handlers.get_container", return_value=mock_container
+        ):
+            result = await handle_reload_provider_config(_ns())
+
+        assert isinstance(result, InterfaceResponse)
 
     @pytest.mark.asyncio
     async def test_handle_execute_provider_operation_returns_not_implemented(self):
@@ -154,34 +170,51 @@ class TestHandleProviderMetrics:
 class TestHandleSystemStatus:
     @pytest.mark.asyncio
     async def test_dispatches_get_system_status_query_with_flags(self):
+        from orb.application.dto.interface_response import InterfaceResponse
         from orb.application.queries.system import GetSystemStatusQuery
+        from orb.interface.response_formatting_service import ResponseFormattingService
         from orb.interface.system_command_handlers import handle_system_status
 
         container, query_bus = _mock_container_with_query_bus(query_return={"healthy": True})
+        mock_formatter = MagicMock(spec=ResponseFormattingService)
+        mock_formatter.format_system_status.return_value = InterfaceResponse(
+            data={"system_status": {"healthy": True}}, exit_code=0
+        )
+        container.get.side_effect = lambda t: (
+            query_bus if t.__name__ == "QueryBus" else mock_formatter
+        )
 
         with patch("orb.interface.system_command_handlers.get_container", return_value=container):
-            result = await handle_system_status(_ns(detailed=True))
+            result = await handle_system_status(_ns(verbose=True))
 
         query_bus.execute.assert_awaited_once()
         q = query_bus.execute.call_args[0][0]
         assert isinstance(q, GetSystemStatusQuery)
         assert q.include_provider_health is True
-        assert q.detailed is True
-        assert "system_status" in result
+        assert q.verbose is True
+        assert isinstance(result, InterfaceResponse)
+        assert "system_status" in result.data
 
     @pytest.mark.asyncio
     async def test_detailed_defaults_to_false_when_not_set(self):
+        from orb.application.dto.interface_response import InterfaceResponse
         from orb.application.queries.system import GetSystemStatusQuery
+        from orb.interface.response_formatting_service import ResponseFormattingService
         from orb.interface.system_command_handlers import handle_system_status
 
         container, query_bus = _mock_container_with_query_bus(query_return={})
+        mock_formatter = MagicMock(spec=ResponseFormattingService)
+        mock_formatter.format_system_status.return_value = InterfaceResponse(data={}, exit_code=0)
+        container.get.side_effect = lambda t: (
+            query_bus if t.__name__ == "QueryBus" else mock_formatter
+        )
 
         with patch("orb.interface.system_command_handlers.get_container", return_value=container):
             await handle_system_status(_ns())
 
         q = query_bus.execute.call_args[0][0]
         assert isinstance(q, GetSystemStatusQuery)
-        assert q.detailed is False
+        assert q.verbose is False
 
 
 # ---------------------------------------------------------------------------
@@ -257,24 +290,34 @@ class TestHandleListProviders:
 class TestHandleSystemHealth:
     @pytest.mark.asyncio
     async def test_returns_success_when_health_check_returns_0(self):
+        from orb.application.dto.interface_response import InterfaceResponse
         from orb.interface.system_command_handlers import handle_system_health
 
+        mock_response = {"success": True, "status": "healthy", "checks": []}
         with patch(
-            "orb.interface.health_command_handler.handle_health_check", return_value=0
+            "orb.interface.health_command_handler.handle_health_check", return_value=mock_response
         ) as mock_hc:
             result = await handle_system_health(_ns())
 
         mock_hc.assert_called_once()
-        assert result["status"] == "success"
+        assert isinstance(result, InterfaceResponse)
+        assert result.data["success"] is True
+        assert result.exit_code == 0
 
     @pytest.mark.asyncio
     async def test_returns_error_when_health_check_returns_nonzero(self):
+        from orb.application.dto.interface_response import InterfaceResponse
         from orb.interface.system_command_handlers import handle_system_health
 
-        with patch("orb.interface.health_command_handler.handle_health_check", return_value=1):
+        mock_response = {"success": False, "status": "unhealthy", "checks": []}
+        with patch(
+            "orb.interface.health_command_handler.handle_health_check", return_value=mock_response
+        ):
             result = await handle_system_health(_ns())
 
-        assert result["status"] == "error"
+        assert isinstance(result, InterfaceResponse)
+        assert result.data["success"] is False
+        assert result.exit_code == 1
 
 
 # ---------------------------------------------------------------------------
@@ -297,7 +340,7 @@ class TestHandleSystemMetrics:
         with patch("orb.interface.system_command_handlers.get_container", return_value=container):
             result = await handle_system_metrics(_ns())
 
-        assert result["metrics"] == {"requests_total": 5}
+        assert result.data["metrics"] == {"requests_total": 5}
 
     @pytest.mark.asyncio
     async def test_returns_empty_metrics_when_collector_unavailable(self):
@@ -309,7 +352,7 @@ class TestHandleSystemMetrics:
         with patch("orb.interface.system_command_handlers.get_container", return_value=container):
             result = await handle_system_metrics(_ns())
 
-        assert result["metrics"] == {}
+        assert result.data["metrics"] == {}
 
     @pytest.mark.asyncio
     async def test_returns_error_dict_when_get_metrics_raises(self):
@@ -324,8 +367,8 @@ class TestHandleSystemMetrics:
         with patch("orb.interface.system_command_handlers.get_container", return_value=container):
             result = await handle_system_metrics(_ns())
 
-        assert result["metrics"] == {}
-        assert "error" in result
+        assert result.data["metrics"] == {}
+        assert "error" in result.data
 
 
 # ---------------------------------------------------------------------------
@@ -336,40 +379,30 @@ class TestHandleSystemMetrics:
 @pytest.mark.unit
 class TestHandleSelectProviderStrategy:
     @pytest.mark.asyncio
-    async def test_returns_selected_provider_from_args(self):
+    async def test_delegates_to_set_default(self):
+        """handle_select_provider_strategy delegates to handle_provider_set_default."""
         from orb.interface.system_command_handlers import handle_select_provider_strategy
 
-        with patch("orb.providers.registry.get_provider_registry") as mock_registry_fn:
-            mock_registry = MagicMock()
-            mock_registry.get_registered_providers.return_value = ["aws"]
-            mock_registry_fn.return_value = mock_registry
+        with patch("orb.interface.system_command_handlers.handle_select_provider_strategy"):
+            with patch(
+                "orb.interface.provider_config_handler.handle_provider_set_default",
+                new_callable=AsyncMock,
+                return_value={"message": "Default provider set", "provider": "aws"},
+            ) as mock_set_default:
+                result = await handle_select_provider_strategy(_ns(provider_name="aws"))
 
-            result = await handle_select_provider_strategy(_ns(provider="gcp"))
-
-        assert result["result"]["selected_provider"] == "gcp"
-
-    @pytest.mark.asyncio
-    async def test_falls_back_to_first_registered_provider_when_no_args(self):
-        from orb.application.services.provider_registry_service import ProviderRegistryService
-        from orb.interface.system_command_handlers import handle_select_provider_strategy
-
-        mock_service = MagicMock(spec=ProviderRegistryService)
-        mock_service.get_available_strategies.return_value = ["aws"]
-
-        with patch("orb.interface.system_command_handlers.get_container") as mock_get_container:
-            mock_get_container.return_value.get.return_value = mock_service
-            result = await handle_select_provider_strategy(_ns())
-
-        assert result["result"]["selected_provider"] == "aws"
+        mock_set_default.assert_called_once()
+        assert result["provider"] == "aws"
 
     @pytest.mark.asyncio
-    async def test_falls_back_to_aws_when_registry_raises(self):
+    async def test_propagates_error_from_set_default(self):
         from orb.interface.system_command_handlers import handle_select_provider_strategy
 
         with patch(
-            "orb.interface.system_command_handlers.get_container",
-            side_effect=RuntimeError("registry unavailable"),
+            "orb.interface.provider_config_handler.handle_provider_set_default",
+            new_callable=AsyncMock,
+            return_value={"error": True, "message": "Provider 'bad' not found", "exit_code": 1},
         ):
-            result = await handle_select_provider_strategy(_ns())
+            result = await handle_select_provider_strategy(_ns(provider_name="bad"))
 
-        assert result["result"]["selected_provider"] == "aws"
+        assert result["error"] is True

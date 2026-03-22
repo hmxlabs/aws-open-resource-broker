@@ -139,6 +139,7 @@ class RefreshTemplatesHandler(BaseCommandHandler[RefreshTemplatesCommand, None])
                 "status": "success",
                 "message": "Templates refreshed successfully",
                 "template_count": len(templates),
+                "templates": [t.model_dump() for t in templates],
                 "provider_name": command.provider_name,
                 "command_id": command.command_id,
             }

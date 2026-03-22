@@ -130,6 +130,7 @@ def build_registry() -> None:
     # --- providers ---
     from orb.interface.provider_config_handler import (
         handle_provider_add,
+        handle_provider_get,
         handle_provider_get_default,
         handle_provider_remove,
         handle_provider_set_default,
@@ -142,12 +143,21 @@ def build_registry() -> None:
     register("providers", "update", handle_provider_update)
     register("providers", "set-default", handle_provider_set_default)
     register("providers", "get-default", handle_provider_get_default)
+    register("providers", "get", handle_provider_get)
     register("providers", "show", handle_provider_show)
-    register("providers", "list", _make_bus_handler("list_available_providers"))
-    register("providers", "health", _make_bus_handler("get_provider_health"))
-    register("providers", "metrics", _make_bus_handler("get_provider_metrics"))
-    register("providers", "exec", _make_bus_handler("execute_provider_operation"))
-    register("providers", "select", _make_bus_handler("get_provider_strategy_config"))
+    from orb.interface.system_command_handlers import (
+        handle_execute_provider_operation,
+        handle_list_providers,
+        handle_provider_health,
+        handle_provider_metrics,
+        handle_select_provider_strategy,
+    )
+
+    register("providers", "list", handle_list_providers)
+    register("providers", "health", handle_provider_health)
+    register("providers", "metrics", handle_provider_metrics)
+    register("providers", "exec", handle_execute_provider_operation)
+    register("providers", "select", handle_select_provider_strategy)
 
     # --- system ---
     from orb.interface.serve_command_handler import handle_serve_api
@@ -189,19 +199,21 @@ def build_registry() -> None:
     from orb.interface.request_command_handlers import (
         handle_cancel_request,
         handle_get_request_status,
+        handle_get_return_requests,
+        handle_list_requests,
         handle_request_machines,
         handle_request_return_machines,
     )
 
-    register("requests", "create", handle_request_machines)
     register("requests", "show", handle_get_request_status)
     register("requests", "status", handle_get_request_status)
-    register("requests", "list", _make_bus_handler("list_requests"))
+    register("requests", "list", handle_list_requests)
     register("requests", "cancel", handle_cancel_request)
-    register("requests", "return", handle_request_return_machines)
+    register("requests", "list-returns", handle_get_return_requests)
 
     # --- machines ---
     from orb.interface.machine_command_handlers import (
+        handle_get_machine,
         handle_get_machine_status,
         handle_list_machines,
         handle_start_machines,
@@ -209,7 +221,7 @@ def build_registry() -> None:
     )
 
     register("machines", "list", handle_list_machines)
-    register("machines", "show", _make_bus_handler("get_machine"))
+    register("machines", "show", handle_get_machine)
     register("machines", "status", handle_get_machine_status)
     register("machines", "request", handle_request_machines)
     register("machines", "return", handle_request_return_machines)
@@ -246,8 +258,15 @@ def build_registry() -> None:
     register("storage", "validate", handle_validate_storage_config)
 
     # --- config ---
-    register("config", "show", _make_bus_handler("get_system_config"))
-    register("config", "get", _make_bus_handler("get_configuration"))
-    register("config", "set", _make_bus_handler("set_configuration"))
-    register("config", "validate", _make_bus_handler("validate_provider_config"))
+    from orb.interface.config_command_handlers import (
+        handle_get_configuration,
+        handle_get_system_config,
+        handle_set_configuration,
+        handle_validate_provider_config,
+    )
+
+    register("config", "show", handle_get_system_config)
+    register("config", "get", handle_get_configuration)
+    register("config", "set", handle_set_configuration)
+    register("config", "validate", handle_validate_provider_config)
     register("config", "reload", handle_reload_provider_config)

@@ -34,7 +34,11 @@ _NON_PROVIDER_FILES = [
 # yet cleaned up.  Keyed as (relative_path, import_string).
 _KNOWN_VIOLATIONS: frozenset[tuple[str, str]] = frozenset(
     {
-        ("bootstrap.py", "orb.providers.registry"),
+        ("bootstrap/core_services.py", "orb.providers.registry"),
+        ("bootstrap/infrastructure_services.py", "orb.providers.aws.registration"),
+        ("bootstrap/provider_services.py", "orb.providers.registry"),
+        ("bootstrap/provider_services.py", "orb.providers.aws.registration"),
+        ("bootstrap/services.py", "orb.providers.registration"),
         ("interface/health_command_handler.py", "orb.providers.registry"),
         ("interface/system_command_handlers.py", "orb.providers.registry"),
         ("interface/infrastructure_command_handler.py", "orb.providers.registry"),
@@ -63,6 +67,8 @@ _KNOWN_VIOLATIONS: frozenset[tuple[str, str]] = frozenset(
             "orb.providers.aws.utilities.ec2.instances",
         ),
         ("config/schemas/cleanup_schema.py", "orb.providers.aws.configuration.cleanup_config"),
+        # loader collects strategy-contributed defaults at load time — intentional bootstrap wiring
+        ("config/loader.py", "orb.providers.registry"),
     }
 )
 

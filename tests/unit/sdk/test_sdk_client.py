@@ -89,8 +89,8 @@ class TestOpenResourceBrokerInitialize:
     @pytest.mark.asyncio
     async def test_initialize_returns_true_on_success(self):
         sdk = _make_sdk()
-        mock_app = AsyncMock()
-        mock_app.initialize.return_value = True
+        mock_app = MagicMock()
+        mock_app.initialize = AsyncMock(return_value=True)
         mock_app.get_query_bus.return_value = AsyncMock()
         mock_app.get_command_bus.return_value = AsyncMock()
 
@@ -141,8 +141,8 @@ class TestOpenResourceBrokerInitialize:
     @pytest.mark.asyncio
     async def test_context_manager_initializes_and_cleans_up(self):
         sdk = _make_sdk()
-        mock_app = AsyncMock()
-        mock_app.initialize.return_value = True
+        mock_app = MagicMock()
+        mock_app.initialize = AsyncMock(return_value=True)
         mock_app.get_query_bus.return_value = AsyncMock()
         mock_app.get_command_bus.return_value = AsyncMock()
         mock_app.cleanup = AsyncMock()
@@ -351,7 +351,6 @@ class TestConvenienceMethods:
             return_value=AcquireMachinesOutput(
                 request_id="req-123",
                 status="pending",
-                raw={"request_id": "req-123", "status": "pending"},
             )
         )
         mock_container.get.return_value = mock_orchestrator
@@ -359,7 +358,7 @@ class TestConvenienceMethods:
 
         result = await sdk.request_machines("tmpl-1", 3)
 
-        assert result == {"request_id": "req-123", "status": "pending"}
+        assert result == {"request_id": "req-123", "status": "pending", "machine_ids": []}
 
     @pytest.mark.asyncio
     async def test_show_template_raises_when_not_initialized(self):

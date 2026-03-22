@@ -24,6 +24,8 @@ class MachineReferenceDTO(BaseDTO):
     instance_tags: Optional[str] = None
     cloud_host_id: Optional[str] = None
     launch_time: Optional[int] = None
+    request_id: Optional[str] = None
+    return_request_id: Optional[str] = None
     message: str = ""
 
     @classmethod
@@ -93,8 +95,10 @@ class RequestDTO(BaseDTO):
     launch_template_version: Optional[str] = None
     metadata: dict[str, Any] = Field(default_factory=dict)
     request_type: str = "acquire"
-    long: bool = False  # Flag to indicate whether to include detailed information
+    verbose: bool = False  # Flag to indicate whether to include detailed information
     desired_capacity: int = 1
+    duration: Optional[int] = None
+    success_rate: Optional[float] = None
     successful_count: int = 0
     failed_count: int = 0
     started_at: Optional[datetime] = None
@@ -108,7 +112,7 @@ class RequestDTO(BaseDTO):
     def from_domain(
         cls,
         request: Request,
-        long: bool = False,
+        verbose: bool = False,
         machine_references: Optional[list["MachineReferenceDTO"]] = None,
     ) -> "RequestDTO":
         """
@@ -116,7 +120,7 @@ class RequestDTO(BaseDTO):
 
         Args:
             request: Request domain object
-            long: Whether to include detailed information
+            verbose: Whether to include detailed information
             machine_references: Optional fresh machine references to use instead of domain object's
 
         Returns:
@@ -148,12 +152,14 @@ class RequestDTO(BaseDTO):
             provider_api=request.provider_api,
             provider_name=request.provider_name,
             provider_type=request.provider_type,
-            launch_template_id=None,  # Not available in current domain model
-            launch_template_version=None,  # Not available in current domain model
+            launch_template_id=request.provider_data.get("launch_template_id"),
+            launch_template_version=request.provider_data.get("launch_template_version"),
             metadata=request.metadata,
             request_type=cls.serialize_enum(request.request_type) or "",
-            long=long,
+            verbose=verbose,
             desired_capacity=request.desired_capacity,
+            duration=request.duration,
+            success_rate=request.success_rate,
             successful_count=request.successful_count,
             failed_count=request.failed_count,
             started_at=request.started_at,
@@ -164,19 +170,19 @@ class RequestDTO(BaseDTO):
             resource_ids=request.resource_ids,
         )
 
-    def to_dict(self, long: Optional[bool] = None) -> dict[str, Any]:
+    def to_dict(self, verbose: Optional[bool] = None) -> dict[str, Any]:
         """
         Convert to dictionary format - returns snake_case for internal use.
         External format conversion should be handled at scheduler strategy level.
 
         Args:
-            long: Whether to include detailed information. If None, uses the instance's long attribute.
+            verbose: Whether to include detailed information. If None, uses the instance's verbose attribute.
 
         Returns:
             Dictionary representation with snake_case keys
         """
-        # Use provided long parameter or fall back to instance attribute
-        include_details = self.long if long is None else long
+        # Use provided verbose parameter or fall back to instance attribute
+        include_details = self.verbose if verbose is None else verbose
 
         # Get clean snake_case data using stable API
         result = super().to_dict()

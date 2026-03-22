@@ -6,15 +6,15 @@ from typing import Any, Dict, List
 from orb.config.platform_dirs import get_config_location
 from orb.domain.base.ports.console_port import ConsolePort
 from orb.infrastructure.di.container import get_container
+from orb.infrastructure.error.decorators import handle_interface_exceptions
 
 
+@handle_interface_exceptions(context="infrastructure_discover", interface_type="cli")
 async def handle_infrastructure_discover(args) -> Dict[str, Any]:
     """Handle orb infrastructure discover command."""
     try:
         if args.provider:
             providers = [_get_provider_config(args.provider)]
-        elif getattr(args, "all_providers", False):
-            providers = _get_active_providers_with_overrides()
         else:
             providers = _get_active_providers_with_overrides()
 
@@ -30,33 +30,35 @@ async def handle_infrastructure_discover(args) -> Dict[str, Any]:
 
     except Exception as e:
         return {
+            "error": f"Infrastructure discovery failed: {e}",
             "status": "error",
-            "message": f"Infrastructure discovery failed: {e}",
         }
 
 
+@handle_interface_exceptions(context="infrastructure_show", interface_type="cli")
 async def handle_infrastructure_show(args) -> Dict[str, Any]:
     """Handle orb infrastructure show command."""
     try:
         if args.provider:
             providers = [_get_provider_config(args.provider)]
-        elif getattr(args, "all_providers", False):
-            providers = _get_active_providers_with_overrides()
         else:
             providers = _get_active_providers_with_overrides()
 
+        provider_data = []
         for provider in providers:
             _show_provider_infrastructure(provider)
+            provider_data.append(provider)
 
-        return {"status": "success"}
+        return {"status": "success", "providers": provider_data}
 
     except Exception as e:
         return {
+            "error": f"Failed to show infrastructure: {e}",
             "status": "error",
-            "message": f"Failed to show infrastructure: {e}",
         }
 
 
+@handle_interface_exceptions(context="infrastructure_validate", interface_type="cli")
 async def handle_infrastructure_validate(args) -> Dict[str, Any]:
     """Handle orb infrastructure validate command."""
     try:
@@ -77,8 +79,8 @@ async def handle_infrastructure_validate(args) -> Dict[str, Any]:
 
     except Exception as e:
         return {
+            "error": f"Infrastructure validation failed: {e}",
             "status": "error",
-            "message": f"Infrastructure validation failed: {e}",
         }
 
 
@@ -86,7 +88,6 @@ async def _discover_provider_infrastructure(provider: Dict[str, Any], args) -> D
     """Discover infrastructure for a provider using strategy pattern."""
     try:
         from orb.domain.base.ports.provider_discovery_port import ProviderDiscoveryPort
-        from orb.infrastructure.di.container import get_container
 
         container = get_container()
         provider_strategy = container.get(ProviderDiscoveryPort)
@@ -140,7 +141,6 @@ async def _validate_provider_infrastructure(provider: Dict[str, Any]) -> Dict[st
     """Validate infrastructure for a provider using strategy pattern."""
     try:
         from orb.domain.base.ports.provider_discovery_port import ProviderDiscoveryPort
-        from orb.infrastructure.di.container import get_container
 
         container = get_container()
         provider_strategy = container.get(ProviderDiscoveryPort)
@@ -171,7 +171,6 @@ def _get_active_providers() -> List[Dict[str, Any]]:
 
     if not config_file.exists():
         from orb.application.services.provider_registry_service import ProviderRegistryService
-        from orb.infrastructure.di.container import get_container
 
         registry_service = get_container().get(ProviderRegistryService)
         registered_types = registry_service.get_registered_provider_types()
@@ -197,7 +196,6 @@ def _get_active_providers() -> List[Dict[str, Any]]:
 
     if not active_providers:
         from orb.application.services.provider_registry_service import ProviderRegistryService
-        from orb.infrastructure.di.container import get_container
 
         registry_service = get_container().get(ProviderRegistryService)
         registered_types = registry_service.get_registered_provider_types()
@@ -219,7 +217,6 @@ def _get_active_providers_with_overrides() -> List[Dict[str, Any]]:
     # Apply global overrides
     try:
         from orb.domain.base.ports.configuration_port import ConfigurationPort
-        from orb.infrastructure.di.container import get_container
 
         container = get_container()
         config = container.get(ConfigurationPort)

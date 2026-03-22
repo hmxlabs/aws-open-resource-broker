@@ -26,6 +26,7 @@ from orb.config.schemas.server_schema import ServerConfig
 from orb.domain.base.ports.configuration_port import ConfigurationPort
 from orb.infrastructure.di.buses import CommandBus, QueryBus
 from orb.infrastructure.di.container import get_container
+from orb.interface.response_formatting_service import ResponseFormattingService
 
 T = TypeVar("T")
 
@@ -145,3 +146,8 @@ def get_validate_template_orchestrator() -> ValidateTemplateOrchestrator:
 def get_refresh_templates_orchestrator() -> RefreshTemplatesOrchestrator:
     """Get RefreshTemplatesOrchestrator from DI container."""
     return get_di_container().get(RefreshTemplatesOrchestrator)
+
+
+def get_response_formatting_service() -> ResponseFormattingService:
+    """Get ResponseFormattingService from DI container."""
+    return get_di_container().get(ResponseFormattingService)

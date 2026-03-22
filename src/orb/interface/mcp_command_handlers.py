@@ -7,15 +7,16 @@ interface layer patterns and error handling conventions.
 
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Union
 
+from orb.application.dto.interface_response import InterfaceResponse
 from orb.infrastructure.constants import MAX_DESCRIPTION_LENGTH
 from orb.infrastructure.error.decorators import handle_interface_exceptions
 from orb.mcp.tools import OpenResourceBrokerMCPTools
 
 
 @handle_interface_exceptions(context="mcp_tools_list", interface_type="cli")
-async def handle_mcp_tools_list(args) -> dict[str, Any]:
+async def handle_mcp_tools_list(args) -> Union[dict[str, Any], InterfaceResponse]:
     """
     Handle 'orb mcp tools list' command.
 
@@ -41,14 +42,14 @@ async def handle_mcp_tools_list(args) -> dict[str, Any]:
                     filtered_tools.append(tool)
             tool_list = filtered_tools
 
-        if args.format == "table":
-            return _format_tools_table(tool_list)
+        if getattr(args, "format", "json") == "table":
+            return InterfaceResponse(data=_format_tools_table(tool_list), exit_code=0)
         else:
-            return {"tools": tool_list}
+            return InterfaceResponse(data={"tools": tool_list}, exit_code=0)
 
 
 @handle_interface_exceptions(context="mcp_tools_call", interface_type="cli")
-async def handle_mcp_tools_call(args) -> dict[str, Any]:
+async def handle_mcp_tools_call(args) -> Union[dict[str, Any], InterfaceResponse]:
     """
     Handle 'orb mcp tools call' command.
 
@@ -65,15 +66,21 @@ async def handle_mcp_tools_call(args) -> dict[str, Any]:
         # Load arguments from file
         file_path = Path(args.file)
         if not file_path.exists():
-            return {"error": f"Arguments file not found: {args.file}"}
+            return InterfaceResponse(
+                data={"error": f"Arguments file not found: {args.file}"}, exit_code=1
+            )
 
         try:
             with open(file_path) as f:
                 tool_args = json.load(f)
         except json.JSONDecodeError as e:
-            return {"error": f"Invalid JSON in arguments file: {e!s}"}
+            return InterfaceResponse(
+                data={"error": f"Invalid JSON in arguments file: {e!s}"}, exit_code=1
+            )
         except Exception as e:
-            return {"error": f"Failed to read arguments file: {e!s}"}
+            return InterfaceResponse(
+                data={"error": f"Failed to read arguments file: {e!s}"}, exit_code=1
+            )
 
     elif hasattr(args, "args") and args.args:
         # Parse arguments from command line JSON string
@@ -81,20 +88,20 @@ async def handle_mcp_tools_call(args) -> dict[str, Any]:
 
         tool_args = safe_json_loads(args.args, default={}, context="MCP tool arguments")
         if not tool_args:
-            return {"error": "Invalid JSON in arguments"}
+            return InterfaceResponse(data={"error": "Invalid JSON in arguments"}, exit_code=1)
 
     # Execute tool
     async with OpenResourceBrokerMCPTools() as tools:
         result = await tools.call_tool(args.tool_name, tool_args)
 
-        if args.format == "table" and "data" in result:
-            return _format_result_table(result, args.tool_name)
+        if getattr(args, "format", "json") == "table" and "data" in result:
+            return InterfaceResponse(data=_format_result_table(result, args.tool_name), exit_code=0)
         else:
-            return result
+            return InterfaceResponse(data=result, exit_code=0)
 
 
 @handle_interface_exceptions(context="mcp_tools_info", interface_type="cli")
-async def handle_mcp_tools_info(args) -> dict[str, Any]:
+async def handle_mcp_tools_info(args) -> Union[dict[str, Any], InterfaceResponse]:
     """
     Handle 'orb mcp tools info' command.
 
@@ -108,7 +115,9 @@ async def handle_mcp_tools_info(args) -> dict[str, Any]:
         tool_def = tools.get_tool_info(args.tool_name)
 
         if not tool_def:
-            return {"error": f"Tool not found: {args.tool_name}"}
+            return InterfaceResponse(
+                data={"error": f"Tool not found: {args.tool_name}"}, exit_code=1
+            )
 
         info = {
             "name": tool_def.name,
@@ -126,14 +135,14 @@ async def handle_mcp_tools_info(args) -> dict[str, Any]:
                 }
             )
 
-        if args.format == "table":
-            return _format_tool_info_table(info)
+        if getattr(args, "format", "json") == "table":
+            return InterfaceResponse(data=_format_tool_info_table(info), exit_code=0)
         else:
-            return info
+            return InterfaceResponse(data=info, exit_code=0)
 
 
 @handle_interface_exceptions(context="mcp_validate", interface_type="cli")
-async def handle_mcp_validate(args) -> dict[str, Any]:
+async def handle_mcp_validate(args) -> Union[dict[str, Any], InterfaceResponse]:
     """
     Handle 'orb mcp validate' command.
 
@@ -143,7 +152,7 @@ async def handle_mcp_validate(args) -> dict[str, Any]:
     Returns:
         Validation result
     """
-    validation_result = {"valid": True, "checks": []}
+    validation_result: dict[str, Any] = {"valid": True, "checks": []}
 
     # Test MCP tools initialization
     try:
@@ -225,10 +234,13 @@ async def handle_mcp_validate(args) -> dict[str, Any]:
                 }
             )
 
-    if args.format == "table":
-        return _format_validation_table(validation_result)
+    exit_code = 0 if validation_result["valid"] else 1
+    if getattr(args, "format", "json") == "table":
+        return InterfaceResponse(
+            data=_format_validation_table(validation_result), exit_code=exit_code
+        )
     else:
-        return validation_result
+        return InterfaceResponse(data=validation_result, exit_code=exit_code)
 
 
 def _format_tools_table(tools: list) -> dict[str, Any]:

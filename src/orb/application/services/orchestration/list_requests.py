@@ -23,7 +23,7 @@ class ListRequestsOrchestrator(OrchestratorBase[ListRequestsInput, ListRequestsO
 
     async def execute(self, input: ListRequestsInput) -> ListRequestsOutput:  # type: ignore[return]
         self._logger.info(
-            "ListRequestsOrchestrator: status=%s limit=%d sync=%s",
+            "ListRequestsOrchestrator: status=%s limit=%s sync=%s",
             input.status,
             input.limit,
             input.sync,
@@ -37,12 +37,15 @@ class ListRequestsOrchestrator(OrchestratorBase[ListRequestsInput, ListRequestsO
             query = ListRequestsQuery(status=input.status, limit=input.limit, offset=input.offset)  # type: ignore[assignment]
 
         results = await self._query_bus.execute(query)
-        return ListRequestsOutput(requests=[self._to_dict(r) for r in (results or [])])
+        requests = [self._to_dict(r) for r in (results or [])]
+        if input.template_id:
+            requests = [r for r in requests if r.get("template_id") == input.template_id]
+        return ListRequestsOutput(requests=requests, count=len(requests))
 
     @staticmethod
     def _to_dict(obj: object) -> dict:
-        if hasattr(obj, "model_dump"):
-            return obj.model_dump()  # type: ignore[union-attr]
         if hasattr(obj, "to_dict"):
             return obj.to_dict()  # type: ignore[union-attr]
+        if hasattr(obj, "model_dump"):
+            return obj.model_dump()  # type: ignore[union-attr]
         return dict(obj) if isinstance(obj, dict) else {"data": str(obj)}

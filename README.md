@@ -18,6 +18,14 @@
   <a href="https://deepwiki.com/awslabs/open-resource-broker"><img src="https://deepwiki.com/badge.svg" alt="Ask DeepWiki"></a>
 </p>
 
+<p align="center">
+  <a href="https://github.com/awslabs/open-resource-broker/actions/workflows/ci-tests.yml"><img src="https://github.com/awslabs/open-resource-broker/actions/workflows/ci-tests.yml/badge.svg" alt="Unit Tests"></a>
+  <a href="https://github.com/awslabs/open-resource-broker/actions/workflows/ci-quality.yml"><img src="https://github.com/awslabs/open-resource-broker/actions/workflows/ci-quality.yml/badge.svg" alt="Quality Checks"></a>
+  <a href="https://github.com/awslabs/open-resource-broker/actions/workflows/security-code.yml"><img src="https://github.com/awslabs/open-resource-broker/actions/workflows/security-code.yml/badge.svg" alt="Security Scanning"></a>
+  <a href="https://codecov.io/gh/awslabs/open-resource-broker"><img src="https://codecov.io/gh/awslabs/open-resource-broker/graph/badge.svg" alt="Coverage"></a>
+  <a href="https://github.com/awslabs/open-resource-broker/actions/workflows/docs.yml"><img src="https://github.com/awslabs/open-resource-broker/actions/workflows/docs.yml/badge.svg" alt="Documentation"></a>
+</p>
+
 ---
 
 ORB is a unified API for orchestrating and provisioning compute capacity programmatically. Define what you need in a template, request it, track it, return it — through a CLI, REST API, Python SDK, or MCP server.
@@ -389,10 +397,6 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the full development guide.
 
 <details>
 <summary>Documentation & CI</summary>
-
-[![Test Matrix](https://github.com/awslabs/open-resource-broker/workflows/Test%20Matrix/badge.svg)](https://github.com/awslabs/open-resource-broker/actions/workflows/test-matrix.yml)
-[![Quality Checks](https://github.com/awslabs/open-resource-broker/workflows/Quality%20Checks/badge.svg)](https://github.com/awslabs/open-resource-broker/actions/workflows/ci-quality.yml)
-[![Security Scanning](https://github.com/awslabs/open-resource-broker/workflows/Security%20Scanning/badge.svg)](https://github.com/awslabs/open-resource-broker/actions/workflows/security-code.yml)
 
 - [Quick Start](docs/root/getting_started/quick_start.md)
 - [CLI Reference](docs/root/cli/cli-reference.md)
