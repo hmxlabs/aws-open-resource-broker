@@ -9,7 +9,6 @@ on:
       - 'pyproject.toml'
       - 'requirements*.txt'
       - 'uv.lock'
-      - 'pytest.ini'
       - '.github/workflows/ci-tests.yml'
   pull_request:
     branches: [ main, develop ]
@@ -19,7 +18,6 @@ on:
       - 'pyproject.toml'
       - 'requirements*.txt'
       - 'uv.lock'
-      - 'pytest.ini'
       - '.github/workflows/ci-tests.yml'
   schedule:
     - cron: '0 2 * * *'
@@ -123,10 +121,3 @@ jobs:
         action_fail: false
         fail_on: "nothing"
 
-    - name: Upload coverage to Codecov
-      uses: codecov/codecov-action@v5
-      if: always()
-      with:
-        files: test-results/**/*coverage*.xml
-        flags: unit
-        name: unit-tests

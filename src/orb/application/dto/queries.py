@@ -16,7 +16,7 @@ class GetRequestQuery(Query, BaseModel):
 
     provider_name: Optional[str] = None
     request_id: str
-    long: bool = False
+    verbose: bool = False
     lightweight: bool = False
 
 
@@ -138,6 +138,9 @@ class ValidateStorageQuery(Query, BaseModel):
     """Query to validate storage connectivity."""
 
     model_config = ConfigDict(frozen=True)
+
+    strategy_name: Optional[str] = None
+    timeout: int = 30
 
 
 class ValidateMCPQuery(Query, BaseModel):

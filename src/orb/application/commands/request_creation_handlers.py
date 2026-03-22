@@ -249,8 +249,10 @@ class CreateReturnRequestHandler(BaseCommandHandler[CreateReturnRequestCommand, 
                 validation_results["valid_machines"]
             )
 
-            # Create separate return requests for each provider
-            created_requests = []
+            # Create and persist a return request for each provider group,
+            # collecting (request, machine_ids, provider_name) for background dispatch.
+            created_requests: list[str] = []
+            pending_deprovision: list[tuple[list[str], Any, str]] = []
             domain_config = self._container.get(DomainConfigurationService)
             prefix = domain_config.get_return_request_prefix()
 
@@ -267,6 +269,7 @@ class CreateReturnRequestHandler(BaseCommandHandler[CreateReturnRequestCommand, 
                 # Persist request and update machines
                 self._persist_return_request(request, machine_ids)
                 created_requests.append(str(request.request_id))
+                pending_deprovision.append((machine_ids, request, provider_name))
 
                 self.logger.info(
                     "Return request created for provider %s: %s (%d machines)",
@@ -275,13 +278,15 @@ class CreateReturnRequestHandler(BaseCommandHandler[CreateReturnRequestCommand, 
                     len(machine_ids),
                 )
 
-                # Execute deprovisioning
-                await self._execute_deprovisioning_for_request(machine_ids, request, provider_name)
-
-            # Store results in command for caller to access
+            # Populate command fields BEFORE spawning background tasks so the
+            # caller always has the request IDs immediately after execute_command returns.
             command.created_request_ids = created_requests
             command.processed_machines = validation_results["valid_machines"]
             command.skipped_machines = validation_results["skipped_machines"]
+
+            # Await deprovisioning sequentially — one per provider group.
+            for machine_ids, request, provider_name in pending_deprovision:
+                await self._execute_deprovisioning_for_request(machine_ids, request, provider_name)
 
         except Exception as e:
             self.logger.error(

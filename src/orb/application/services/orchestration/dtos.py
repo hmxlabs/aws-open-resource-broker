@@ -22,14 +22,13 @@ class AcquireMachinesOutput:
     request_id: str
     status: str
     machine_ids: list[str] = dataclasses.field(default_factory=list)
-    raw: dict[str, Any] = dataclasses.field(default_factory=dict)
 
 
 @dataclasses.dataclass(frozen=True)
 class GetRequestStatusInput:
     request_ids: list[str] = dataclasses.field(default_factory=list)
     all_requests: bool = False
-    detailed: bool = False
+    verbose: bool = False
 
 
 @dataclasses.dataclass(frozen=True)
@@ -49,11 +48,14 @@ class ListRequestsInput:
     limit: int = 50
     sync: bool = False
     offset: int = 0
+    template_id: Optional[str] = None
+    request_type: Optional[str] = None
 
 
 @dataclasses.dataclass(frozen=True)
 class ListRequestsOutput:
     requests: list[dict[str, Any]] = dataclasses.field(default_factory=list)
+    count: int = 0
 
 
 @dataclasses.dataclass(frozen=True)
@@ -61,26 +63,29 @@ class ReturnMachinesInput:
     machine_ids: list[str] = dataclasses.field(default_factory=list)
     all_machines: bool = False
     force: bool = False
+    wait: bool = False
+    timeout_seconds: int = 300
 
 
 @dataclasses.dataclass(frozen=True)
 class ReturnMachinesOutput:
     request_id: Optional[str]
     status: str
-    raw: dict[str, Any] = dataclasses.field(default_factory=dict)
+    message: str = ""
+    skipped_machines: list[str] = dataclasses.field(default_factory=list)
 
 
 @dataclasses.dataclass(frozen=True)
 class CancelRequestInput:
     request_id: str
     reason: str = "Cancelled via API"
+    force: bool = False
 
 
 @dataclasses.dataclass(frozen=True)
 class CancelRequestOutput:
     request_id: str
     status: str
-    raw: dict[str, Any] = dataclasses.field(default_factory=dict)
     requests: list[dict[str, Any]] = dataclasses.field(default_factory=list)
 
 
@@ -91,11 +96,13 @@ class ListMachinesInput:
     request_id: Optional[str] = None
     limit: int = 100
     offset: int = 0
+    timestamp_format: Optional[str] = None
 
 
 @dataclasses.dataclass(frozen=True)
 class ListMachinesOutput:
     machines: list[MachineDTO] = dataclasses.field(default_factory=list)
+    count: int = 0
 
 
 @dataclasses.dataclass(frozen=True)
@@ -120,6 +127,7 @@ class ListTemplatesInput:
 @dataclasses.dataclass(frozen=True)
 class ListTemplatesOutput:
     templates: list[Any] = dataclasses.field(default_factory=list)
+    count: int = 0
 
 
 @dataclasses.dataclass(frozen=True)
@@ -161,7 +169,6 @@ class CreateTemplateOutput:
     template_id: str
     created: bool
     validation_errors: list[str] = dataclasses.field(default_factory=list)
-    raw: dict[str, Any] = dataclasses.field(default_factory=dict)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -179,7 +186,6 @@ class UpdateTemplateOutput:
     template_id: str
     updated: bool
     validation_errors: list[str] = dataclasses.field(default_factory=list)
-    raw: dict[str, Any] = dataclasses.field(default_factory=dict)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -191,7 +197,6 @@ class DeleteTemplateInput:
 class DeleteTemplateOutput:
     template_id: str
     deleted: bool
-    raw: dict[str, Any] = dataclasses.field(default_factory=dict)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -205,7 +210,7 @@ class ValidateTemplateOutput:
     valid: bool
     errors: list[str] = dataclasses.field(default_factory=list)
     message: str = ""
-    raw: dict[str, Any] = dataclasses.field(default_factory=dict)
+    template_id: Optional[str] = None
 
 
 @dataclasses.dataclass(frozen=True)
@@ -215,7 +220,7 @@ class RefreshTemplatesInput:
 
 @dataclasses.dataclass(frozen=True)
 class RefreshTemplatesOutput:
-    templates: list[dict[str, Any]] = dataclasses.field(default_factory=list)
+    templates: list[Any] = dataclasses.field(default_factory=list)
 
 
 @dataclasses.dataclass(frozen=True)
@@ -291,4 +296,50 @@ class ListProvidersOutput:
     providers: list[dict[str, Any]] = dataclasses.field(default_factory=list)
     count: int = 0
     selection_policy: str = ""
+    message: str = ""
+
+
+@dataclasses.dataclass(frozen=True)
+class ListSchedulerStrategiesInput:
+    pass
+
+
+@dataclasses.dataclass(frozen=True)
+class ListSchedulerStrategiesOutput:
+    strategies: list[dict[str, Any]] = dataclasses.field(default_factory=list)
+    current_strategy: str = ""
+    count: int = 0
+
+
+@dataclasses.dataclass(frozen=True)
+class GetSchedulerConfigInput:
+    strategy_name: Optional[str] = None
+
+
+@dataclasses.dataclass(frozen=True)
+class GetSchedulerConfigOutput:
+    config: dict[str, Any] = dataclasses.field(default_factory=dict)
+    message: str = ""
+
+
+@dataclasses.dataclass(frozen=True)
+class ListStorageStrategiesInput:
+    pass
+
+
+@dataclasses.dataclass(frozen=True)
+class ListStorageStrategiesOutput:
+    strategies: list[dict[str, Any]] = dataclasses.field(default_factory=list)
+    current_strategy: str = ""
+    count: int = 0
+
+
+@dataclasses.dataclass(frozen=True)
+class GetStorageConfigInput:
+    strategy_name: Optional[str] = None
+
+
+@dataclasses.dataclass(frozen=True)
+class GetStorageConfigOutput:
+    config: dict[str, Any] = dataclasses.field(default_factory=dict)
     message: str = ""

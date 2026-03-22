@@ -47,6 +47,21 @@ async def execute_command(args, app, resource_parsers) -> Union[str, tuple[str, 
 
     result = await handler(args)
 
+    if isinstance(result, int):  # handle_init returns a bare int exit code
+        return "", result
+
+    from orb.application.dto.interface_response import InterfaceResponse
+    from orb.cli.formatters import format_output
+
+    if isinstance(result, InterfaceResponse):
+        output_format = getattr(args, "format", "json")
+        return format_output(result.data, output_format), result.exit_code
+
+    # Raw dict with error key → exit code 1
+    if isinstance(result, dict) and result.get("error"):
+        output_format = getattr(args, "format", "json")
+        return format_output(result, output_format), 1
+
     container = get_container()
     scheduler_port = container.get(SchedulerPort)
     formatter = create_cli_formatter(scheduler_port)

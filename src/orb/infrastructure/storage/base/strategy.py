@@ -14,6 +14,10 @@ T = TypeVar("T")  # Entity type
 class StorageStrategy(StoragePort[T], ABC, Generic[T]):
     """Interface for storage strategies implementing StoragePort."""
 
+    @classmethod
+    def get_defaults_config(cls) -> dict:
+        return {}
+
     @abstractmethod
     def cleanup(self) -> None:
         """

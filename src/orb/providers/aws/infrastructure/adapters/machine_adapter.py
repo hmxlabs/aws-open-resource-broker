@@ -38,6 +38,17 @@ class AWSMachineAdapter:
         self._aws_client = aws_client
         self._logger = logger
 
+    @staticmethod
+    def _extract_status_reason(aws_instance_data: dict) -> str | None:
+        """Extract status reason from AWS instance data (PascalCase or snake_case)."""
+        sr = aws_instance_data.get("StateReason") or aws_instance_data.get("state_reason") or {}
+        return (
+            (sr.get("Message") or sr.get("message") if isinstance(sr, dict) else None)
+            or aws_instance_data.get("StateTransitionReason")
+            or aws_instance_data.get("state_transition_reason")
+            or None
+        )
+
     def _resolve_machine_name(self, aws_instance_data: dict) -> str:
         """
         Resolve machine name using priority order:
@@ -46,25 +57,37 @@ class AWSMachineAdapter:
         3. Private IP
         4. Instance ID (fallback)
         """
-        # 1. Check AWS Name tag
-        tags = aws_instance_data.get("Tags", [])
-        for tag in tags:
-            if tag.get("Key") == "Name" and tag.get("Value"):
-                self._logger.info("Using AWS Name tag for machine: %s", tag["Value"])
-                return tag["Value"]
+        # 1. Check AWS Name tag (snake_case: list of dicts with Key/Value, or dict)
+        tags = aws_instance_data.get("tags") or aws_instance_data.get("Tags", [])
+        if isinstance(tags, dict):
+            name = tags.get("Name")
+            if name:
+                self._logger.info("Using AWS Name tag for machine: %s", name)
+                return name
+        else:
+            for tag in tags:
+                if tag.get("Key") == "Name" and tag.get("Value"):
+                    self._logger.info("Using AWS Name tag for machine: %s", tag["Value"])
+                    return tag["Value"]
 
         # 2. Use private DNS name (more readable than IP)
-        if private_dns := aws_instance_data.get("PrivateDnsName"):
+        if private_dns := (
+            aws_instance_data.get("private_dns_name") or aws_instance_data.get("PrivateDnsName")
+        ):
             self._logger.info("Using private DNS name for machine: %s", private_dns)
             return private_dns
 
         # 3. Use private IP
-        if private_ip := aws_instance_data.get("PrivateIpAddress"):
+        if private_ip := (
+            aws_instance_data.get("private_ip") or aws_instance_data.get("PrivateIpAddress")
+        ):
             self._logger.info("Using private IP for machine: %s", private_ip)
             return private_ip
 
         # 4. Fallback to instance ID
-        instance_id = aws_instance_data.get("InstanceId", "")
+        instance_id = aws_instance_data.get("instance_id") or aws_instance_data.get(
+            "InstanceId", ""
+        )
         self._logger.info("Using instance ID fallback for machine: %s", instance_id)
         return instance_id
 
@@ -117,8 +140,13 @@ class AWSMachineAdapter:
 
                 # Add smart machine naming and DNS fields
                 machine_data["name"] = self._resolve_machine_name(aws_instance_data)
-                machine_data["private_dns_name"] = aws_instance_data.get("PrivateDnsName")
-                machine_data["public_dns_name"] = aws_instance_data.get("PublicDnsName")
+                machine_data["private_dns_name"] = aws_instance_data.get(
+                    "private_dns_name"
+                ) or aws_instance_data.get("PrivateDnsName")
+                machine_data["public_dns_name"] = aws_instance_data.get(
+                    "public_dns_name"
+                ) or aws_instance_data.get("PublicDnsName")
+                machine_data["status_reason"] = self._extract_status_reason(aws_instance_data)
 
                 # Log DNS data for debugging
                 self._logger.info(
@@ -147,11 +175,47 @@ class AWSMachineAdapter:
                     aws_instance_data.get("InstanceId"),
                 )
 
+                # Validate State field (nested dict with Name)
+                if "State" not in aws_instance_data or "Name" not in aws_instance_data.get(
+                    "State", {}
+                ):
+                    self._logger.error("Missing required State.Name in AWS instance data")
+                    raise AWSError("Missing required State.Name in AWS instance data")
+
+                # For terminal/transitional states AWS strips most network fields —
+                # return a minimal record rather than failing validation.
+                instance_state = aws_instance_data["State"]["Name"]
+                if instance_state in ("shutting-down", "terminated", "stopping", "stopped"):
+                    return {
+                        "instance_id": aws_instance_data["InstanceId"],
+                        "request_id": request_id,
+                        "name": aws_instance_data["InstanceId"],
+                        "status": MachineStatus.from_str(instance_state).value,
+                        "instance_type": aws_instance_data.get("InstanceType", "unknown"),
+                        "image_id": aws_instance_data.get("ImageId", "unknown"),
+                        "private_ip": aws_instance_data.get("PrivateIpAddress"),
+                        "public_ip": aws_instance_data.get("PublicIpAddress"),
+                        "private_dns_name": aws_instance_data.get("PrivateDnsName"),
+                        "public_dns_name": aws_instance_data.get("PublicDnsName"),
+                        "launch_time": aws_instance_data.get("LaunchTime"),
+                        "status_reason": self._extract_status_reason(aws_instance_data),
+                        "provider_api": provider_api,
+                        "resource_id": resource_id,
+                        "price_type": PriceType.ON_DEMAND.value,
+                        "subnet_id": aws_instance_data.get("SubnetId"),
+                        "security_group_ids": [],
+                        "metadata": {
+                            "tags": {
+                                tag["Key"]: tag["Value"]
+                                for tag in aws_instance_data.get("Tags", [])
+                            },
+                        },
+                    }
+
                 # Validate required fields for PascalCase format
                 required_fields = [
                     "InstanceId",
                     "InstanceType",
-                    "PrivateIpAddress",
                     "Placement",
                     "SubnetId",
                     "VpcId",
@@ -161,13 +225,6 @@ class AWSMachineAdapter:
                     if field not in aws_instance_data:
                         self._logger.error("Missing required field in AWS instance data: %s", field)
                         raise AWSError(f"Missing required field in AWS instance data: {field}")
-
-                # Validate State field (nested dict with Name)
-                if "State" not in aws_instance_data or "Name" not in aws_instance_data.get(
-                    "State", {}
-                ):
-                    self._logger.error("Missing required State.Name in AWS instance data")
-                    raise AWSError("Missing required State.Name in AWS instance data")
 
                 # Validate AWS handler type
                 try:
@@ -198,6 +255,7 @@ class AWSMachineAdapter:
                     "private_dns_name": aws_instance_data.get("PrivateDnsName"),
                     "public_dns_name": aws_instance_data.get("PublicDnsName"),
                     "launch_time": aws_instance_data.get("LaunchTime"),
+                    "status_reason": self._extract_status_reason(aws_instance_data),
                     "provider_api": provider_api,
                     "resource_id": resource_id,
                     "price_type": (
@@ -253,7 +311,8 @@ class AWSMachineAdapter:
 
         # Detect format and extract fields accordingly
         if "instance_id" in aws_instance_data:
-            # snake_case format
+            # snake_case format — always populate cloud_host_id with the instance ID
+            provider_data["cloud_host_id"] = aws_instance_data.get("instance_id")
             field_mappings = {
                 "network_interfaces": "network_interfaces",
                 "block_device_mappings": "block_device_mappings",
@@ -270,7 +329,8 @@ class AWSMachineAdapter:
                 "private_dns_name": "private_dns_name",
             }
         else:
-            # PascalCase format
+            # PascalCase format — always populate cloud_host_id with the instance ID
+            provider_data["cloud_host_id"] = aws_instance_data.get("InstanceId")
             field_mappings = {
                 "network_interfaces": "NetworkInterfaces",
                 "block_device_mappings": "BlockDeviceMappings",

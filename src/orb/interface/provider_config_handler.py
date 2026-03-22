@@ -1,25 +1,30 @@
 """Provider configuration command handlers."""
 
 import json
-from typing import Any, Dict
+from typing import Any, Dict, Union
 
+from orb.application.dto.interface_response import InterfaceResponse
 from orb.config.platform_dirs import get_config_location
-from orb.domain.base.ports.console_port import ConsolePort
 from orb.domain.base.ports.provider_cli_spec_port import CLISpecRegistry
 from orb.infrastructure.di.container import get_container
+from orb.infrastructure.error.decorators import handle_interface_exceptions
 from orb.infrastructure.logging.logger import get_logger
+from orb.interface.response_formatting_service import ResponseFormattingService
 
 logger = get_logger(__name__)
 
 
-async def handle_provider_add(args) -> int:
+@handle_interface_exceptions(context="provider_add", interface_type="cli")
+async def handle_provider_add(args) -> dict[str, Any]:
     """Handle orb providers add command."""
     try:
-        console = get_container().get(ConsolePort)
         config_file = get_config_location() / "config.json"
         if not config_file.exists():
-            console.error("No configuration found. Run 'orb init' first.")
-            return 1
+            return {
+                "error": True,
+                "message": "No configuration found. Run 'orb init' first.",
+                "exit_code": 1,
+            }
 
         with open(config_file) as f:
             config = json.load(f)
@@ -28,30 +33,26 @@ async def handle_provider_add(args) -> int:
         spec = CLISpecRegistry.get(provider_type)
 
         if spec is None:
-            console.error(f"Unknown provider type: {provider_type}")
-            return 1
+            return {
+                "error": True,
+                "message": f"Unknown provider type: {provider_type}",
+                "exit_code": 1,
+            }
 
         errors = spec.validate_add(args)
-        for err in errors:
-            console.error(err)
         if errors:
-            return 1
+            return {"error": True, "message": errors[0], "exit_code": 1}
 
         provider_config = spec.extract_config(args)
 
         # Test credentials
-        console.info("Testing credentials...")
         success, error = _test_provider_credentials(provider_type, provider_config)
         if not success:
-            console.error(f"Credential test failed: {error}")
-            return 1
-
-        console.success("Credentials verified successfully")
+            return {"error": True, "message": f"Credential test failed: {error}", "exit_code": 1}
 
         # Discover infrastructure if requested
         infrastructure_defaults = {}
         if args.discover:
-            console.info("Discovering infrastructure...")
             infrastructure_defaults = _discover_infrastructure(provider_type, provider_config)
 
         # Generate provider name
@@ -60,8 +61,11 @@ async def handle_provider_add(args) -> int:
         # Check if provider already exists
         existing_providers = config.get("provider", {}).get("providers", [])
         if any(p["name"] == provider_name for p in existing_providers):
-            console.error(f"Provider '{provider_name}' already exists")
-            return 1
+            return {
+                "error": True,
+                "message": f"Provider '{provider_name}' already exists",
+                "exit_code": 1,
+            }
 
         # Create provider instance
         provider_instance: dict[str, Any] = {
@@ -79,23 +83,20 @@ async def handle_provider_add(args) -> int:
         with open(config_file, "w") as f:
             json.dump(config, f, indent=2)
 
-        console.success(f"Provider '{provider_name}' added successfully")
-        return 0
+        return {"message": "Provider added", "provider": provider_name}
 
     except Exception as e:
-        get_container().get(ConsolePort).error(f"Failed to add provider: {e}")
         logger.error("Failed to add provider: %s", e, exc_info=True)
-        return 1
+        return {"error": True, "message": f"Failed to add provider: {e}", "exit_code": 1}
 
 
-async def handle_provider_remove(args) -> int:
+@handle_interface_exceptions(context="provider_remove", interface_type="cli")
+async def handle_provider_remove(args) -> dict[str, Any]:
     """Handle orb providers remove command."""
     try:
-        console = get_container().get(ConsolePort)
         config_file = get_config_location() / "config.json"
         if not config_file.exists():
-            console.error("No configuration found")
-            return 1
+            return {"error": True, "message": "No configuration found", "exit_code": 1}
 
         with open(config_file) as f:
             config = json.load(f)
@@ -106,33 +107,32 @@ async def handle_provider_remove(args) -> int:
         providers[:] = [p for p in providers if p["name"] != args.provider_name]
 
         if len(providers) == original_count:
-            console.error(f"Provider '{args.provider_name}' not found")
-            return 1
+            return {
+                "error": True,
+                "message": f"Provider '{args.provider_name}' not found",
+                "exit_code": 1,
+            }
 
         if len(providers) == 0:
-            console.error("Cannot remove last provider")
-            return 1
+            return {"error": True, "message": "Cannot remove last provider", "exit_code": 1}
 
         with open(config_file, "w") as f:
             json.dump(config, f, indent=2)
 
-        console.success(f"Provider '{args.provider_name}' removed successfully")
-        return 0
+        return {"message": "Provider removed", "provider": args.provider_name}
 
     except Exception as e:
-        get_container().get(ConsolePort).error(f"Failed to remove provider: {e}")
         logger.error("Failed to remove provider: %s", e, exc_info=True)
-        return 1
+        return {"error": True, "message": f"Failed to remove provider: {e}", "exit_code": 1}
 
 
-async def handle_provider_update(args) -> int:
+@handle_interface_exceptions(context="provider_update", interface_type="cli")
+async def handle_provider_update(args) -> dict[str, Any]:
     """Handle orb providers update command."""
     try:
-        console = get_container().get(ConsolePort)
         config_file = get_config_location() / "config.json"
         if not config_file.exists():
-            console.error("No configuration found")
-            return 1
+            return {"error": True, "message": "No configuration found", "exit_code": 1}
 
         with open(config_file) as f:
             config = json.load(f)
@@ -145,8 +145,11 @@ async def handle_provider_update(args) -> int:
                 break
 
         if not provider:
-            console.error(f"Provider '{args.provider_name}' not found")
-            return 1
+            return {
+                "error": True,
+                "message": f"Provider '{args.provider_name}' not found",
+                "exit_code": 1,
+            }
 
         # Infer provider type from stored record
         provider_type = provider.get("type", "aws")
@@ -157,8 +160,7 @@ async def handle_provider_update(args) -> int:
         if spec is not None:
             partial = spec.extract_partial_config(args)
             if not partial:
-                console.error("No updates specified.")
-                return 1
+                return {"error": True, "message": "No updates specified.", "exit_code": 1}
             provider_config.update(partial)
         else:
             # Fallback: apply any non-None aws_* attrs directly
@@ -170,69 +172,61 @@ async def handle_provider_update(args) -> int:
                 provider_config["profile"] = args.aws_profile
                 updated = True
             if not updated:
-                console.error("No updates specified.")
-                return 1
+                return {"error": True, "message": "No updates specified.", "exit_code": 1}
 
         # Test updated credentials
-        console.info("Testing updated credentials...")
         success, error = _test_provider_credentials(provider_type, provider_config)
         if not success:
-            console.error(f"Credential test failed: {error}")
-            return 1
-
-        console.success("Updated credentials verified successfully")
+            return {"error": True, "message": f"Credential test failed: {error}", "exit_code": 1}
 
         with open(config_file, "w") as f:
             json.dump(config, f, indent=2)
 
-        console.success(f"Provider '{args.provider_name}' updated successfully")
-        return 0
+        return {"message": "Provider updated", "provider": args.provider_name}
 
     except Exception as e:
-        get_container().get(ConsolePort).error(f"Failed to update provider: {e}")
         logger.error("Failed to update provider: %s", e, exc_info=True)
-        return 1
+        return {"error": True, "message": f"Failed to update provider: {e}", "exit_code": 1}
 
 
-async def handle_provider_set_default(args) -> int:
+@handle_interface_exceptions(context="provider_set_default", interface_type="cli")
+async def handle_provider_set_default(args) -> dict[str, Any]:
     """Handle orb providers set-default command."""
     try:
-        console = get_container().get(ConsolePort)
         config_file = get_config_location() / "config.json"
         if not config_file.exists():
-            console.error("No configuration found")
-            return 1
+            return {"error": True, "message": "No configuration found", "exit_code": 1}
 
         with open(config_file) as f:
             config = json.load(f)
 
         providers = config.get("provider", {}).get("providers", [])
         if not any(p["name"] == args.provider_name for p in providers):
-            console.error(f"Provider '{args.provider_name}' not found")
-            return 1
+            return {
+                "error": True,
+                "message": f"Provider '{args.provider_name}' not found",
+                "exit_code": 1,
+            }
 
         config.setdefault("provider", {})["default_provider"] = args.provider_name
 
         with open(config_file, "w") as f:
             json.dump(config, f, indent=2)
 
-        console.success(f"Default provider set to '{args.provider_name}'")
-        return 0
+        return {"message": "Default provider set", "provider": args.provider_name}
 
     except Exception as e:
-        get_container().get(ConsolePort).error(f"Failed to set default provider: {e}")
         logger.error("Failed to set default provider: %s", e, exc_info=True)
-        return 1
+        return {"error": True, "message": f"Failed to set default provider: {e}", "exit_code": 1}
 
 
-async def handle_provider_get_default(args) -> int:
+@handle_interface_exceptions(context="provider_get_default", interface_type="cli")
+async def handle_provider_get_default(args) -> dict[str, Any]:
     """Handle orb providers get-default command."""
     try:
-        console = get_container().get(ConsolePort)
         config_file = get_config_location() / "config.json"
         if not config_file.exists():
-            console.error("No configuration found")
-            return 1
+            return {"error": True, "message": "No configuration found", "exit_code": 1}
 
         with open(config_file) as f:
             config = json.load(f)
@@ -240,86 +234,99 @@ async def handle_provider_get_default(args) -> int:
         default_provider = config.get("provider", {}).get("default_provider")
 
         if default_provider:
-            console.success(f"Default provider: {default_provider}")
+            return {"default_provider": default_provider, "explicit": True}
         else:
             providers = config.get("provider", {}).get("providers", [])
             if providers:
-                first_provider = providers[0]["name"]
-                console.info(f"No explicit default set. Using first provider: {first_provider}")
+                return {"default_provider": providers[0]["name"], "explicit": False}
             else:
-                console.error("No providers configured")
-                return 1
-
-        return 0
+                return {"error": True, "message": "No providers configured", "exit_code": 1}
 
     except Exception as e:
-        get_container().get(ConsolePort).error(f"Failed to get default provider: {e}")
         logger.error("Failed to get default provider: %s", e, exc_info=True)
-        return 1
+        return {"error": True, "message": f"Failed to get default provider: {e}", "exit_code": 1}
 
 
-async def handle_provider_show(args) -> int:
-    """Handle orb providers show command."""
+@handle_interface_exceptions(context="provider_get", interface_type="cli")
+async def handle_provider_get(args) -> dict[str, Any]:
+    """Handle orb providers get command."""
     try:
-        console = get_container().get(ConsolePort)
+        provider_name = getattr(args, "name", None) or getattr(args, "provider_name", None)
+        if not provider_name:
+            return {"error": True, "message": "Provider name is required", "exit_code": 1}
+
         config_file = get_config_location() / "config.json"
         if not config_file.exists():
-            console.error("No configuration found")
-            return 1
+            return {"error": True, "message": "No configuration found", "exit_code": 1}
+
+        with open(config_file) as f:
+            config = json.load(f)
+
+        providers = config.get("provider", {}).get("providers", [])
+        provider = next((p for p in providers if p["name"] == provider_name), None)
+        if not provider:
+            return {
+                "error": True,
+                "message": f"Provider '{provider_name}' not found",
+                "exit_code": 1,
+            }
+
+        return {"provider": provider}
+
+    except Exception as e:
+        logger.error("Failed to get provider: %s", e, exc_info=True)
+        return {"error": True, "message": f"Failed to get provider: {e}", "exit_code": 1}
+
+
+async def handle_provider_show(args) -> Union[dict[str, Any], InterfaceResponse]:
+    """Handle orb providers show command."""
+    try:
+        container = get_container()
+        formatter = container.get(ResponseFormattingService)
+        config_file = get_config_location() / "config.json"
+        if not config_file.exists():
+            return formatter.format_error("No configuration found")
 
         with open(config_file) as f:
             config = json.load(f)
 
         providers = config.get("provider", {}).get("providers", [])
 
-        def _display_provider(p: dict) -> None:
-            console.info(f"Provider: {p['name']}")
-            console.info(f"Type: {p['type']}")
+        def _build_provider_dict(p: dict) -> dict[str, Any]:
             spec = CLISpecRegistry.get(p.get("type", ""))
+            display_config: dict[str, Any]
             if spec is not None:
-                for label, value in spec.format_display(p.get("config", {})):
-                    console.info(f"{label}: {value}")
+                display_config = dict(spec.format_display(p.get("config", {})))
             else:
-                for key, value in p.get("config", {}).items():
-                    console.info(f"{key}: {value}")
-            console.info(f"Enabled: {p.get('enabled', True)}")
+                display_config = p.get("config", {})
+            result: dict[str, Any] = {
+                "name": p["name"],
+                "type": p["type"],
+                "enabled": p.get("enabled", True),
+                "config": display_config,
+            }
             if p.get("template_defaults"):
-                console.info("Template Defaults:")
-                for key, value in p["template_defaults"].items():
-                    label = key.replace("_", " ").title()
-                    if isinstance(value, list):
-                        console.info(f"  {label}: {', '.join(value)}")
-                    else:
-                        console.info(f"  {label}: {value}")
+                result["template_defaults"] = p["template_defaults"]
+            return result
 
         if args.provider_name:
             provider = next((p for p in providers if p["name"] == args.provider_name), None)
             if not provider:
-                console.error(f"Provider '{args.provider_name}' not found")
-                return 1
-            _display_provider(provider)
+                return formatter.format_error(f"Provider '{args.provider_name}' not found")
+            return formatter.format_provider_detail(_build_provider_dict(provider))
         else:
             default_provider = config.get("provider", {}).get("default_provider")
             if default_provider:
                 for p in providers:
                     if p["name"] == default_provider:
-                        console.info(f"Default Provider: {p['name']}")
-                        _display_provider(p)
-                        break
-            elif providers:
-                first_provider = providers[0]
-                console.info(f"No explicit default set. First provider: {first_provider['name']}")
-                _display_provider(first_provider)
-            else:
-                console.error("No providers configured")
-                return 1
-
-        return 0
+                        return formatter.format_provider_detail(_build_provider_dict(p))
+            if providers:
+                return formatter.format_provider_detail(_build_provider_dict(providers[0]))
+            return formatter.format_error("No providers configured")
 
     except Exception as e:
-        get_container().get(ConsolePort).error(f"Failed to show provider: {e}")
         logger.error("Failed to show provider: %s", e, exc_info=True)
-        return 1
+        return formatter.format_error(f"Failed to show provider: {e}")
 
 
 def _test_provider_credentials(provider_type: str, credential_config: dict) -> tuple[bool, str]:

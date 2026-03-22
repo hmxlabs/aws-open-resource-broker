@@ -14,8 +14,8 @@ from orb.api.dependencies import (
     get_list_return_requests_orchestrator,
     get_machine_orchestrator,
     get_request_status_orchestrator,
+    get_response_formatting_service,
     get_return_machines_orchestrator,
-    get_scheduler_strategy,
 )
 from orb.api.routers.machines import router as machines_router
 from orb.api.routers.requests import router as requests_router
@@ -67,12 +67,18 @@ def requests_app():
 class TestMachinesRouter:
     """Tests for the /machines router."""
 
-    def _make_scheduler(self):
-        scheduler = MagicMock()
-        scheduler.format_request_response.return_value = {"request_id": "req-abc", "message": "ok"}
-        scheduler.format_machine_status_response.return_value = {"machines": []}
-        scheduler.format_machine_details_response.return_value = {"machine_id": "i-123"}
-        return scheduler
+    def _make_formatter(self):
+        from orb.application.dto.interface_response import InterfaceResponse
+
+        formatter = MagicMock()
+        formatter.format_request_operation.return_value = InterfaceResponse(
+            data={"request_id": "req-abc", "message": "ok"}
+        )
+        formatter.format_machine_list.return_value = InterfaceResponse(data={"machines": []})
+        formatter.format_machine_detail.return_value = InterfaceResponse(
+            data={"machine_id": "i-123"}
+        )
+        return formatter
 
     def _override_acquire(self, app, output: AcquireMachinesOutput):
         orch = MagicMock()
@@ -99,14 +105,12 @@ class TestMachinesRouter:
         return orch
 
     def _set_scheduler(self, app, scheduler=None):
-        s = scheduler or self._make_scheduler()
-        app.dependency_overrides[get_scheduler_strategy] = lambda: s
-        return s
+        f = self._make_formatter()
+        app.dependency_overrides[get_response_formatting_service] = lambda: f
+        return f
 
     def test_request_machines_happy_path(self, machines_app):
-        output = AcquireMachinesOutput(
-            request_id="req-abc", status="pending", raw={"request_id": "req-abc", "message": "ok"}
-        )
+        output = AcquireMachinesOutput(request_id="req-abc", status="pending")
         orch = self._override_acquire(machines_app, output)
         scheduler = self._set_scheduler(machines_app)
         client = TestClient(machines_app, raise_server_exceptions=False)
@@ -118,10 +122,12 @@ class TestMachinesRouter:
         inp: AcquireMachinesInput = orch.execute.call_args.args[0]
         assert inp.template_id == "t1"
         assert inp.requested_count == 3
-        scheduler.format_request_response.assert_called_once_with(output.raw)
+        scheduler.format_request_operation.assert_called_once_with(
+            {"request_id": "req-abc", "status": "pending", "machine_ids": []}, "pending"
+        )
 
     def test_request_machines_camel_case_body(self, machines_app):
-        output = AcquireMachinesOutput(request_id="req-camel", status="pending", raw={})
+        output = AcquireMachinesOutput(request_id="req-camel", status="pending")
         orch = self._override_acquire(machines_app, output)
         self._set_scheduler(machines_app)
         client = TestClient(machines_app, raise_server_exceptions=False)
@@ -134,7 +140,7 @@ class TestMachinesRouter:
         assert inp.requested_count == 3
 
     def test_request_machines_snake_case_count_alias(self, machines_app):
-        output = AcquireMachinesOutput(request_id="req-snake", status="pending", raw={})
+        output = AcquireMachinesOutput(request_id="req-snake", status="pending")
         orch = self._override_acquire(machines_app, output)
         self._set_scheduler(machines_app)
         client = TestClient(machines_app, raise_server_exceptions=False)
@@ -162,9 +168,7 @@ class TestMachinesRouter:
         assert resp.status_code == 422
 
     def test_return_machines_happy_path(self, machines_app):
-        output = ReturnMachinesOutput(
-            request_id="ret-1", status="pending", raw={"returned": ["i-123"]}
-        )
+        output = ReturnMachinesOutput(request_id="ret-1", status="pending")
         orch = self._override_return(machines_app, output)
         self._set_scheduler(machines_app)
         client = TestClient(machines_app, raise_server_exceptions=False)
@@ -177,7 +181,7 @@ class TestMachinesRouter:
         assert inp.machine_ids == ["i-123"]
 
     def test_return_machines_empty_ids(self, machines_app):
-        output = ReturnMachinesOutput(request_id=None, status="pending", raw={})
+        output = ReturnMachinesOutput(request_id=None, status="pending")
         orch = self._override_return(machines_app, output)
         self._set_scheduler(machines_app)
         client = TestClient(machines_app, raise_server_exceptions=False)
@@ -188,7 +192,7 @@ class TestMachinesRouter:
         orch.execute.assert_awaited_once()
 
     def test_return_machines_camel_case_body(self, machines_app):
-        output = ReturnMachinesOutput(request_id=None, status="pending", raw={})
+        output = ReturnMachinesOutput(request_id=None, status="pending")
         orch = self._override_return(machines_app, output)
         self._set_scheduler(machines_app)
         client = TestClient(machines_app, raise_server_exceptions=False)
@@ -273,19 +277,20 @@ class TestMachinesRouter:
 class TestRequestsRouter:
     """Tests for the /requests router."""
 
-    def _make_scheduler(self):
-        scheduler = MagicMock()
-        scheduler.format_request_status_response.return_value = {"requests": []}
-        scheduler.format_request_response.return_value = {
-            "request_id": "req-789",
-            "status": "cancelled",
-        }
-        return scheduler
+    def _make_formatter(self):
+        from orb.application.dto.interface_response import InterfaceResponse
+
+        formatter = MagicMock()
+        formatter.format_request_status.return_value = InterfaceResponse(data={"requests": []})
+        formatter.format_request_operation.return_value = InterfaceResponse(
+            data={"request_id": "req-789", "status": "cancelled"}
+        )
+        return formatter
 
     def _set_scheduler(self, app, scheduler=None):
-        s = scheduler or self._make_scheduler()
-        app.dependency_overrides[get_scheduler_strategy] = lambda: s
-        return s
+        f = self._make_formatter()
+        app.dependency_overrides[get_response_formatting_service] = lambda: f
+        return f
 
     def _override_list_requests(self, app, output: ListRequestsOutput):
         orch = MagicMock()
@@ -409,7 +414,7 @@ class TestRequestsRouter:
         client.get("/requests/req-123/status")
 
         inp: GetRequestStatusInput = orch.execute.call_args.args[0]
-        assert inp.detailed is True
+        assert inp.verbose is True
 
     def test_get_request_status_long_false(self, requests_app):
         output = GetRequestStatusOutput(requests=[])
@@ -417,10 +422,10 @@ class TestRequestsRouter:
         self._set_scheduler(requests_app)
         client = TestClient(requests_app, raise_server_exceptions=False)
 
-        client.get("/requests/req-123/status?long=false")
+        client.get("/requests/req-123/status?verbose=false")
 
         inp: GetRequestStatusInput = orch.execute.call_args.args[0]
-        assert inp.detailed is False
+        assert inp.verbose is False
 
     def test_get_request_details(self, requests_app):
         # GET /requests/{id} (no /status) was removed; expect 404 or 405
@@ -435,7 +440,6 @@ class TestRequestsRouter:
         output = CancelRequestOutput(
             request_id="req-789",
             status="cancelled",
-            raw={"request_id": "req-789", "status": "cancelled"},
         )
         orch = self._override_cancel(requests_app, output)
         self._set_scheduler(requests_app)
@@ -450,7 +454,7 @@ class TestRequestsRouter:
         assert inp.reason == "Cancelled via REST API"
 
     def test_cancel_request_with_reason(self, requests_app):
-        output = CancelRequestOutput(request_id="req-789", status="cancelled", raw={})
+        output = CancelRequestOutput(request_id="req-789", status="cancelled")
         orch = self._override_cancel(requests_app, output)
         self._set_scheduler(requests_app)
         client = TestClient(requests_app, raise_server_exceptions=False)
@@ -462,7 +466,7 @@ class TestRequestsRouter:
         assert inp.reason == "no longer needed"
 
     def test_cancel_request_default_reason(self, requests_app):
-        output = CancelRequestOutput(request_id="req-999", status="cancelled", raw={})
+        output = CancelRequestOutput(request_id="req-999", status="cancelled")
         orch = self._override_cancel(requests_app, output)
         self._set_scheduler(requests_app)
         client = TestClient(requests_app, raise_server_exceptions=False)

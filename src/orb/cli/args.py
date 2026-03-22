@@ -9,6 +9,7 @@ import argparse
 import os
 import sys
 
+from orb.domain.machine.machine_status import MachineStatus
 from orb.domain.request.value_objects import RequestStatus
 
 # Optional: Rich formatting for help text
@@ -76,11 +77,15 @@ def add_machine_actions(subparsers):
     machines_list = subparsers.add_parser(
         "list",
         help="List machines",
-        description="List machines with filtering support. Use specific filters (--status, --template-id) or generic filters (--filter field=value).",
+        description="List machines with filtering support. Use specific filters (--status, --request-id) or generic filters (--filter field=value).",
     )
     add_global_arguments(machines_list)
-    machines_list.add_argument("--status", help="Filter by machine status (specific filter)")
-    machines_list.add_argument("--template-id", help="Filter by template ID (specific filter)")
+    machines_list.add_argument(
+        "--status",
+        choices=[s.value for s in MachineStatus],
+        help="Filter by machine status (specific filter)",
+    )
+    machines_list.add_argument("--request-id", dest="request_id", help="Filter by request ID")
     machines_list.add_argument(
         "--timestamp-format",
         choices=["auto", "unix", "iso"],
@@ -118,27 +123,53 @@ def add_machine_actions(subparsers):
     add_global_arguments(machines_return)
     add_force_argument(machines_return)
     machines_return.add_argument("machine_ids", nargs="*", help="Machine IDs to return")
+    machines_return.add_argument(
+        "--machine-id", "-m", action="append", dest="machine_ids_flag", help="Machine ID to return"
+    )
+    machines_return.add_argument(
+        "--wait", action="store_true", help="Wait for return request to complete"
+    )
+    machines_return.add_argument("--timeout", type=int, default=300, help="Wait timeout in seconds")
 
     machines_terminate = subparsers.add_parser("terminate", help="Terminate (return) machines")
     add_global_arguments(machines_terminate)
     add_force_argument(machines_terminate)
     machines_terminate.add_argument("machine_ids", nargs="*", help="Machine IDs to terminate")
+    machines_terminate.add_argument(
+        "--machine-id",
+        "-m",
+        action="append",
+        dest="machine_ids_flag",
+        help="Machine ID to terminate",
+    )
+    machines_terminate.add_argument(
+        "--wait", action="store_true", help="Wait for terminate request to complete"
+    )
+    machines_terminate.add_argument(
+        "--timeout", type=int, default=300, help="Wait timeout in seconds"
+    )
 
     machines_status = subparsers.add_parser("status", help="Check machine status")
     add_global_arguments(machines_status)
     machines_status.add_argument("machine_ids", nargs="*", help="Machine IDs to check")
     machines_status.add_argument(
-        "--machine-id", "-m", action="append", dest="flag_machine_ids", help="Machine ID to check"
+        "--machine-id", "-m", action="append", dest="machine_ids_flag", help="Machine ID to check"
     )
 
     machines_stop = subparsers.add_parser("stop", help="Stop running machines")
     add_global_arguments(machines_stop)
     add_force_argument(machines_stop)
     machines_stop.add_argument("machine_ids", nargs="*", help="Machine IDs to stop")
+    machines_stop.add_argument(
+        "--machine-id", "-m", action="append", dest="machine_ids_flag", help="Machine ID to stop"
+    )
 
     machines_start = subparsers.add_parser("start", help="Start stopped machines")
     add_global_arguments(machines_start)
     machines_start.add_argument("machine_ids", nargs="*", help="Machine IDs to start")
+    machines_start.add_argument(
+        "--machine-id", "-m", action="append", dest="machine_ids_flag", help="Machine ID to start"
+    )
 
 
 def add_request_actions(subparsers):
@@ -164,11 +195,17 @@ def add_request_actions(subparsers):
     requests_show = subparsers.add_parser("show", help="Show request details")
     add_global_arguments(requests_show)
     requests_show.add_argument("request_id", nargs="?", help="Request ID to show")
+    requests_show.add_argument(
+        "--request-id", "-r", dest="flag_request_id", help="Request ID to show"
+    )
 
     requests_cancel = subparsers.add_parser("cancel", help="Cancel request")
     add_global_arguments(requests_cancel)
     add_force_argument(requests_cancel)
-    requests_cancel.add_argument("request_id", help="Request ID to cancel")
+    requests_cancel.add_argument("request_id", nargs="?", help="Request ID to cancel")
+    requests_cancel.add_argument(
+        "--request-id", "-r", dest="flag_request_id", help="Request ID to cancel"
+    )
 
     requests_status = subparsers.add_parser("status", help="Check request status")
     add_global_arguments(requests_status)
@@ -176,9 +213,10 @@ def add_request_actions(subparsers):
     requests_status.add_argument(
         "--request-id", "-r", action="append", dest="flag_request_ids", help="Request ID to check"
     )
-    requests_status.add_argument(
-        "--detailed", action="store_true", help="Show detailed request information"
-    )
+
+    requests_list_returns = subparsers.add_parser("list-returns", help="List return requests")
+    add_global_arguments(requests_list_returns)
+    requests_list_returns.add_argument("--status", help="Filter by return request status")
 
 
 def add_infrastructure_actions(subparsers):
@@ -224,10 +262,6 @@ def add_provider_actions(subparsers):
         description="List providers with filtering support.",
     )
     add_global_arguments(providers_list)
-    providers_list.add_argument(
-        "--detailed", action="store_true", help="Show detailed provider information"
-    )
-
     providers_show = subparsers.add_parser("show", help="Show provider details")
     add_global_arguments(providers_show)
     providers_show.add_argument("provider_name", nargs="?", help="Provider name to show")
@@ -259,18 +293,23 @@ def add_provider_actions(subparsers):
     add_global_arguments(providers_set_default)
     providers_set_default.add_argument("provider_name", help="Provider name to set as default")
 
+    providers_get = subparsers.add_parser("get", help="Get provider details by name")
+    add_global_arguments(providers_get)
+    providers_get.add_argument("name", help="Provider name")
+
     providers_get_default = subparsers.add_parser("get-default", help="Show default provider")
     add_global_arguments(providers_get_default)
 
     providers_select = subparsers.add_parser("select", help="Select provider instance")
     add_global_arguments(providers_select)
-    providers_select.add_argument("provider", help="Provider name to select")
-    providers_select.add_argument("--strategy", help="Specific strategy to select")
+    providers_select.add_argument("provider_name", help="Provider name to select")
 
     providers_exec = subparsers.add_parser("exec", help="Execute provider command")
     add_global_arguments(providers_exec)
     providers_exec.add_argument("operation", help="Operation to execute")
-    providers_exec.add_argument("--params", help="Operation parameters (JSON format)")
+    providers_exec.add_argument(
+        "--params", "--args", dest="params", help="Operation parameters (JSON format)"
+    )
 
     providers_metrics = subparsers.add_parser("metrics", help="Show provider metrics")
     add_global_arguments(providers_metrics)
@@ -324,6 +363,9 @@ def add_template_actions(subparsers):
     templates_validate = subparsers.add_parser("validate", help="Validate template")
     add_global_arguments(templates_validate)
     templates_validate.add_argument("template_id", nargs="?", help="Template ID to validate")
+    templates_validate.add_argument(
+        "--template-id", "-t", dest="flag_template_id", help="Template ID to validate"
+    )
     templates_validate.add_argument("--file", help="Template file to validate (pre-import)")
 
     templates_refresh = subparsers.add_parser("refresh", help="Refresh template cache")
@@ -348,11 +390,11 @@ def add_template_actions(subparsers):
     templates_generate.add_argument("--provider-type", help="Provider type (e.g., aws)")
 
 
-def parse_args() -> tuple[argparse.Namespace, dict]:
-    """Parse command line arguments with resource-action structure.
+def build_parser() -> tuple[argparse.ArgumentParser, dict]:
+    """Build the argument parser with resource-action structure.
 
     Returns:
-        tuple: (parsed_args, resource_parsers_dict)
+        tuple: (parser, resource_parsers_dict)
     """
     from orb._package import DESCRIPTION, DOCS_URL
 
@@ -450,12 +492,11 @@ For more information, visit: {DOCS_URL}
 
     system_health = system_subparsers.add_parser("health", help="Check system health")
     add_global_arguments(system_health)
-    system_health.add_argument(
-        "--detailed", action="store_true", help="Show detailed health information"
-    )
-
     system_metrics = system_subparsers.add_parser("metrics", help="Show system metrics")
     add_global_arguments(system_metrics)
+
+    system_reload = system_subparsers.add_parser("reload", help="Reload provider configuration")
+    add_global_arguments(system_reload)
 
     system_serve = system_subparsers.add_parser("serve", help="Start REST API server")
     add_global_arguments(system_serve)
@@ -502,6 +543,9 @@ For more information, visit: {DOCS_URL}
     add_global_arguments(config_validate)
     config_validate.add_argument("--file", help="Configuration file to validate")
 
+    config_reload = config_subparsers.add_parser("reload", help="Reload provider configuration")
+    add_global_arguments(config_reload)
+
     # Providers
     providers_parser = subparsers.add_parser("providers", help="Cloud providers")
     resource_parsers["providers"] = providers_parser
@@ -539,10 +583,6 @@ For more information, visit: {DOCS_URL}
 
     storage_health = storage_subparsers.add_parser("health", help="Check storage health")
     add_global_arguments(storage_health)
-    storage_health.add_argument(
-        "--detailed", action="store_true", help="Show detailed health information"
-    )
-
     storage_metrics = storage_subparsers.add_parser("metrics", help="Show storage metrics")
     add_global_arguments(storage_metrics)
     storage_metrics.add_argument("--strategy", help="Show metrics for specific storage strategy")
@@ -631,4 +671,10 @@ For more information, visit: {DOCS_URL}
         help="Spot Fleet IAM role ARN or name for template_defaults (non-interactive only)",
     )
 
+    return parser, resource_parsers
+
+
+def parse_args() -> tuple[argparse.Namespace, dict]:
+    """Parse command line arguments. Thin wrapper around build_parser()."""
+    parser, resource_parsers = build_parser()
     return parser.parse_args(), resource_parsers

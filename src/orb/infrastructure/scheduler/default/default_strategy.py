@@ -167,6 +167,7 @@ class DefaultSchedulerStrategy(BaseSchedulerStrategy):
         return {
             "templates": [self.format_template_for_display(template) for template in templates],
             "message": "Templates retrieved successfully",
+            "success": True,
             "total_count": len(templates),
         }
 

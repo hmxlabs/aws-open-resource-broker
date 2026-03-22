@@ -40,9 +40,19 @@ def _make_namespace(**kwargs) -> argparse.Namespace:
 
 
 def _mock_container(extra: dict | None = None):
-    """Return (container, scheduler) mocks with orchestrators pre-wired."""
+    """Return (container, scheduler, formatter, orchestrators...) mocks pre-wired."""
+    from orb.application.dto.interface_response import InterfaceResponse
+    from orb.interface.response_formatting_service import ResponseFormattingService
+
     container = MagicMock()
     scheduler = MagicMock(spec=SchedulerPort)
+    formatter = MagicMock(spec=ResponseFormattingService)
+
+    # Default formatter return values — tests override as needed
+    formatter.format_request_status.return_value = InterfaceResponse(data={"requests": []})
+    formatter.format_request_operation.return_value = InterfaceResponse(
+        data={"request_id": "req-1", "status": "pending"}
+    )
 
     acquire_orch = AsyncMock(spec=AcquireMachinesOrchestrator)
     cancel_orch = AsyncMock(spec=CancelRequestOrchestrator)
@@ -53,6 +63,7 @@ def _mock_container(extra: dict | None = None):
 
     dispatch_map: dict = {
         SchedulerPort: scheduler,
+        ResponseFormattingService: formatter,
         AcquireMachinesOrchestrator: acquire_orch,
         CancelRequestOrchestrator: cancel_orch,
         GetRequestStatusOrchestrator: status_orch,
@@ -73,6 +84,7 @@ def _mock_container(extra: dict | None = None):
         list_req_orch,
         list_ret_orch,
         return_orch,
+        formatter,
     )
 
 
@@ -85,34 +97,34 @@ def _mock_container(extra: dict | None = None):
 class TestHandleRequestMachines:
     @pytest.mark.asyncio
     async def test_happy_path(self):
-        """template_id + machine_count → AcquireMachinesOrchestrator called, tuple returned."""
-        container, scheduler, acquire_orch, *_ = _mock_container()
+        """template_id + machine_count → AcquireMachinesOrchestrator called, InterfaceResponse returned."""
+        from orb.application.dto.interface_response import InterfaceResponse
 
-        scheduler.parse_request_data.return_value = {
-            "template_id": "t1",
-            "requested_count": 3,
-        }
+        container, _scheduler, acquire_orch, _, _, _, _, _, formatter = _mock_container()
+
         acquire_orch.execute.return_value = AcquireMachinesOutput(
             request_id="req-abc", status="pending", machine_ids=["r-1"]
         )
-        scheduler.format_request_response.return_value = {"requestId": "req-abc"}
-        scheduler.get_exit_code_for_status.return_value = 0
+        formatter.format_request_operation.return_value = InterfaceResponse(
+            data={"requestId": "req-abc"}, exit_code=0
+        )
 
         args = _make_namespace(template_id="t1", machine_count=3, metadata={})
 
         with patch("orb.interface.request_command_handlers.get_container", return_value=container):
             result = await handle_request_machines(args)
 
-        assert isinstance(result, tuple)
-        response, exit_code = result
-        assert exit_code == 0
-        assert response == {"requestId": "req-abc"}
+        assert isinstance(result, InterfaceResponse)
+        assert result.exit_code == 0
+        assert result.data == {"requestId": "req-abc"}
         acquire_orch.execute.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_from_input_data(self):
         """input_data dict is passed to scheduler.parse_request_data."""
-        container, scheduler, acquire_orch, *_ = _mock_container()
+        from orb.application.dto.interface_response import InterfaceResponse
+
+        container, scheduler, acquire_orch, _, _, _, _, _, formatter = _mock_container()
 
         scheduler.parse_request_data.return_value = {
             "template_id": "t1",
@@ -121,8 +133,9 @@ class TestHandleRequestMachines:
         acquire_orch.execute.return_value = AcquireMachinesOutput(
             request_id="req-xyz", status="pending"
         )
-        scheduler.format_request_response.return_value = {"requestId": "req-xyz"}
-        scheduler.get_exit_code_for_status.return_value = 0
+        formatter.format_request_operation.return_value = InterfaceResponse(
+            data={"requestId": "req-xyz"}
+        )
 
         args = _make_namespace(
             input_data={"template_id": "t1", "requested_count": 2},
@@ -135,7 +148,7 @@ class TestHandleRequestMachines:
         scheduler.parse_request_data.assert_called_once_with(
             {"template_id": "t1", "requested_count": 2}
         )
-        assert isinstance(result, tuple)
+        assert isinstance(result, InterfaceResponse)
 
     @pytest.mark.asyncio
     async def test_missing_template_id(self):
@@ -179,11 +192,15 @@ class TestHandleRequestReturnMachines:
     @pytest.mark.asyncio
     async def test_happy_path(self):
         """machine_ids provided → ReturnMachinesOrchestrator called."""
-        container, scheduler, _, _, _, _, _, return_orch = _mock_container()
+        from orb.application.dto.interface_response import InterfaceResponse
+
+        container, _scheduler, _, _, _, _, _, return_orch, formatter = _mock_container()
         return_orch.execute.return_value = ReturnMachinesOutput(
             request_id="ret-1", status="pending"
         )
-        scheduler.format_request_response.return_value = {"requestId": "ret-1", "status": "pending"}
+        formatter.format_request_operation.return_value = InterfaceResponse(
+            data={"requestId": "ret-1", "status": "pending"}
+        )
 
         args = _make_namespace(machine_ids=["i-1", "i-2"])
 
@@ -193,16 +210,15 @@ class TestHandleRequestReturnMachines:
         return_orch.execute.assert_awaited_once()
         call_input = return_orch.execute.call_args[0][0]
         assert call_input.machine_ids == ["i-1", "i-2"]
-        assert isinstance(result, dict)
+        assert isinstance(result, InterfaceResponse)
 
     @pytest.mark.asyncio
     async def test_from_input_data(self):
         """input_data with machineId keys → IDs extracted correctly."""
-        container, scheduler, _, _, _, _, _, return_orch = _mock_container()
+        container, _scheduler, _, _, _, _, _, return_orch, _ = _mock_container()
         return_orch.execute.return_value = ReturnMachinesOutput(
             request_id="ret-1", status="pending"
         )
-        scheduler.format_request_response.return_value = {"status": "pending"}
 
         args = _make_namespace(
             input_data={"machines": [{"machineId": "i-1"}, {"machineId": "i-2"}]}
@@ -243,11 +259,10 @@ class TestHandleRequestReturnMachines:
     @pytest.mark.asyncio
     async def test_all_with_force(self):
         """all=True, force=True → ReturnMachinesOrchestrator called with all_machines=True."""
-        container, scheduler, _, _, _, _, _, return_orch = _mock_container()
+        container, _scheduler, _, _, _, _, _, return_orch, _ = _mock_container()
         return_orch.execute.return_value = ReturnMachinesOutput(
             request_id="ret-1", status="pending"
         )
-        scheduler.format_request_response.return_value = {"status": "pending"}
 
         args = _make_namespace(all=True, force=True)
 
@@ -268,17 +283,17 @@ class TestHandleRequestReturnMachines:
 class TestHandleCancelRequest:
     @pytest.mark.asyncio
     async def test_happy_path(self):
-        """request_id provided → CancelRequestOrchestrator called, status=cancelled."""
-        container, scheduler, _, cancel_orch, *_ = _mock_container()
+        """request_id provided → CancelRequestOrchestrator called, InterfaceResponse returned."""
+        from orb.application.dto.interface_response import InterfaceResponse
+
+        container, _scheduler, _, cancel_orch, *_, formatter = _mock_container()
         cancel_orch.execute.return_value = CancelRequestOutput(
             request_id="req-123",
             status="cancelled",
-            raw={"request_id": "req-123", "status": "cancelled"},
         )
-        scheduler.format_request_response.return_value = {
-            "request_id": "req-123",
-            "status": "cancelled",
-        }
+        formatter.format_request_operation.return_value = InterfaceResponse(
+            data={"request_id": "req-123", "status": "cancelled"}
+        )
 
         args = _make_namespace(request_id="req-123")
 
@@ -288,8 +303,8 @@ class TestHandleCancelRequest:
         cancel_orch.execute.assert_awaited_once()
         call_input = cancel_orch.execute.call_args[0][0]
         assert call_input.request_id == "req-123"
-        assert isinstance(result, dict)
-        assert result["status"] == "cancelled"
+        assert isinstance(result, InterfaceResponse)
+        assert result.data["status"] == "cancelled"
 
     @pytest.mark.asyncio
     async def test_with_reason(self):
@@ -298,7 +313,6 @@ class TestHandleCancelRequest:
         cancel_orch.execute.return_value = CancelRequestOutput(
             request_id="req-123",
             status="cancelled",
-            raw={"request_id": "req-123", "status": "cancelled"},
         )
         scheduler.format_request_response.return_value = {"status": "cancelled"}
 
@@ -335,9 +349,11 @@ class TestHandleGetReturnRequests:
     @pytest.mark.asyncio
     async def test_happy_path(self):
         """No input_data → ListReturnRequestsOrchestrator called."""
-        container, scheduler, _, _, _, _, list_ret_orch, _ = _mock_container()
+        from orb.application.dto.interface_response import InterfaceResponse
+
+        container, _scheduler, _, _, _, _, list_ret_orch, _, formatter = _mock_container()
         list_ret_orch.execute.return_value = ListReturnRequestsOutput(requests=[])
-        scheduler.format_request_status_response.return_value = {"requests": []}
+        formatter.format_request_status.return_value = InterfaceResponse(data={"requests": []})
 
         args = _make_namespace()
 
@@ -345,7 +361,7 @@ class TestHandleGetReturnRequests:
             result = await handle_get_return_requests(args)
 
         list_ret_orch.execute.assert_awaited_once()
-        assert isinstance(result, dict)
+        assert isinstance(result, InterfaceResponse)
 
 
 # ---------------------------------------------------------------------------
@@ -358,11 +374,13 @@ class TestHandleGetRequestStatus:
     @pytest.mark.asyncio
     async def test_single_id(self):
         """request_id provided → GetRequestStatusOrchestrator called with that ID."""
-        container, scheduler, _, _, status_orch, *_ = _mock_container()
+        from orb.application.dto.interface_response import InterfaceResponse
+
+        container, _scheduler, _, _, status_orch, *_, formatter = _mock_container()
         status_orch.execute.return_value = GetRequestStatusOutput(
             requests=[{"request_id": "req-123", "status": "complete"}]
         )
-        scheduler.format_request_status_response.return_value = {"requests": []}
+        formatter.format_request_status.return_value = InterfaceResponse(data={"requests": []})
 
         args = _make_namespace(request_id="req-123", all=False)
 
@@ -372,7 +390,7 @@ class TestHandleGetRequestStatus:
         status_orch.execute.assert_awaited_once()
         call_input = status_orch.execute.call_args[0][0]
         assert "req-123" in call_input.request_ids
-        assert isinstance(result, dict)
+        assert isinstance(result, InterfaceResponse)
 
     @pytest.mark.asyncio
     async def test_all_flag(self):
@@ -405,74 +423,76 @@ class TestHandleGetRequestStatus:
 
 
 # ---------------------------------------------------------------------------
-# handle_get_request_status — detailed flag (2010) + multi-ID paths (2014)
+# handle_get_request_status — verbose flag (2010) + multi-ID paths (2014)
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.unit
 class TestHandleGetRequestStatusDetailed:
-    """2010: --detailed flag must be respected, not hardcoded to True."""
+    """2010: --verbose flag must be respected, not hardcoded to True."""
 
     @pytest.mark.asyncio
     async def test_detailed_false_by_default(self):
-        """No --detailed on args → orchestrator receives detailed=False."""
-        container, scheduler, _, _, status_orch, *_ = _mock_container()
-        status_orch.execute.return_value = GetRequestStatusOutput(requests=[])
-        scheduler.format_request_status_response.return_value = {"requests": []}
+        """No --verbose on args → orchestrator receives verbose=False."""
+        from orb.application.dto.interface_response import InterfaceResponse
 
-        args = _make_namespace(request_id="req-001", all=False, detailed=False)
+        container, _scheduler, _, _, status_orch, *_, formatter = _mock_container()
+        status_orch.execute.return_value = GetRequestStatusOutput(requests=[])
+        formatter.format_request_status.return_value = InterfaceResponse(data={"requests": []})
+
+        args = _make_namespace(request_id="req-001", all=False, verbose=False)
 
         with patch("orb.interface.request_command_handlers.get_container", return_value=container):
             result = await handle_get_request_status(args)
 
         call_input = status_orch.execute.call_args[0][0]
-        assert call_input.detailed is False
-        assert isinstance(result, dict)
+        assert call_input.verbose is False
+        assert isinstance(result, InterfaceResponse)
 
     @pytest.mark.asyncio
     async def test_detailed_true_when_flag_set(self):
-        """--detailed set → orchestrator receives detailed=True."""
+        """--verbose set → orchestrator receives verbose=True."""
         container, scheduler, _, _, status_orch, *_ = _mock_container()
         status_orch.execute.return_value = GetRequestStatusOutput(requests=[])
         scheduler.format_request_status_response.return_value = {"requests": []}
 
-        args = _make_namespace(request_id="req-001", all=False, detailed=True)
+        args = _make_namespace(request_id="req-001", all=False, verbose=True)
 
         with patch("orb.interface.request_command_handlers.get_container", return_value=container):
             await handle_get_request_status(args)
 
         call_input = status_orch.execute.call_args[0][0]
-        assert call_input.detailed is True
+        assert call_input.verbose is True
 
     @pytest.mark.asyncio
     async def test_all_path_detailed_false_by_default(self):
-        """--all path also respects detailed flag defaulting to False."""
+        """--all path also respects verbose flag defaulting to False."""
         container, scheduler, _, _, status_orch, *_ = _mock_container()
         status_orch.execute.return_value = GetRequestStatusOutput(requests=[])
         scheduler.format_request_status_response.return_value = {"requests": []}
 
-        args = _make_namespace(all=True, detailed=False)
+        args = _make_namespace(all=True, verbose=False)
 
         with patch("orb.interface.request_command_handlers.get_container", return_value=container):
             await handle_get_request_status(args)
 
         call_input = status_orch.execute.call_args[0][0]
-        assert call_input.detailed is False
+        assert call_input.verbose is False
 
     @pytest.mark.asyncio
     async def test_all_path_detailed_true_when_flag_set(self):
-        """--all + --detailed → orchestrator receives detailed=True."""
+        """--all + --verbose → orchestrator receives verbose=True."""
         container, scheduler, _, _, status_orch, *_ = _mock_container()
         status_orch.execute.return_value = GetRequestStatusOutput(requests=[])
         scheduler.format_request_status_response.return_value = {"requests": []}
 
-        args = _make_namespace(all=True, detailed=True)
+        args = _make_namespace(all=True, verbose=True)
 
         with patch("orb.interface.request_command_handlers.get_container", return_value=container):
             await handle_get_request_status(args)
 
         call_input = status_orch.execute.call_args[0][0]
-        assert call_input.detailed is True
+        assert call_input.verbose is True
 
 
 @pytest.mark.unit
@@ -482,9 +502,11 @@ class TestHandleGetRequestStatusMultiId:
     @pytest.mark.asyncio
     async def test_request_ids_list_flag(self):
         """args.request_ids=['req-1','req-2'] → both IDs forwarded."""
-        container, scheduler, _, _, status_orch, *_ = _mock_container()
+        from orb.application.dto.interface_response import InterfaceResponse
+
+        container, _scheduler, _, _, status_orch, *_, formatter = _mock_container()
         status_orch.execute.return_value = GetRequestStatusOutput(requests=[])
-        scheduler.format_request_status_response.return_value = {"requests": []}
+        formatter.format_request_status.return_value = InterfaceResponse(data={"requests": []})
 
         args = _make_namespace(request_ids=["req-1", "req-2"], all=False)
 
@@ -494,7 +516,7 @@ class TestHandleGetRequestStatusMultiId:
         call_input = status_orch.execute.call_args[0][0]
         assert "req-1" in call_input.request_ids
         assert "req-2" in call_input.request_ids
-        assert isinstance(result, dict)
+        assert isinstance(result, InterfaceResponse)
 
     @pytest.mark.asyncio
     async def test_flag_request_ids_path(self):
@@ -606,9 +628,11 @@ class TestHandleListRequests:
     @pytest.mark.asyncio
     async def test_happy_path(self):
         """handle_list_requests → ListRequestsOrchestrator called."""
-        container, scheduler, _, _, _, list_req_orch, *_ = _mock_container()
+        from orb.application.dto.interface_response import InterfaceResponse
+
+        container, _scheduler, _, _, _, list_req_orch, *_, formatter = _mock_container()
         list_req_orch.execute.return_value = ListRequestsOutput(requests=[])
-        scheduler.format_request_status_response.return_value = {"requests": []}
+        formatter.format_request_status.return_value = InterfaceResponse(data={"requests": []})
 
         args = _make_namespace()
 
@@ -616,4 +640,4 @@ class TestHandleListRequests:
             result = await handle_list_requests(args)
 
         list_req_orch.execute.assert_awaited_once()
-        assert isinstance(result, dict)
+        assert isinstance(result, InterfaceResponse)

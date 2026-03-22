@@ -35,9 +35,9 @@ def _get_from_package_metadata() -> Optional[dict]:
                 "short_name": "orb",  # Not in package metadata, hardcode this one
                 "version": version("orb-py"),
                 "description": meta["Summary"],
-                "author": meta["Author"],
-                "email": meta["Author-email"],
-                "license": meta["License"],
+                "author": meta.get("Author") or "",
+                "email": meta.get("Author-email") or "",
+                "license": meta.get("License") or "",
             },
             "repository": {
                 "org": "awslabs",  # Not in package metadata
@@ -65,8 +65,8 @@ if not config:
             # CI builds will override this with dynamic versions like "0.1.0.dev20250822145030+abc1234"
             "version": "0.1.0.dev0",
             "description": "Open Resource Broker (ORB) — dynamic cloud resource provisioning via CLI and REST API",
-            "author": "AWS Professional Services",
-            "email": "aws-proserve@amazon.com",
+            "author": "AWS ORB Maintainers",
+            "email": "aws-orb-maintainers@amazon.com",
             "license": "Apache-2.0",
         },
         "repository": {

@@ -178,9 +178,10 @@ class HostFactoryResponseFormatter:
         return {
             "machines": [
                 {
-                    "instanceId": str(machine.machine_id),
+                    "machineId": str(machine.machine_id),
                     "templateId": str(machine.template_id),
                     "requestId": str(machine.request_id),
+                    "returnRequestId": machine.return_request_id,
                     "vmType": str(machine.instance_type),
                     "imageId": str(machine.image_id),
                     "privateIp": machine.private_ip,
@@ -200,13 +201,12 @@ class HostFactoryResponseFormatter:
     def format_machine_details_response(self, machine_data: dict) -> dict:
         """Format machine details with HostFactory-specific fields."""
         return {
-            "id": machine_data.get("id"),
             "name": machine_data.get("name"),
             "status": machine_data.get("status"),
-            "provider": "hostfactory",
-            "instance_type": machine_data.get("instance_type"),
+            "provider": machine_data.get("provider_type") or "aws",
             "region": machine_data.get("region"),
-            "instanceId": machine_data.get("id"),
+            "machineId": machine_data.get("machine_id"),
+            "returnRequestId": machine_data.get("return_request_id"),
             "vmType": machine_data.get("instance_type"),
             "imageId": machine_data.get("image_id"),
             "privateIp": machine_data.get("private_ip"),
@@ -217,6 +217,14 @@ class HostFactoryResponseFormatter:
             "launchTime": machine_data.get("launch_time"),
             "terminationTime": machine_data.get("termination_time"),
             "tags": machine_data.get("tags"),
+        }
+
+    def format_template_mutation_response(self, raw: dict[str, Any]) -> dict[str, Any]:
+        """Format template mutation response using HostFactory camelCase keys."""
+        return {
+            "templateId": raw.get("template_id"),
+            "status": raw.get("status"),
+            "validationErrors": raw.get("validation_errors", []),
         }
 
     def format_machines_for_hostfactory(
@@ -240,7 +248,7 @@ class HostFactoryResponseFormatter:
             else:
                 message = machine.get("message", "")
 
-            launchtime = int(machine.get("launch_time_timestamp", 0))
+            launchtime = int(machine.get("launch_time") or 0)
             raw_ip = machine.get("private_ip_address", machine.get("private_ip"))
             private_ip = raw_ip if raw_ip else None
 
@@ -256,6 +264,18 @@ class HostFactoryResponseFormatter:
                 "message": message,
                 "cloudHostId": machine.get("cloud_host_id") or None,
             }
+
+            if request_type == "return":
+                formatted_machine["requestId"] = machine.get("request_id")
+            elif request_type in ("acquire", "provision"):
+                if machine.get("return_request_id"):
+                    formatted_machine["returnRequestId"] = machine.get("return_request_id")
+            else:
+                # neutral context (machine list/show) — show both when present
+                if machine.get("request_id"):
+                    formatted_machine["requestId"] = machine.get("request_id")
+                if machine.get("return_request_id"):
+                    formatted_machine["returnRequestId"] = machine.get("return_request_id")
 
             formatted_machine["publicIpAddress"] = (
                 machine.get("public_ip_address") or machine.get("public_ip") or None
@@ -281,7 +301,7 @@ class HostFactoryResponseFormatter:
         if request_type == "return":
             if status in ["terminated", "stopped"]:
                 return "succeed"
-            elif status in ["shutting-down", "stopping", "pending", "terminating"]:
+            elif status in ["shutting-down", "stopping", "pending", "terminating", "running"]:
                 return "executing"
             else:
                 return "fail"

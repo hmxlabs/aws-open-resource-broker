@@ -54,8 +54,12 @@ def _make_args(**kwargs: Any) -> argparse.Namespace:
 
 def _top_level_keys(result: Any) -> set[str]:
     """Return the top-level keys of a dict result, unwrapping tuple returns."""
+    from orb.application.dto.interface_response import InterfaceResponse
+
     if isinstance(result, tuple):
         result = result[0]
+    if isinstance(result, InterfaceResponse):
+        result = result.data
     assert isinstance(result, dict), f"Expected dict, got {type(result)}: {result!r}"
     return set(result.keys())
 
@@ -515,31 +519,40 @@ async def test_list_templates_cli_equals_rest_top_level_keys(scheduler_type: str
 @pytest.mark.asyncio
 async def test_list_machines_cli_returns_dict(scheduler_type: str) -> None:
     """handle_list_machines always returns a dict, never a bare list."""
+    from orb.application.dto.interface_response import InterfaceResponse
     from orb.interface.machine_command_handlers import handle_list_machines
 
     strategy = _make_scheduler_strategy(scheduler_type)
     result = await _call_cli(handle_list_machines, _make_args(), strategy)
     unwrapped = result[0] if isinstance(result, tuple) else result  # type: ignore[index]
+    if isinstance(unwrapped, InterfaceResponse):
+        unwrapped = unwrapped.data
     assert isinstance(unwrapped, dict), f"[{scheduler_type}] Expected dict, got {type(unwrapped)}"
 
 
 @pytest.mark.asyncio
 async def test_list_requests_cli_returns_dict(scheduler_type: str) -> None:
     """handle_list_requests always returns a dict, never a bare list."""
+    from orb.application.dto.interface_response import InterfaceResponse
     from orb.interface.request_command_handlers import handle_list_requests
 
     strategy = _make_scheduler_strategy(scheduler_type)
     result = await _call_cli(handle_list_requests, _make_args(), strategy)
     unwrapped = result[0] if isinstance(result, tuple) else result  # type: ignore[index]
+    if isinstance(unwrapped, InterfaceResponse):
+        unwrapped = unwrapped.data
     assert isinstance(unwrapped, dict), f"[{scheduler_type}] Expected dict, got {type(unwrapped)}"
 
 
 @pytest.mark.asyncio
 async def test_list_templates_cli_returns_dict(scheduler_type: str) -> None:
     """handle_list_templates always returns a dict, never a bare list."""
+    from orb.application.dto.interface_response import InterfaceResponse
     from orb.interface.template_command_handlers import handle_list_templates
 
     strategy = _make_scheduler_strategy(scheduler_type)
     result = await _call_cli(handle_list_templates, _make_args(), strategy)
     unwrapped = result[0] if isinstance(result, tuple) else result  # type: ignore[index]
+    if isinstance(unwrapped, InterfaceResponse):
+        unwrapped = unwrapped.data
     assert isinstance(unwrapped, dict), f"[{scheduler_type}] Expected dict, got {type(unwrapped)}"

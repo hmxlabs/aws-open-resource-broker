@@ -119,11 +119,11 @@ class FleetGroupingMixin:
             self._collect_groups_from_instances(
                 instances_needing_lookup, groups, group_ids_to_fetch
             )
-
-        # Fetch detailed resource information for all identified groups
-        if group_ids_to_fetch:
-            # Delegate to handler-specific resource details fetching
-            self._fetch_and_attach_group_details(group_ids_to_fetch, groups)
+            # Fetch details only for groups discovered via AWS lookup — groups resolved
+            # from the mapping are left with details=None so the release manager fetches
+            # them on demand (avoiding unnecessary describe calls on the return path).
+            if group_ids_to_fetch:
+                self._fetch_and_attach_group_details(group_ids_to_fetch, groups)
 
         # Log performance metrics and optimization results
         self._log_grouping_summary(
@@ -208,15 +208,15 @@ class FleetGroupingMixin:
     # Abstract hooks for subclasses
     def _collect_groups_from_instances(
         self,
-        instance_ids: list[str],
-        groups: dict[Optional[str], dict[str, Any]],
-        group_ids_to_fetch: set[str],
+        _instance_ids: list[str],
+        _groups: dict[Optional[str], dict[str, Any]],
+        _group_ids_to_fetch: set[str],
     ) -> None:
         """Populate groups using AWS API lookups (implemented by subclasses)."""
         raise NotImplementedError
 
     def _fetch_and_attach_group_details(
-        self, group_ids: set[str], groups: dict[Optional[str], dict[str, Any]]
+        self, _group_ids: set[str], _groups: dict[Optional[str], dict[str, Any]]
     ) -> None:
         """Fetch and attach resource details for grouped identifiers."""
         raise NotImplementedError

@@ -79,8 +79,8 @@ class TestGetRequestDetailsRemoved:
 
         assert resp.status_code == 200
 
-    def test_get_request_status_passes_long_true_by_default(self, requests_app):
-        """GET /requests/{id}/status with no ?long= → detailed=True (default)."""
+    def test_get_request_status_passes_verbose_true_by_default(self, requests_app):
+        """GET /requests/{id}/status with no ?verbose= → verbose=True (default)."""
         orchestrator = AsyncMock()
         orchestrator.execute = AsyncMock(return_value=GetRequestStatusOutput(requests=[]))
         client = _make_client(requests_app, {get_request_status_orchestrator: lambda: orchestrator})
@@ -88,18 +88,18 @@ class TestGetRequestDetailsRemoved:
         client.get("/requests/req-123/status")
 
         call_input = orchestrator.execute.call_args[0][0]
-        assert call_input.detailed is True
+        assert call_input.verbose is True
 
-    def test_get_request_status_passes_long_false_when_queried(self, requests_app):
-        """GET /requests/{id}/status?long=false → detailed=False."""
+    def test_get_request_status_passes_verbose_false_when_queried(self, requests_app):
+        """GET /requests/{id}/status?verbose=false → verbose=False."""
         orchestrator = AsyncMock()
         orchestrator.execute = AsyncMock(return_value=GetRequestStatusOutput(requests=[]))
         client = _make_client(requests_app, {get_request_status_orchestrator: lambda: orchestrator})
 
-        client.get("/requests/req-123/status?long=false")
+        client.get("/requests/req-123/status?verbose=false")
 
         call_input = orchestrator.execute.call_args[0][0]
-        assert call_input.detailed is False
+        assert call_input.verbose is False
 
     def test_get_request_status_passes_request_id(self, requests_app):
         """GET /requests/req-abc/status → request_ids=['req-abc']."""
