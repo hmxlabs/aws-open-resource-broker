@@ -565,9 +565,14 @@ class TestSDKDefaultSchedulerRequests:
 
             assert status_result is not None
             status = _extract_status(status_result)
-            assert status in {"running", "complete", "complete_with_error", "pending", "unknown", "failed"}, (
-                f"Unexpected status: {status!r}"
-            )
+            assert status in {
+                "running",
+                "complete",
+                "complete_with_error",
+                "pending",
+                "unknown",
+                "failed",
+            }, f"Unexpected status: {status!r}"
 
     @pytest.mark.asyncio
     async def test_full_lifecycle_with_default_scheduler(
@@ -613,9 +618,14 @@ class TestSDKDefaultSchedulerRequests:
                 status_result = await sdk.get_request(request_id=request_id)
 
             status = _extract_status(status_result)
-            assert status in {"running", "complete", "complete_with_error", "pending", "unknown", "failed"}, (
-                f"Unexpected status: {status!r}"
-            )
+            assert status in {
+                "running",
+                "complete",
+                "complete_with_error",
+                "pending",
+                "unknown",
+                "failed",
+            }, f"Unexpected status: {status!r}"
 
             # 4. Extract machine IDs and optionally return them
             machine_ids = []
