@@ -21,6 +21,7 @@ from orb.config.schemas.app_schema import AppConfig
 
 # Import logging
 from orb.infrastructure.logging.logger import get_logger, setup_logging
+from orb.cli.console import print_console
 
 
 class Application:
@@ -403,7 +404,7 @@ async def main() -> None:
     config_path = os.getenv("ORB_CONFIG_FILE")
 
     # Only print before app creation - no logger available yet
-    print("Starting Open Host Factory...")
+    print_console("Starting Open Host Factory...")
 
     try:
         async with await create_application(config_path) as app:
@@ -431,7 +432,7 @@ async def main() -> None:
 
     except Exception as e:
         # Keep print here - app creation failed, no logger available
-        print(f"Application failed: {e}")
+        print_console(f"Application failed: {e}")
         sys.exit(1)
 
 
