@@ -78,7 +78,37 @@ class RequestStatusService:
             else:
                 machines_to_check = provider_machines if provider_machines else db_machines
 
+                fleet_errors = provider_metadata.get("fleet_errors") or []
+                fleet_capacity = provider_metadata.get("fleet_capacity_fulfilment") or {}
+                capacity_state = str(fleet_capacity.get("state") or "").lower()
+
                 if not machines_to_check:
+                    if fleet_errors:
+                        error_message = next(
+                            (
+                                str(error.get("error_message"))
+                                for error in fleet_errors
+                                if isinstance(error, dict) and error.get("error_message")
+                            ),
+                            None,
+                        )
+                        error_code = next(
+                            (
+                                str(error.get("error_code"))
+                                for error in fleet_errors
+                                if isinstance(error, dict) and error.get("error_code")
+                            ),
+                            None,
+                        )
+                        detail = error_message or error_code or "Provider reported provisioning errors"
+                        return RequestStatus.FAILED.value, detail
+
+                    if capacity_state == "failed":
+                        return (
+                            RequestStatus.FAILED.value,
+                            "Provider reported failed state before any instances were visible",
+                        )
+
                     return None, None
 
                 running_count = sum(1 for m in machines_to_check if m.status.value == "running")
@@ -90,7 +120,6 @@ class RequestStatusService:
 
                 # Use fleet capacity metrics when available (fleets/ASGs report their own
                 # target and fulfilled capacity). Fall back to instance counts otherwise.
-                fleet_capacity = provider_metadata.get("fleet_capacity_fulfilment") or {}
                 effective_target = (
                     fleet_capacity.get("target_capacity_units") or request.requested_count
                 )

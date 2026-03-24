@@ -178,7 +178,7 @@ def test_provisioning_failure_metadata_forces_failed():
 
 @pytest.mark.unit
 def test_provider_fleet_errors_force_failed_without_persisted_metadata():
-    handler = DummyHandler()
+    service = _make_service()
     request = _request(
         RequestType.ACQUIRE,
         RequestStatus.IN_PROGRESS,
@@ -193,16 +193,14 @@ def test_provider_fleet_errors_force_failed_without_persisted_metadata():
         ]
     }
 
-    new_status, msg = handler._determine_request_status_from_machines(
-        [], [], request, provider_metadata
-    )
+    new_status, msg = service.determine_status_from_machines([], [], request, provider_metadata)
     assert new_status == RequestStatus.FAILED.value
     assert "VMSS provisioning failed" in msg
 
 
 @pytest.mark.unit
 def test_failed_provider_capacity_state_forces_failed_without_instances():
-    handler = DummyHandler()
+    service = _make_service()
     request = _request(
         RequestType.ACQUIRE,
         RequestStatus.IN_PROGRESS,
@@ -217,8 +215,6 @@ def test_failed_provider_capacity_state_forces_failed_without_instances():
         }
     }
 
-    new_status, msg = handler._determine_request_status_from_machines(
-        [], [], request, provider_metadata
-    )
+    new_status, msg = service.determine_status_from_machines([], [], request, provider_metadata)
     assert new_status == RequestStatus.FAILED.value
     assert "failed state" in msg

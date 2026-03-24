@@ -6,14 +6,14 @@ import pytest
 import requests
 from unittest.mock import MagicMock, patch
 
-from providers.azure.configuration.config import AzureProviderConfig
-from providers.azure.domain.template.azure_template_aggregate import AzureTemplate
-from providers.azure.exceptions.azure_exceptions import (
+from orb.providers.azure.configuration.config import AzureProviderConfig
+from orb.providers.azure.domain.template.azure_template_aggregate import AzureTemplate
+from orb.providers.azure.exceptions.azure_exceptions import (
     CycleCloudConnectionError,
     CycleCloudNodeError,
     TerminationError,
 )
-from providers.azure.infrastructure.handlers.cyclecloud_handler import (
+from orb.providers.azure.infrastructure.handlers.cyclecloud_handler import (
     CycleCloudHandler,
     _resolve_cc_state,
 )
@@ -164,7 +164,7 @@ class TestStateMapping:
 
 
 class TestCycleCloudHandlerAcquire:
-    @patch("providers.azure.infrastructure.handlers.cyclecloud_handler.requests.Session")
+    @patch("orb.providers.azure.infrastructure.handlers.cyclecloud_handler.requests.Session")
     def test_acquire_hosts_success(self, mock_session_cls):
         handler = _make_handler()
         template = _make_template()
@@ -212,7 +212,7 @@ class TestCycleCloudHandlerAcquire:
         request_json = mock_session.request.call_args_list[1].kwargs["json"]
         assert request_json["requestId"] == "req-12345678-1234-1234-1234-123456789012"
 
-    @patch("providers.azure.infrastructure.handlers.cyclecloud_handler.requests.Session")
+    @patch("orb.providers.azure.infrastructure.handlers.cyclecloud_handler.requests.Session")
     def test_acquire_hosts_placeholder_nodes(self, mock_session_cls):
         """When CycleCloud returns added count but no inline node details, tracking stays resource-level."""
         handler = _make_handler()
@@ -265,7 +265,7 @@ class TestCycleCloudHandlerAcquire:
         with pytest.raises(CycleCloudConnectionError, match="cyclecloud_url is required"):
             handler.acquire_hosts(request, template)
 
-    @patch("providers.azure.infrastructure.handlers.cyclecloud_handler.requests.Session")
+    @patch("orb.providers.azure.infrastructure.handlers.cyclecloud_handler.requests.Session")
     def test_acquire_hosts_collects_failed_node_errors(self, mock_session_cls):
         handler = _make_handler()
         template = _make_template()
@@ -312,7 +312,7 @@ class TestCycleCloudHandlerAcquire:
 
 
 class TestCycleCloudHandlerStatus:
-    @patch("providers.azure.infrastructure.handlers.cyclecloud_handler.requests.Session")
+    @patch("orb.providers.azure.infrastructure.handlers.cyclecloud_handler.requests.Session")
     def test_check_hosts_status_success(self, mock_session_cls):
         handler = _make_handler()
 
@@ -363,7 +363,7 @@ class TestCycleCloudHandlerStatus:
         assert results[0]["private_ip"] == "10.0.0.1"
         assert results[1]["status"] == "pending"
 
-    @patch("providers.azure.infrastructure.handlers.cyclecloud_handler.requests.Session")
+    @patch("orb.providers.azure.infrastructure.handlers.cyclecloud_handler.requests.Session")
     def test_check_hosts_status_uses_request_id_filter(self, mock_session_cls):
         handler = _make_handler()
 
@@ -434,7 +434,7 @@ class TestCycleCloudHandlerStatus:
         )
         assert handler.check_hosts_status(request) == []
 
-    @patch("providers.azure.infrastructure.handlers.cyclecloud_handler.requests.Session")
+    @patch("orb.providers.azure.infrastructure.handlers.cyclecloud_handler.requests.Session")
     def test_check_hosts_status_request_failure_raises(self, mock_session_cls):
         handler = _make_handler()
 
@@ -453,7 +453,7 @@ class TestCycleCloudHandlerStatus:
         with pytest.raises(CycleCloudConnectionError, match="Cannot connect to CycleCloud"):
             handler.check_hosts_status(request)
 
-    @patch("providers.azure.infrastructure.handlers.cyclecloud_handler.requests.Session")
+    @patch("orb.providers.azure.infrastructure.handlers.cyclecloud_handler.requests.Session")
     def test_check_hosts_status_filters_by_node_array(self, mock_session_cls):
         handler = _make_handler()
 
@@ -484,7 +484,7 @@ class TestCycleCloudHandlerStatus:
         assert len(results) == 1
         assert results[0]["instance_id"] == "node-1"
 
-    @patch("providers.azure.infrastructure.handlers.cyclecloud_handler.requests.Session")
+    @patch("orb.providers.azure.infrastructure.handlers.cyclecloud_handler.requests.Session")
     def test_check_hosts_status_includes_failed_node_errors(self, mock_session_cls):
         handler = _make_handler()
 
@@ -530,7 +530,7 @@ class TestCycleCloudHandlerStatus:
 
 
 class TestCycleCloudHandlerRelease:
-    @patch("providers.azure.infrastructure.handlers.cyclecloud_handler.requests.Session")
+    @patch("orb.providers.azure.infrastructure.handlers.cyclecloud_handler.requests.Session")
     def test_release_hosts_success(self, mock_session_cls):
         handler = _make_handler()
 
@@ -569,7 +569,7 @@ class TestCycleCloudHandlerRelease:
         assert "deallocate" in calls[1].args[1]
         assert "remove" in calls[2].args[1]
 
-    @patch("providers.azure.infrastructure.handlers.cyclecloud_handler.requests.Session")
+    @patch("orb.providers.azure.infrastructure.handlers.cyclecloud_handler.requests.Session")
     def test_release_hosts_resolves_node_id_to_node_name(self, mock_session_cls):
         handler = _make_handler()
 
@@ -786,7 +786,7 @@ class TestCycleCloudAuthModes:
         assert session_context.session.verify is False
         assert session_context.auth_mode == credential_payload["auth_mode"]
 
-    @patch("providers.azure.infrastructure.handlers.cyclecloud_handler.requests.Session")
+    @patch("orb.providers.azure.infrastructure.handlers.cyclecloud_handler.requests.Session")
     def test_acquire_hosts_persists_credential_path(self, mock_session_cls, tmp_path: Path):
         handler = _make_handler()
         credential_file = tmp_path / "cyclecloud-credentials.json"
@@ -824,7 +824,7 @@ class TestCycleCloudAuthModes:
 
         assert result["provider_data"]["cyclecloud_credential_path"] == str(credential_file)
 
-    @patch("providers.azure.infrastructure.handlers.cyclecloud_handler.requests.Session")
+    @patch("orb.providers.azure.infrastructure.handlers.cyclecloud_handler.requests.Session")
     def test_acquire_hosts_persists_resolved_provider_config_credential_path(
         self,
         mock_session_cls,
@@ -887,7 +887,7 @@ class TestCycleCloudAuthModes:
         assert result["provider_data"]["cyclecloud_verify_ssl"] is False
         assert mock_session.verify is False
 
-    @patch("providers.azure.infrastructure.handlers.cyclecloud_handler.requests.Session")
+    @patch("orb.providers.azure.infrastructure.handlers.cyclecloud_handler.requests.Session")
     def test_acquire_hosts_explicit_template_verify_ssl_true_overrides_provider_false(
         self,
         mock_session_cls,
@@ -947,7 +947,7 @@ class TestCycleCloudAuthModes:
         assert result["provider_data"]["cyclecloud_verify_ssl"] is True
         assert mock_session.verify is True
 
-    @patch("providers.azure.infrastructure.handlers.cyclecloud_handler.requests.Session")
+    @patch("orb.providers.azure.infrastructure.handlers.cyclecloud_handler.requests.Session")
     def test_acquire_hosts_honors_explicit_template_verify_ssl_false(
         self,
         mock_session_cls,

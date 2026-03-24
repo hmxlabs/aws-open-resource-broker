@@ -11,6 +11,49 @@ from orb.config.schemas.provider_strategy_schema import (
 class TestConfigDrivenProviderRegistration:
     """Test config-driven provider registration functionality."""
 
+    def test_register_all_provider_types_includes_azure(self):
+        """Canonical provider bootstrap must register Azure alongside AWS."""
+        from orb.providers.registration import register_all_provider_types
+        from orb.providers.registry import get_provider_registry
+
+        registry = get_provider_registry()
+        registry.clear_registrations()
+
+        register_all_provider_types()
+
+        assert registry.is_provider_registered("aws") is True
+        assert registry.is_provider_registered("azure") is True
+
+    def test_provider_config_builder_accepts_azure_provider_instance_config(self):
+        """Azure config creation must accept the canonical ProviderInstanceConfig input."""
+        from orb.providers.config_builder import ProviderConfigBuilder
+        from orb.providers.registration import register_all_provider_types
+        from orb.providers.registry import get_provider_registry
+
+        registry = get_provider_registry()
+        registry.clear_registrations()
+        register_all_provider_types()
+
+        logger = MagicMock()
+        builder = ProviderConfigBuilder(logger, registry)
+        provider_instance = ProviderInstanceConfig(  # type: ignore[call-arg]
+            name="azure-default",
+            type="azure",
+            enabled=True,
+            config={
+                "subscription_id": "11111111-1111-1111-1111-111111111111",
+                "tenant_id": "22222222-2222-2222-2222-222222222222",
+                "client_id": "test-client",
+                "client_secret_path": "/tmp/test-secret",
+                "region": "uksouth",
+            },
+        )
+
+        azure_config = builder.build_config(provider_instance)
+
+        assert azure_config.subscription_id == "11111111-1111-1111-1111-111111111111"
+        assert azure_config.region == "uksouth"
+
     def test_register_providers_with_valid_config(self):
         """Test provider registration with valid configuration."""
         from orb.bootstrap.provider_services import register_provider_services

@@ -6,33 +6,33 @@ import types
 import pytest
 from unittest.mock import MagicMock, Mock, patch
 
-from domain.base.value_objects import InstanceId, InstanceType
-from domain.machine.aggregate import Machine
-from providers.azure.configuration.config import AzureProviderConfig
-from providers.azure.configuration.validator import (
+from orb.domain.base.value_objects import InstanceId, InstanceType
+from orb.domain.machine.aggregate import Machine
+from orb.providers.azure.configuration.config import AzureProviderConfig
+from orb.providers.azure.configuration.validator import (
     validate_azure_config,
     validate_azure_template,
 )
-from providers.azure.configuration.template_extension import AzureTemplateExtensionConfig
-from providers.azure.exceptions.azure_exceptions import (
+from orb.providers.azure.configuration.template_extension import AzureTemplateExtensionConfig
+from orb.providers.azure.exceptions.azure_exceptions import (
     AzureError,
     VMNotFoundError,
 )
-from providers.azure.infrastructure.adapters.machine_adapter import AzureMachineAdapter
-from providers.azure.infrastructure.azure_client import AzureClient
-from providers.azure.managers.azure_resource_manager import AzureResourceManager
-from providers.azure.registration import (
+from orb.providers.azure.infrastructure.adapters.machine_adapter import AzureMachineAdapter
+from orb.providers.azure.infrastructure.azure_client import AzureClient
+from orb.providers.azure.managers.azure_resource_manager import AzureResourceManager
+from orb.providers.azure.registration import (
     create_azure_config,
     register_azure_provider,
 )
-from providers.azure.infrastructure.adapters.azure_validation_adapter import (
+from orb.providers.azure.infrastructure.adapters.azure_validation_adapter import (
     AzureValidationAdapter,
 )
-from providers.azure.resilience.azure_retry_strategy import (
+from orb.providers.azure.resilience.azure_retry_strategy import (
     AzureRetryStrategy,
     is_retryable_azure_error,
 )
-from infrastructure.registry.provider_registry import ProviderRegistry
+from orb.providers.registry import ProviderRegistry
 
 
 # ---------------------------------------------------------------------------
@@ -194,7 +194,7 @@ class TestConfigValidation:
         container = MagicMock()
         container.get.return_value = selection_service
 
-        with patch("infrastructure.di.container.get_container", return_value=container):
+        with patch("orb.infrastructure.di.container.get_container", return_value=container):
             client = AzureClient(config=config_port, logger=MagicMock())
 
         assert client.subscription_id == azure_config.subscription_id
@@ -218,7 +218,7 @@ class TestConfigValidation:
         container = MagicMock()
         container.get.return_value = azure_client
 
-        with patch("infrastructure.di.container.get_container", return_value=container):
+        with patch("orb.infrastructure.di.container.get_container", return_value=container):
             strategy = registry.create_strategy(
                 "azure",
                 {
@@ -372,7 +372,7 @@ class TestConfigValidation:
 
 class TestAzureAuthStrategy:
     def test_auth_strategy_passes_managed_identity_client_id_when_configured(self):
-        from providers.azure.auth.azure_auth_strategy import AzureAuthStrategy
+        from orb.providers.azure.auth.azure_auth_strategy import AzureAuthStrategy
 
         class ConcreteAzureAuthStrategy(AzureAuthStrategy):
             def is_enabled(self) -> bool:
@@ -401,7 +401,7 @@ class TestAzureAuthStrategy:
         )
 
     def test_auth_strategy_omits_managed_identity_client_id_when_unset(self):
-        from providers.azure.auth.azure_auth_strategy import AzureAuthStrategy
+        from orb.providers.azure.auth.azure_auth_strategy import AzureAuthStrategy
 
         class ConcreteAzureAuthStrategy(AzureAuthStrategy):
             def is_enabled(self) -> bool:
@@ -461,28 +461,13 @@ class TestAzureValidationAdapter:
     def test_validate_provider_api_fallback_accepts_vmss_uniform(self):
         adapter = AzureValidationAdapter(config=AzureProviderConfig(), logger=MagicMock())
 
-        with patch("config.manager.get_config_manager", side_effect=Exception("no config")):
-            assert adapter.validate_provider_api("VMSSUniform") is True
+        assert adapter.validate_provider_api("VMSSUniform") is True
 
     def test_validate_provider_api_does_not_accept_dead_config_only_api_names(self):
         adapter = AzureValidationAdapter(config=AzureProviderConfig(), logger=MagicMock())
 
-        fake_config_manager = MagicMock()
-        fake_config_manager.get_raw_config.return_value = {
-            "provider": {
-                "provider_defaults": {
-                    "azure": {
-                        "handlers": {
-                            "AzureFleet": {},
-                        }
-                    }
-                }
-            }
-        }
-
-        with patch("config.manager.get_config_manager", return_value=fake_config_manager):
-            assert adapter.validate_provider_api("AzureFleet") is False
-            assert "AzureFleet" not in adapter.get_supported_provider_apis()
+        assert adapter.validate_provider_api("AzureFleet") is False
+        assert "AzureFleet" not in adapter.get_supported_provider_apis()
 
     def test_validate_template_configuration_rejects_spot_percentage_for_uniform(self):
         adapter = AzureValidationAdapter(config=AzureProviderConfig(), logger=MagicMock())
@@ -577,6 +562,7 @@ class TestAzureMachineAdapter:
             instance_id=InstanceId(value="vm-1"),
             template_id="tpl-1",
             provider_type="azure",
+            provider_name="azure-default",
             instance_type=InstanceType(value="Standard_D4s_v5"),
             image_id="img-1",
             provider_data={"resource_group": "rg", "vm_name": "vm-1"},
@@ -596,6 +582,7 @@ class TestAzureMachineAdapter:
             instance_id=InstanceId(value="vm-1"),
             template_id="tpl-1",
             provider_type="azure",
+            provider_name="azure-default",
             instance_type=InstanceType(value="Standard_D4s_v5"),
             image_id="img-1",
             provider_data={"resource_group": "rg"},
@@ -606,7 +593,7 @@ class TestAzureMachineAdapter:
 
 class TestAzureClientNetworkResolution:
     def test_resolve_network_identity_from_vm_populates_ips_and_subnet(self):
-        from providers.azure.infrastructure.azure_client import AzureClient
+        from orb.providers.azure.infrastructure.azure_client import AzureClient
 
         azure_client = object.__new__(AzureClient)
         azure_client._logger = MagicMock()
@@ -710,22 +697,22 @@ class TestAzureRegistration:
 
         with (
             patch(
-                "providers.azure.registration._register_azure_components_with_di",
+                "orb.providers.azure.registration._register_azure_components_with_di",
                 return_value=None,
             ),
             patch(
-                "providers.azure.registration._create_azure_strategy_with_di",
+                "orb.providers.azure.registration._create_azure_strategy_with_di",
                 return_value=strategy,
             ) as mock_create_strategy,
         ):
-            from domain.base.ports import LoggingPort
-            from providers.azure.registration import register_azure_provider_with_di
+            from orb.domain.base.ports import LoggingPort
+            from orb.providers.azure.registration import register_azure_provider_with_di
 
             container.get.side_effect = lambda key: logger if key is LoggingPort else Mock()
 
             assert register_azure_provider_with_di(provider_instance, container) is True
 
-            created = ProviderRegistry().create_strategy_from_instance(
+            created = ProviderRegistry().create_strategy_by_instance(
                 "azure-test",
                 {"ignored": "config"},
             )

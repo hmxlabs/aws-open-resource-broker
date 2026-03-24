@@ -9,19 +9,19 @@ import asyncio
 import pytest
 from unittest.mock import MagicMock, call
 
-from application.services.spot_placement_planner import (
+from orb.application.services.spot_placement_planner import (
     PlacementCandidate,
     PlacementPlanEntry,
     PlacementScore,
 )
-from providers.azure.infrastructure.services.spot_placement_score_adapter import (
+from orb.providers.azure.infrastructure.services.spot_placement_score_adapter import (
     AzureSpotPlacementScoreAdapter,
 )
-from providers.azure.configuration.config import AzureProviderConfig
-from providers.azure.domain.template.azure_template_aggregate import AzureTemplate
-from providers.azure.exceptions.azure_exceptions import CycleCloudConnectionError
-from providers.azure.strategy.azure_provider_strategy import AzureProviderStrategy
-from providers.base.strategy import (
+from orb.providers.azure.configuration.config import AzureProviderConfig
+from orb.providers.azure.domain.template.azure_template_aggregate import AzureTemplate
+from orb.providers.azure.exceptions.azure_exceptions import CycleCloudConnectionError
+from orb.providers.azure.strategy.azure_provider_strategy import AzureProviderStrategy
+from orb.providers.base.strategy import (
     ProviderOperation,
     ProviderOperationType,
 )
@@ -579,7 +579,7 @@ class TestCreateInstances:
         strategy.initialize()
 
         def acquire_hosts(request, _template):
-            assert request.provider_instance == "azure-test"
+            assert request.provider_name == "azure-test"
             return {
                 "success": True,
                 "resource_ids": ["vmss-demo"],

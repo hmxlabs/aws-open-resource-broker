@@ -12,6 +12,7 @@ from pydantic import (
     model_validator,
 )
 
+from orb.domain.base.value_objects import AllocationStrategy
 from orb.domain.template.template_aggregate import Template
 from orb.providers.aws.domain.template.value_objects import (
     AWSAllocationStrategy,
@@ -254,7 +255,7 @@ class AWSTemplate(Template):
         # from provider.template_defaults via _coalesce_merge)
 
         if self.allocation_strategy == AllocationStrategy.SPOT_PLACEMENT_SCORE.value:
-            candidate_types = list((self.instance_types or {}).keys())
+            candidate_types = list((self.machine_types or {}).keys())
             if self.instance_type and self.instance_type not in candidate_types:
                 candidate_types.insert(0, self.instance_type)
             if len(candidate_types) < 2:

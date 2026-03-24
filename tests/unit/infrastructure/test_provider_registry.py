@@ -4,8 +4,9 @@ from unittest.mock import Mock
 
 import pytest
 
-from domain.base.exceptions import ConfigurationError
-from infrastructure.registry.provider_registry import (
+from orb.config.schemas.provider_strategy_schema import ProviderInstanceConfig
+from orb.domain.base.exceptions import ConfigurationError
+from orb.providers.registry.provider_registry import (
     ProviderRegistry,
     UnsupportedProviderError,
     get_provider_registry,
@@ -52,20 +53,21 @@ class TestProviderRegistry:
 
         assert self.registry.is_provider_registered("test_provider")
 
-    def test_register_duplicate_provider_raises_error(self):
-        """Test that registering duplicate provider raises error."""
+    def test_register_duplicate_provider_is_idempotent(self):
+        """Canonical registry path treats repeated provider registration as idempotent."""
         self.registry.register_provider(
             provider_type="test_provider",
             strategy_factory=self.mock_strategy_factory,
             config_factory=self.mock_config_factory,
         )
 
-        with pytest.raises(ValueError, match="already registered"):
-            self.registry.register_provider(
-                provider_type="test_provider",
-                strategy_factory=self.mock_strategy_factory,
-                config_factory=self.mock_config_factory,
-            )
+        self.registry.register_provider(
+            provider_type="test_provider",
+            strategy_factory=self.mock_strategy_factory,
+            config_factory=self.mock_config_factory,
+        )
+
+        assert self.registry.is_provider_registered("test_provider")
 
     def test_unregister_provider(self):
         """Test provider unregistration."""
@@ -109,15 +111,14 @@ class TestProviderRegistry:
         )
 
         with pytest.raises(ConfigurationError, match="Failed to create strategy"):
-            self.registry.create_strategy_from_instance(
+            self.registry.create_strategy_by_instance(
                 "azure-primary",
                 {"subscription_id": "test-subscription"},
             )
 
     def test_create_strategy_unsupported_provider(self):
-        """Test strategy creation with unsupported provider."""
-        with pytest.raises(UnsupportedProviderError, match="not registered"):
-            self.registry.create_strategy("unsupported_provider", {})
+        """Unknown provider types resolve to no strategy when auto-registration fails."""
+        assert self.registry.create_strategy("unsupported_provider", {}) is None
 
     def test_create_strategy_factory_error(self):
         """Test strategy creation when factory raises error."""
@@ -178,8 +179,8 @@ class TestProviderRegistry:
 
     def test_create_resolver_unregistered_provider(self):
         """Test resolver creation for unregistered provider."""
-        resolver = self.registry.create_resolver("unregistered_provider")
-        assert resolver is None
+        with pytest.raises(ValueError, match="not registered"):
+            self.registry.create_resolver("unregistered_provider")
 
     def test_create_validator(self):
         """Test validator creation."""
@@ -265,3 +266,24 @@ class TestProviderRegistry:
         assert len(errors) == 0
         assert len(results) == 10
         assert len(self.registry.get_registered_providers()) == 10
+
+    def test_ensure_provider_instance_registered_from_config_supports_azure(self):
+        """Registry auto-registration must work for Azure instances too."""
+        provider_instance = ProviderInstanceConfig(  # type: ignore[call-arg]
+            name="azure-default",
+            type="azure",
+            enabled=True,
+            config={
+                "subscription_id": "test-subscription",
+                "tenant_id": "test-tenant",
+                "client_id": "test-client",
+                "client_secret_path": "/tmp/test-secret",
+                "region": "uksouth",
+            },
+        )
+
+        result = self.registry.ensure_provider_instance_registered_from_config(provider_instance)
+
+        assert result is True
+        assert self.registry.is_provider_registered("azure") is True
+        assert self.registry.is_provider_instance_registered("azure-default") is True

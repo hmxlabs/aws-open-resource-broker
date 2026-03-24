@@ -3,11 +3,11 @@
 import pytest
 from unittest.mock import MagicMock
 
-from providers.azure.domain.template.value_objects import AzureVMSSOrchestrationMode
-from providers.azure.domain.template.azure_template_aggregate import AzureTemplate
-from providers.azure.infrastructure.handlers.single_vm_handler import SingleVMHandler
-from providers.azure.infrastructure.handlers.vmss_handler import VMSSHandler
-from providers.azure.infrastructure.services.azure_deployment_service import (
+from orb.providers.azure.domain.template.value_objects import AzureVMSSOrchestrationMode
+from orb.providers.azure.domain.template.azure_template_aggregate import AzureTemplate
+from orb.providers.azure.infrastructure.handlers.single_vm_handler import SingleVMHandler
+from orb.providers.azure.infrastructure.handlers.vmss_handler import VMSSHandler
+from orb.providers.azure.infrastructure.services.azure_deployment_service import (
     AzureDeploymentService,
 )
 
@@ -443,7 +443,10 @@ def test_vmss_release_scales_down_before_deleting_uniform_instances():
     assert delete_call["resource_group_name"] == "test-rg"
     assert delete_call["vm_scale_set_name"] == "vmss-azure-test"
     delete_ids = delete_call["vm_instance_i_ds"]
-    assert getattr(delete_ids, "instance_ids", delete_ids["instance_ids"]) == ["3", "4"]
+    if hasattr(delete_ids, "instance_ids"):
+        assert delete_ids.instance_ids == ["3", "4"]
+    else:
+        assert delete_ids["instance_ids"] == ["3", "4"]
 def test_vmss_scale_fallback_submits_capacity_update():
     azure_client = MagicMock()
     logger = MagicMock()
@@ -521,7 +524,10 @@ def test_vmss_release_marks_scale_set_delete_when_capacity_reaches_zero():
         azure_client.compute_client.virtual_machine_scale_sets.begin_delete_instances.call_args.kwargs
     )
     delete_ids = delete_call["vm_instance_i_ds"]
-    assert getattr(delete_ids, "instance_ids", delete_ids["instance_ids"]) == ["3"]
+    if hasattr(delete_ids, "instance_ids"):
+        assert delete_ids.instance_ids == ["3"]
+    else:
+        assert delete_ids["instance_ids"] == ["3"]
     assert result["provider_data"]["pending_reconciliation"]["delete_vmss_when_empty"] is True
 
 

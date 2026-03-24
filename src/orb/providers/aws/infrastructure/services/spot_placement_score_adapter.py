@@ -4,13 +4,13 @@ from __future__ import annotations
 
 from typing import Any
 
-from application.services.spot_placement_planner import (
+from orb.application.services.spot_placement_planner import (
     PlacementCandidate,
     PlacementScore,
     SpotPlacementScoreAdapter,
 )
-from domain.base.ports import LoggingPort
-from providers.aws.infrastructure.aws_client import AWSClient
+from orb.domain.base.ports import LoggingPort
+from orb.providers.aws.infrastructure.aws_client import AWSClient
 
 
 class AWSSpotPlacementScoreAdapter(SpotPlacementScoreAdapter):
@@ -22,7 +22,7 @@ class AWSSpotPlacementScoreAdapter(SpotPlacementScoreAdapter):
         self._region = region
 
     def score_candidates(self, requested_count: int, template: Any) -> list[PlacementScore]:
-        instance_types = list((template.instance_types or {}).keys())
+        instance_types = list((template.machine_types or {}).keys())
         if template.instance_type and template.instance_type not in instance_types:
             instance_types.insert(0, template.instance_type)
 

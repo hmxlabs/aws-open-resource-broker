@@ -1,9 +1,9 @@
-from application.services.spot_placement_planner import (
+from orb.application.services.spot_placement_planner import (
     PlacementCandidate,
     PlacementScore,
     SpotPlacementPlanner,
 )
-from domain.base.value_objects import PlacementSplitStrategy
+from orb.domain.base.value_objects import PlacementSplitStrategy
 
 
 def _score(candidate_id: str, normalized_score: float, raw_score):

@@ -2,8 +2,8 @@
 
 import pytest
 
-from providers.azure.domain.template.azure_template_aggregate import AzureTemplate
-from providers.azure.domain.template.value_objects import (
+from orb.providers.azure.domain.template.azure_template_aggregate import AzureTemplate
+from orb.providers.azure.domain.template.value_objects import (
     AzureAllocationStrategy,
     AzureCachingType,
     AzureDataDisk,
@@ -397,13 +397,13 @@ class TestValueObjects:
         assert ip_config["applicationGatewayBackendAddressPools"][0]["id"].endswith("/appgw-a")
 
     def test_allocation_strategy_from_core(self):
-        from domain.base.value_objects import AllocationStrategy
+        from orb.domain.base.value_objects import AllocationStrategy
 
         mapped = AzureAllocationStrategy.from_core(AllocationStrategy.LOWEST_PRICE)
         assert mapped == AzureAllocationStrategy.LOWEST_PRICE
 
     def test_priority_from_price_type(self):
-        from domain.base.value_objects import PriceType
+        from orb.domain.base.value_objects import PriceType
 
         mapped = AzurePriority.from_price_type(PriceType.SPOT)
         assert mapped == AzurePriority.SPOT

@@ -5,12 +5,12 @@ from unittest.mock import patch
 
 from pydantic import ValidationError
 
-from application.services.native_spec_service import NativeSpecService
-from config.schemas.provider_strategy_schema import ProviderConfig
-from domain.request.aggregate import Request
-from domain.request.request_types import RequestType
-from providers.azure.domain.template.azure_template_aggregate import AzureTemplate
-from providers.azure.infrastructure.services.azure_native_spec_service import AzureNativeSpecService
+from orb.application.services.native_spec_service import NativeSpecService
+from orb.config.schemas.provider_strategy_schema import ProviderConfig
+from orb.domain.request.aggregate import Request
+from orb.domain.request.request_types import RequestType
+from orb.providers.azure.domain.template.azure_template_aggregate import AzureTemplate
+from orb.providers.azure.infrastructure.services.azure_native_spec_service import AzureNativeSpecService
 
 
 def _make_template(**overrides):
@@ -37,7 +37,7 @@ def _make_request():
         template_id="azure-native-spec-test",
         machine_count=2,
         provider_type="azure",
-        provider_instance="azure-default",
+        provider_name="azure-default",
     )
 
 
@@ -124,7 +124,7 @@ def test_load_spec_file_uses_typed_provider_config_extensions_path():
     )
 
     with patch(
-        "providers.azure.infrastructure.services.azure_native_spec_service.read_json_file"
+        "orb.providers.azure.infrastructure.services.azure_native_spec_service.read_json_file"
     ) as mock_read:
         mock_read.return_value = {"location": "eastus2"}
 
