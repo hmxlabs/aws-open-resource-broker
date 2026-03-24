@@ -7,6 +7,9 @@ from providers.azure.domain.template.value_objects import AzureVMSSOrchestration
 from providers.azure.domain.template.azure_template_aggregate import AzureTemplate
 from providers.azure.infrastructure.handlers.single_vm_handler import SingleVMHandler
 from providers.azure.infrastructure.handlers.vmss_handler import VMSSHandler
+from providers.azure.infrastructure.services.azure_deployment_service import (
+    AzureDeploymentService,
+)
 
 
 def _make_template(**overrides) -> AzureTemplate:
@@ -29,14 +32,14 @@ def _make_template(**overrides) -> AzureTemplate:
     return AzureTemplate(**config)
 
 
-def test_acquire_hosts_returns_immediately_after_submitting_lro():
+def test_acquire_hosts_submits_native_vmss_create_and_returns_submitted_status():
     azure_client = MagicMock()
     logger = MagicMock()
     handler = VMSSHandler(azure_client=azure_client, logger=logger)
 
-    poller = MagicMock()
-    poller.continuation_token.return_value = "vmss-lro-token"
-    azure_client.compute_client.virtual_machine_scale_sets.begin_create_or_update.return_value = poller
+    azure_client.compute_client.virtual_machine_scale_sets.begin_create_or_update.return_value = (
+        MagicMock()
+    )
 
     request = MagicMock()
     request.requested_count = 2
@@ -50,6 +53,11 @@ def test_acquire_hosts_returns_immediately_after_submitting_lro():
     assert result["instances"] == []
     assert result["provider_data"]["provisioning_state"] == "creating"
     assert result["provider_data"]["operation_status"] == "submitted"
+    create_call = azure_client.compute_client.virtual_machine_scale_sets.begin_create_or_update.call_args.kwargs
+    assert create_call["resource_group_name"] == "test-rg"
+    assert create_call["vm_scale_set_name"] == result["provider_data"]["vmss_name"]
+    assert create_call["parameters"]["name"] == result["provider_data"]["vmss_name"]
+    assert create_call["parameters"]["sku"]["capacity"] == 2
 
 
 def test_flexible_vmss_status_returns_only_member_vms():
@@ -98,23 +106,15 @@ def test_flexible_vmss_status_returns_only_member_vms():
     assert result[0]["instance_id"] == "vmss-azure-test_abcd1234"
 
 
-def test_single_vm_acquire_hosts_returns_immediately_after_submitting_lros():
+def test_single_vm_acquire_hosts_submits_one_batched_deployment_and_returns_submitted_status():
     azure_client = MagicMock()
     logger = MagicMock()
     handler = SingleVMHandler(azure_client=azure_client, logger=logger)
 
-    nic_result = MagicMock()
-    nic_result.id = "/subscriptions/.../networkInterfaces/nic-vm-1"
-    nic_poller = MagicMock()
-    nic_poller.result.return_value = nic_result
-    azure_client.network_client.network_interfaces.begin_create_or_update.return_value = nic_poller
-
-    vm_poller = MagicMock()
-    vm_poller.continuation_token.return_value = "single-vm-lro-token"
-    azure_client.compute_client.virtual_machines.begin_create_or_update.return_value = vm_poller
+    azure_client.resource_client.resources.begin_create_or_update.return_value = MagicMock()
 
     request = MagicMock()
-    request.requested_count = 1
+    request.requested_count = 2
     request.request_id = "req-2"
     request.metadata = {}
 
@@ -137,34 +137,29 @@ def test_single_vm_acquire_hosts_returns_immediately_after_submitting_lros():
     result = handler.acquire_hosts(request, template)
 
     assert result["success"] is True
-    assert len(result["resource_ids"]) == 1
+    assert len(result["resource_ids"]) == 2
     assert result["instances"] == []
     assert result["provider_data"]["operation_status"] == "submitted"
+    deployment_call = azure_client.resource_client.resources.begin_create_or_update.call_args.kwargs
+    deployment_template = deployment_call[
+        "parameters"
+    ]["properties"]["template"]
+    resource_types = [resource["type"] for resource in deployment_template["resources"]]
+    assert resource_types.count("Microsoft.Network/networkInterfaces") == 2
+    assert resource_types.count("Microsoft.Compute/virtualMachines") == 2
+    assert result["provider_data"]["deployment_name"] == deployment_call["resource_name"]
+    assert len(result["provider_data"]["submitted_vms"]) == 2
 
 
-def test_single_vm_acquire_hosts_creates_public_ip_when_enabled():
+def test_single_vm_acquire_hosts_creates_public_ips_when_enabled():
     azure_client = MagicMock()
     logger = MagicMock()
     handler = SingleVMHandler(azure_client=azure_client, logger=logger)
 
-    public_ip_result = MagicMock()
-    public_ip_result.id = "/subscriptions/.../publicIPAddresses/pip-vm-1"
-    public_ip_poller = MagicMock()
-    public_ip_poller.result.return_value = public_ip_result
-    azure_client.network_client.public_ip_addresses.begin_create_or_update.return_value = public_ip_poller
-
-    nic_result = MagicMock()
-    nic_result.id = "/subscriptions/.../networkInterfaces/nic-vm-1"
-    nic_poller = MagicMock()
-    nic_poller.result.return_value = nic_result
-    azure_client.network_client.network_interfaces.begin_create_or_update.return_value = nic_poller
-
-    vm_poller = MagicMock()
-    vm_poller.continuation_token.return_value = "single-vm-lro-token"
-    azure_client.compute_client.virtual_machines.begin_create_or_update.return_value = vm_poller
+    azure_client.resource_client.resources.begin_create_or_update.return_value = MagicMock()
 
     request = MagicMock()
-    request.requested_count = 1
+    request.requested_count = 2
     request.request_id = "req-pip"
     request.metadata = {}
 
@@ -190,85 +185,41 @@ def test_single_vm_acquire_hosts_creates_public_ip_when_enabled():
     result = handler.acquire_hosts(request, template)
 
     assert result["success"] is True
-    azure_client.network_client.public_ip_addresses.begin_create_or_update.assert_called_once()
-    nic_params = azure_client.network_client.network_interfaces.begin_create_or_update.call_args.kwargs[
+    deployment_template = azure_client.resource_client.resources.begin_create_or_update.call_args.kwargs[
         "parameters"
+    ]["properties"]["template"]
+    public_ip_resources = [
+        resource
+        for resource in deployment_template["resources"]
+        if resource["type"] == "Microsoft.Network/publicIPAddresses"
     ]
-    public_ip_ref = nic_params["properties"]["ipConfigurations"][0]["properties"]["publicIPAddress"]
-    assert public_ip_ref["id"] == "/subscriptions/.../publicIPAddresses/pip-vm-1"
+    nic_resources = [
+        resource
+        for resource in deployment_template["resources"]
+        if resource["type"] == "Microsoft.Network/networkInterfaces"
+    ]
+    assert len(public_ip_resources) == 2
+    assert len(nic_resources) == 2
+    public_ip_ref = nic_resources[0]["properties"]["ipConfigurations"][0]["properties"]["publicIPAddress"]
+    assert public_ip_resources[0]["name"].startswith("pip-vm-")
+    assert "Microsoft.Network/publicIPAddresses" in public_ip_ref["id"]
     assert public_ip_ref["deleteOption"] == "Delete"
 
 
-def test_single_vm_partial_failure_returns_structured_errors():
+def test_single_vm_falls_back_to_alternate_vm_size_for_the_whole_batch():
     azure_client = MagicMock()
     logger = MagicMock()
     handler = SingleVMHandler(azure_client=azure_client, logger=logger)
 
-    nic_result = MagicMock()
-    nic_result.id = "/subscriptions/.../networkInterfaces/nic-vm-1"
-    nic_poller = MagicMock()
-    nic_poller.result.return_value = nic_result
-    azure_client.network_client.network_interfaces.begin_create_or_update.return_value = nic_poller
-
-    first_vm_poller = MagicMock()
-    first_vm_poller.continuation_token.return_value = "token-1"
-    azure_client.compute_client.virtual_machines.begin_create_or_update.side_effect = [
-        first_vm_poller,
-        Exception("AllocationFailed: insufficient capacity"),
+    first_failure = Exception("primary size unavailable")
+    first_failure.error_code = "AllocationFailed"
+    azure_client.resource_client.resources.begin_create_or_update.side_effect = [
+        first_failure,
+        MagicMock(),
     ]
 
     request = MagicMock()
     request.requested_count = 2
-    request.request_id = "req-3"
-    request.metadata = {}
-
-    template = AzureTemplate(
-        template_id="azure-singlevm-test",
-        provider_api="SingleVM",
-        vm_size="Standard_D4s_v5",
-        resource_group="test-rg",
-        location="eastus2",
-        network_config={"subnet_id": "/subscriptions/.../subnets/default"},
-        ssh_public_keys=["ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQC7 test@host"],
-        image={
-            "publisher": "Canonical",
-            "offer": "0001-com-ubuntu-server-jammy",
-            "sku": "22_04-lts-gen2",
-            "version": "latest",
-        },
-    )
-
-    result = handler.acquire_hosts(request, template)
-
-    assert result["success"] is True
-    assert len(result["resource_ids"]) == 1
-    assert result["provider_data"]["failed_count"] == 1
-    assert result["provider_data"]["operation_status"] == "partial_submitted"
-    assert result["provider_data"]["fleet_errors"][0]["error_code"] == "AllocationFailed"
-
-
-def test_single_vm_falls_back_to_alternate_vm_size():
-    azure_client = MagicMock()
-    logger = MagicMock()
-    handler = SingleVMHandler(azure_client=azure_client, logger=logger)
-
-    nic_result = MagicMock()
-    nic_result.id = "/subscriptions/.../networkInterfaces/nic-vm-1"
-    nic_poller = MagicMock()
-    nic_poller.result.return_value = nic_result
-    azure_client.network_client.network_interfaces.begin_create_or_update.return_value = nic_poller
-
-    first_failure = Exception("primary size unavailable")
-    first_failure.error_code = "AllocationFailed"
-    vm_poller = MagicMock()
-    vm_poller.continuation_token.return_value = "fallback-token"
-    azure_client.compute_client.virtual_machines.begin_create_or_update.side_effect = [
-        first_failure,
-        vm_poller,
-    ]
-
-    request = MagicMock()
-    request.requested_count = 1
     request.request_id = "req-4"
     request.metadata = {}
 
@@ -292,8 +243,11 @@ def test_single_vm_falls_back_to_alternate_vm_size():
     result = handler.acquire_hosts(request, template)
 
     assert result["success"] is True
-    assert result["provider_data"]["failed_count"] == 0
-    assert result["provider_data"]["submitted_vms"][0]["selected_vm_size"] == "Standard_D8s_v5"
+    assert result["provider_data"]["submitted_count"] == 2
+    assert all(
+        submitted_vm["selected_vm_size"] == "Standard_D8s_v5"
+        for submitted_vm in result["provider_data"]["submitted_vms"]
+    )
 
 
 def test_single_vm_build_vm_params_applies_disk_encryption_set_to_os_and_data_disks():
@@ -483,11 +437,35 @@ def test_vmss_release_scales_down_before_deleting_uniform_instances():
         vmss_name="vmss-azure-test",
         capacity=3,
     )
-    azure_client.compute_client.virtual_machine_scale_sets.begin_delete_instances.assert_called_once()
-    azure_client.compute_client.virtual_machine_scale_sets.begin_delete.assert_not_called()
+    delete_call = (
+        azure_client.compute_client.virtual_machine_scale_sets.begin_delete_instances.call_args.kwargs
+    )
+    assert delete_call["resource_group_name"] == "test-rg"
+    assert delete_call["vm_scale_set_name"] == "vmss-azure-test"
+    delete_ids = delete_call["vm_instance_i_ds"]
+    assert getattr(delete_ids, "instance_ids", delete_ids["instance_ids"]) == ["3", "4"]
+def test_vmss_scale_fallback_submits_capacity_update():
+    azure_client = MagicMock()
+    logger = MagicMock()
+    handler = VMSSHandler(azure_client=azure_client, logger=logger)
+    handler.azure_resource_manager = None
+
+    vmss = MagicMock()
+    vmss.sku.capacity = 5
+    azure_client.compute_client.virtual_machine_scale_sets.get.return_value = vmss
+
+    azure_client.compute_client.virtual_machine_scale_sets.begin_create_or_update.return_value = MagicMock()
+
+    handler._scale_vmss_capacity("test-rg", "vmss-azure-test", 3)
+
+    azure_client.compute_client.virtual_machine_scale_sets.begin_create_or_update.assert_called_once_with(
+        resource_group_name="test-rg",
+        vm_scale_set_name="vmss-azure-test",
+        parameters=vmss,
+    )
 
 
-def test_vmss_release_submits_flexible_deletes_without_waiting():
+def test_vmss_release_returns_reconciliation_metadata_for_flexible_deletes():
     azure_client = MagicMock()
     logger = MagicMock()
     handler = VMSSHandler(azure_client=azure_client, logger=logger)
@@ -498,10 +476,7 @@ def test_vmss_release_submits_flexible_deletes_without_waiting():
     vmss.orchestration_mode = AzureVMSSOrchestrationMode.FLEXIBLE.value
     azure_client.compute_client.virtual_machine_scale_sets.get.return_value = vmss
 
-    delete_poller = MagicMock()
-    delete_poller.continuation_token.return_value = "token-1"
-    delete_poller.result.side_effect = AssertionError("result() should not be called")
-    azure_client.compute_client.virtual_machines.begin_delete.return_value = delete_poller
+    azure_client.compute_client.virtual_machines.begin_delete.return_value = MagicMock()
 
     result = handler.release_hosts(
         machine_ids=["vm-a", "vm-b"],
@@ -515,7 +490,7 @@ def test_vmss_release_submits_flexible_deletes_without_waiting():
     assert azure_client.compute_client.virtual_machines.begin_delete.call_count == 2
 
 
-def test_vmss_release_deletes_scale_set_when_capacity_reaches_zero():
+def test_vmss_release_marks_scale_set_delete_when_capacity_reaches_zero():
     azure_client = MagicMock()
     logger = MagicMock()
     handler = VMSSHandler(azure_client=azure_client, logger=logger)
@@ -542,8 +517,11 @@ def test_vmss_release_deletes_scale_set_when_capacity_reaches_zero():
         vmss_name="vmss-azure-test",
         capacity=0,
     )
-    azure_client.compute_client.virtual_machine_scale_sets.begin_delete_instances.assert_called_once()
-    azure_client.compute_client.virtual_machine_scale_sets.begin_delete.assert_not_called()
+    delete_call = (
+        azure_client.compute_client.virtual_machine_scale_sets.begin_delete_instances.call_args.kwargs
+    )
+    delete_ids = delete_call["vm_instance_i_ds"]
+    assert getattr(delete_ids, "instance_ids", delete_ids["instance_ids"]) == ["3"]
     assert result["provider_data"]["pending_reconciliation"]["delete_vmss_when_empty"] is True
 
 
@@ -595,7 +573,7 @@ def test_single_vm_status_populates_network_identity():
     assert result[0]["vpc_id"].endswith("/virtualNetworks/test-vnet")
 
 
-def test_single_vm_release_submits_deletes_without_waiting():
+def test_single_vm_release_returns_submitted_delete_metadata():
     azure_client = MagicMock()
     logger = MagicMock()
     handler = SingleVMHandler(azure_client=azure_client, logger=logger)
@@ -608,10 +586,7 @@ def test_single_vm_release_submits_deletes_without_waiting():
     vm_2.vm_id = "guid-2"
     azure_client.compute_client.virtual_machines.list.return_value = [vm_1, vm_2]
 
-    delete_poller = MagicMock()
-    delete_poller.continuation_token.return_value = "single-delete-token"
-    delete_poller.result.side_effect = AssertionError("result() should not be called")
-    azure_client.compute_client.virtual_machines.begin_delete.return_value = delete_poller
+    azure_client.compute_client.virtual_machines.begin_delete.return_value = MagicMock()
 
     result = handler.release_hosts(
         machine_ids=["guid-1", "guid-2"],
@@ -629,15 +604,7 @@ def test_single_vm_create_sets_native_delete_options():
     logger = MagicMock()
     handler = SingleVMHandler(azure_client=azure_client, logger=logger)
 
-    nic_result = MagicMock()
-    nic_result.id = "/subscriptions/.../networkInterfaces/nic-vm-1"
-    nic_poller = MagicMock()
-    nic_poller.result.return_value = nic_result
-    azure_client.network_client.network_interfaces.begin_create_or_update.return_value = nic_poller
-
-    vm_poller = MagicMock()
-    vm_poller.continuation_token.return_value = "single-vm-lro-token"
-    azure_client.compute_client.virtual_machines.begin_create_or_update.return_value = vm_poller
+    azure_client.resource_client.resources.begin_create_or_update.return_value = MagicMock()
 
     request = MagicMock()
     request.requested_count = 1
@@ -663,57 +630,83 @@ def test_single_vm_create_sets_native_delete_options():
 
     handler.acquire_hosts(request, template)
 
-    vm_params = azure_client.compute_client.virtual_machines.begin_create_or_update.call_args.kwargs[
+    deployment_template = azure_client.resource_client.resources.begin_create_or_update.call_args.kwargs[
         "parameters"
-    ]
-    nic_ref = vm_params["properties"]["networkProfile"]["networkInterfaces"][0]
+    ]["properties"]["template"]
+    vm_resource = next(
+        resource
+        for resource in deployment_template["resources"]
+        if resource["type"] == "Microsoft.Compute/virtualMachines"
+    )
+    nic_ref = vm_resource["properties"]["networkProfile"]["networkInterfaces"][0]
     assert nic_ref["properties"]["deleteOption"] == "Delete"
-    assert vm_params["properties"]["storageProfile"]["osDisk"]["deleteOption"] == "Delete"
-    assert vm_params["properties"]["storageProfile"]["dataDisks"][0]["deleteOption"] == "Delete"
+    assert vm_resource["properties"]["storageProfile"]["osDisk"]["deleteOption"] == "Delete"
+    assert vm_resource["properties"]["storageProfile"]["dataDisks"][0]["deleteOption"] == "Delete"
 
 
-def test_single_vm_create_nic_attaches_public_ip_when_enabled():
-    azure_client = MagicMock()
-    logger = MagicMock()
-    handler = SingleVMHandler(azure_client=azure_client, logger=logger)
-
-    public_ip_result = MagicMock()
-    public_ip_result.id = "/subscriptions/.../publicIPAddresses/pip-vm-test"
-    public_ip_poller = MagicMock()
-    public_ip_poller.result.return_value = public_ip_result
-    azure_client.network_client.public_ip_addresses.begin_create_or_update.return_value = public_ip_poller
-
-    nic_result = MagicMock()
-    nic_result.id = "/subscriptions/.../networkInterfaces/nic-vm-test"
-    nic_poller = MagicMock()
-    nic_poller.result.return_value = nic_result
-    azure_client.network_client.network_interfaces.begin_create_or_update.return_value = nic_poller
-
-    nic_id = handler._create_nic(
-        vm_name="vm-test",
+def test_single_vm_deployment_template_attaches_public_ip_when_enabled():
+    template = AzureTemplate(
+        template_id="azure-singlevm-test",
+        provider_api="SingleVM",
+        vm_size="Standard_D4s_v5",
         resource_group="test-rg",
         location="eastus2",
-        subnet_id="/subscriptions/.../subnets/default",
-        public_ip_enabled=True,
-    )
-
-    assert nic_id == "/subscriptions/.../networkInterfaces/nic-vm-test"
-    azure_client.network_client.public_ip_addresses.begin_create_or_update.assert_called_once_with(
-        resource_group_name="test-rg",
-        public_ip_address_name="pip-vm-test",
-        parameters={
-            "location": "eastus2",
-            "sku": {"name": "Standard"},
-            "properties": {
-                "publicIPAllocationMethod": "Static",
-                "deleteOption": "Delete",
-            },
+        network_config={
+            "subnet_id": "/subscriptions/.../subnets/default",
+            "public_ip_enabled": True,
+        },
+        ssh_public_keys=["ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQC7 test@host"],
+        image={
+            "publisher": "Canonical",
+            "offer": "0001-com-ubuntu-server-jammy",
+            "sku": "22_04-lts-gen2",
+            "version": "latest",
         },
     )
-    nic_params = azure_client.network_client.network_interfaces.begin_create_or_update.call_args.kwargs[
-        "parameters"
-    ]
-    assert nic_params["properties"]["ipConfigurations"][0]["properties"]["publicIPAddress"] == {
-        "id": "/subscriptions/.../publicIPAddresses/pip-vm-test",
+    service = AzureDeploymentService(azure_client=MagicMock(), logger=MagicMock())
+    vm_payload = SingleVMHandler._build_vm_params(
+        template=template,
+        vm_name="vm-test",
+        nic_id=service.resource_id_expression(
+            "Microsoft.Network/networkInterfaces",
+            "nic-vm-test",
+        ),
+    )
+    deployment_template = service.build_single_vm_deployment_template(
+        location="eastus2",
+        subnet_id="/subscriptions/.../subnets/default",
+        vm_definitions=[
+            {
+                "vm_name": "vm-test",
+                "nic_name": "nic-vm-test",
+                "public_ip_name": "pip-vm-test",
+                "vm_payload": vm_payload,
+            }
+        ],
+    )
+
+    public_ip_resource = next(
+        resource
+        for resource in deployment_template["resources"]
+        if resource["type"] == "Microsoft.Network/publicIPAddresses"
+    )
+    nic_resource = next(
+        resource
+        for resource in deployment_template["resources"]
+        if resource["type"] == "Microsoft.Network/networkInterfaces"
+    )
+    assert public_ip_resource == {
+        "type": "Microsoft.Network/publicIPAddresses",
+        "apiVersion": "2023-09-01",
+        "name": "pip-vm-test",
+        "location": "eastus2",
+        "sku": {"name": "Standard"},
+        "properties": {
+            "publicIPAllocationMethod": "Static",
+            "deleteOption": "Delete",
+        },
+    }
+    assert nic_resource["properties"]["ipConfigurations"][0]["properties"]["publicIPAddress"] == {
+        "id": "[resourceId('Microsoft.Network/publicIPAddresses', 'pip-vm-test')]",
         "deleteOption": "Delete",
     }

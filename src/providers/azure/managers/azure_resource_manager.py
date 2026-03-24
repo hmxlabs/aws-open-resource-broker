@@ -46,8 +46,12 @@ class AzureResourceManager:
             self._azure_client.resource_client.tags.begin_create_or_update_at_scope(
                 scope=resource_id,
                 parameters={"properties": {"tags": tags}},
-            ).result()
-            self._logger.info("Tagged resource %s with %s", resource_id, tags)
+            )
+            self._logger.info(
+                "Submitted tag update for resource %s with %s",
+                resource_id,
+                tags,
+            )
         except Exception as exc:
             raise TaggingError(
                 f"Failed to tag resource {resource_id}: {exc}",
@@ -133,28 +137,15 @@ class AzureResourceManager:
                 vm_scale_set_name=vmss_name,
             )
             vmss.sku.capacity = capacity
-            poller = (
-                self._azure_client.compute_client.virtual_machine_scale_sets.begin_create_or_update(
-                    resource_group_name=resource_group,
-                    vm_scale_set_name=vmss_name,
-                    parameters=vmss,
-                )
+            self._azure_client.compute_client.virtual_machine_scale_sets.begin_create_or_update(
+                resource_group_name=resource_group,
+                vm_scale_set_name=vmss_name,
+                parameters=vmss,
             )
-            continuation_token = None
-            if hasattr(poller, "continuation_token"):
-                try:
-                    continuation_token = poller.continuation_token()
-                except Exception as exc:
-                    self._logger.debug(
-                        "Could not capture VMSS scale continuation token for '%s': %s",
-                        vmss_name,
-                        exc,
-                    )
             self._logger.info(
-                "Submitted VMSS '%s' scale to capacity %d (token=%s)",
+                "Submitted VMSS '%s' scale to capacity %d",
                 vmss_name,
                 capacity,
-                continuation_token,
             )
         except Exception as exc:
             self._logger.error(

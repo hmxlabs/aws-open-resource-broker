@@ -243,6 +243,11 @@ class CreateMachineRequestHandler(BaseCommandHandler[CreateRequestCommand, str])
                                 and provider_data.get("resource_group") not in (None, "")
                             ):
                                 request.metadata["resource_group"] = provider_data["resource_group"]
+                            if (
+                                selection_result.provider_type == "azure"
+                                and provider_data.get("deployment_name") not in (None, "")
+                            ):
+                                request.metadata["deployment_name"] = provider_data["deployment_name"]
 
                         if request.provider_api == "CycleCloud" and isinstance(provider_data, dict):
                             for key in (

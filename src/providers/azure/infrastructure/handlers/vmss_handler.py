@@ -82,6 +82,15 @@ def _status_attr(status: Any, attr: str, default: Any = None) -> Any:
     return default
 
 
+def _build_vmss_delete_instance_ids(instance_ids: list[str]) -> Any:
+    """Build the VMSS delete payload using the SDK model when available."""
+    try:
+        from azure.mgmt.compute.models import VirtualMachineScaleSetVMInstanceRequiredIDs
+    except ImportError:
+        return {"instance_ids": instance_ids}
+    return VirtualMachineScaleSetVMInstanceRequiredIDs(instance_ids=instance_ids)
+
+
 @injectable
 class VMSSHandler(AzureHandler):
     """Handler that creates and manages VMSS resources.
@@ -197,25 +206,14 @@ class VMSSHandler(AzureHandler):
                     },
                 }
 
-            # Begin VMSS creation (long-running operation)
-            poller = compute.virtual_machine_scale_sets.begin_create_or_update(
+            compute.virtual_machine_scale_sets.begin_create_or_update(
                 resource_group_name=resource_group,
                 vm_scale_set_name=vmss_name,
                 parameters=arm_payload,
             )
-            continuation_token = None
-            if hasattr(poller, "continuation_token"):
-                try:
-                    continuation_token = poller.continuation_token()
-                except Exception as exc:
-                    self._logger.debug(
-                        "Could not capture VMSS poller continuation token for '%s': %s",
-                        vmss_name,
-                        exc,
-                    )
 
             self._logger.info(
-                "Submitted VMSS create operation for '%s'; tracking will continue via status checks",
+                "Submitted native VMSS create for '%s'; tracking will continue via status checks",
                 vmss_name,
             )
 
@@ -231,7 +229,6 @@ class VMSSHandler(AzureHandler):
                     "location": location,
                     "provisioning_state": "creating",
                     "operation_status": "submitted",
-                    "continuation_token": continuation_token,
                 },
             }
 
@@ -387,24 +384,13 @@ class VMSSHandler(AzureHandler):
                 if orchestration_mode == AzureVMSSOrchestrationMode.FLEXIBLE:
                     submitted_deletions: list[dict[str, Any]] = []
                     for vm_name in machine_ids:
-                        poller = compute.virtual_machines.begin_delete(
+                        compute.virtual_machines.begin_delete(
                             resource_group_name=resource_group,
                             vm_name=str(vm_name),
                         )
-                        continuation_token = None
-                        if hasattr(poller, "continuation_token"):
-                            try:
-                                continuation_token = poller.continuation_token()
-                            except Exception as exc:
-                                self._logger.debug(
-                                    "Could not capture Flexible VMSS delete continuation token for '%s': %s",
-                                    vm_name,
-                                    exc,
-                                )
                         submitted_deletions.append(
                             {
                                 "vm_name": str(vm_name),
-                                "continuation_token": continuation_token,
                             }
                         )
                     self._logger.info(
@@ -434,21 +420,13 @@ class VMSSHandler(AzureHandler):
                         vmss_name=vmss_name,
                         machine_ids=machine_ids,
                     )
-                    poller = compute.virtual_machine_scale_sets.begin_delete_instances(
+                    compute.virtual_machine_scale_sets.begin_delete_instances(
                         resource_group_name=resource_group,
                         vm_scale_set_name=vmss_name,
-                        vm_instance_i_ds={"instance_ids": resolved_instance_ids},
+                        vm_instance_i_ds=_build_vmss_delete_instance_ids(
+                            resolved_instance_ids
+                        ),
                     )
-                    continuation_token = None
-                    if hasattr(poller, "continuation_token"):
-                        try:
-                            continuation_token = poller.continuation_token()
-                        except Exception as exc:
-                            self._logger.debug(
-                                "Could not capture Uniform VMSS delete continuation token for '%s': %s",
-                                vmss_name,
-                                exc,
-                            )
                     self._logger.info(
                         "Submitted delete for %d instance(s) from VMSS '%s'",
                         len(resolved_instance_ids),
@@ -460,7 +438,6 @@ class VMSSHandler(AzureHandler):
                             "vmss_name": vmss_name,
                             "operation_status": "submitted",
                             "resolved_instance_ids": resolved_instance_ids,
-                            "continuation_token": continuation_token,
                             "pending_reconciliation": {
                                 "resource_group": resource_group,
                                 "vmss_name": vmss_name,
@@ -520,12 +497,16 @@ class VMSSHandler(AzureHandler):
             vm_scale_set_name=vmss_name,
         )
         vmss.sku.capacity = capacity
-        poller = self.azure_client.compute_client.virtual_machine_scale_sets.begin_create_or_update(
+        self.azure_client.compute_client.virtual_machine_scale_sets.begin_create_or_update(
             resource_group_name=resource_group,
             vm_scale_set_name=vmss_name,
             parameters=vmss,
         )
-        poller.result()
+        self._logger.info(
+            "Submitted fallback VMSS scale for '%s' to capacity %d",
+            vmss_name,
+            capacity,
+        )
 
     def _resolve_vmss_instance_ids(
         self,

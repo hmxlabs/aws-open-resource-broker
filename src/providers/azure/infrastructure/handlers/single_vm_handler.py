@@ -53,6 +53,14 @@ class SingleVMHandler(AzureHandler):
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
+        from providers.azure.infrastructure.services.azure_deployment_service import (
+            AzureDeploymentService,
+        )
+
+        self.azure_deployment_service = AzureDeploymentService(
+            azure_client=self.azure_client,
+            logger=self._logger,
+        )
         container = get_container()
         try:
             from providers.azure.infrastructure.services.azure_native_spec_service import (
@@ -95,12 +103,6 @@ class SingleVMHandler(AzureHandler):
             location,
         )
 
-        created_ids: list[str] = []
-        errors: list[str] = []
-        structured_errors: list[dict[str, Any]] = []
-        created_nic_names: list[str] = []
-        operation_tracking: list[dict[str, Any]] = []
-
         nsg_id = (
             template.network_config.network_security_group_id
             if template.network_config else None
@@ -133,154 +135,130 @@ class SingleVMHandler(AzureHandler):
             template.resolve_ssh_keys(self.azure_client.compute_client)
 
         candidate_vm_sizes = [template.vm_size, *(template.vm_sizes or [])]
-
-        for i in range(count):
+        vm_definitions: list[dict[str, Any]] = []
+        for _ in range(count):
             vm_name = f"vm-{template.template_id}-{uuid.uuid4().hex[:8]}"
-            nic_name = f"nic-{vm_name}"
-            nic_id: Optional[str] = None
-            public_ip_name: Optional[str] = None
+            vm_definitions.append({
+                "vm_name": vm_name,
+                "nic_name": f"nic-{vm_name}",
+                "public_ip_name": f"pip-{vm_name}" if public_ip_enabled else None,
+            })
+
+        selected_vm_size: Optional[str] = None
+        submitted_deployment_name: Optional[str] = None
+        last_error_details: Optional[dict[str, Any]] = None
+
+        for candidate_vm_size in candidate_vm_sizes:
             try:
-                # Step 1: create NIC
-                nic_id = self._create_nic(
-                    vm_name=vm_name,
-                    resource_group=resource_group,
-                    location=location,
-                    subnet_id=subnet_id,
-                    public_ip_enabled=public_ip_enabled,
-                    enable_accelerated_networking=accel_net,
-                    nsg_id=nsg_id,
-                    load_balancer_backend_pool_ids=backend_pool_ids,
-                    load_balancer_inbound_nat_pool_ids=inbound_nat_pool_ids,
-                    application_gateway_backend_pool_ids=app_gateway_pool_ids,
-                )
-                if public_ip_enabled:
-                    public_ip_name = f"pip-{vm_name}"
-                created_nic_names.append(nic_name)
-                self._logger.debug("NIC '%s' created: %s", nic_name, nic_id)
-
-                # Step 2: create VM
-                compute = self.azure_client.compute_client
-                poller = None
-                selected_vm_size: Optional[str] = None
-                vm_attempt_errors: list[dict[str, Any]] = []
-
-                for candidate_vm_size in candidate_vm_sizes:
-                    try:
-                        vm_params = self._build_vm_params(
-                            template,
-                            vm_name,
-                            nic_id,
-                            vm_size_override=candidate_vm_size,
-                        )
-                        if self.azure_native_spec_service:
-                            merged_params = (
-                                self.azure_native_spec_service.process_provider_api_spec_with_merge(
-                                    template=template,
-                                    request=request,
-                                    default_payload=vm_params,
-                                    extra_context={
-                                        "vm_name": vm_name,
-                                        "nic_id": nic_id,
-                                        "vm_size": candidate_vm_size,
-                                    },
-                                )
-                            )
-                            if merged_params:
-                                vm_params = merged_params
-                        poller = compute.virtual_machines.begin_create_or_update(
-                            resource_group_name=resource_group,
-                            vm_name=vm_name,
-                            parameters=vm_params,
-                        )
-                        selected_vm_size = candidate_vm_size
-                        break
-                    except Exception as exc:
-                        error_details = extract_azure_error_details(exc)
-                        vm_attempt_errors.append({
-                            "error_code": self._classify_provisioning_error(exc),
-                            "error_message": error_details["message"],
-                            "instance_id": vm_name,
-                            "resource_group": resource_group,
-                            "instance_type": candidate_vm_size,
-                            "status_code": error_details["status_code"],
-                            "raw_error_code": error_details["raw_error_code"],
-                        })
-                        if not self._is_capacity_error(exc):
-                            break
-
-                if poller is None or selected_vm_size is None:
-                    last_error = vm_attempt_errors[-1] if vm_attempt_errors else None
-                    raise LaunchError(
-                        message=(
-                            last_error["error_message"]
-                            if last_error
-                            else f"Failed to create VM '{vm_name}'"
-                        ),
-                        template_id=template.template_id,
+                resolved_vm_definitions: list[dict[str, Any]] = []
+                for vm_definition in vm_definitions:
+                    nic_id = self.azure_deployment_service.resource_id_expression(
+                        "Microsoft.Network/networkInterfaces",
+                        vm_definition["nic_name"],
                     )
-                # Use VM name as ORB machine ID; it is directly actionable for Azure APIs.
-                created_ids.append(vm_name)
-                continuation_token = None
-                if hasattr(poller, "continuation_token"):
-                    try:
-                        continuation_token = poller.continuation_token()
-                    except Exception as exc:
-                        self._logger.debug(
-                            "Could not capture VM poller continuation token for '%s': %s",
-                            vm_name,
-                            exc,
+                    vm_params = self._build_vm_params(
+                        template,
+                        vm_definition["vm_name"],
+                        nic_id,
+                        vm_size_override=candidate_vm_size,
+                    )
+                    if self.azure_native_spec_service:
+                        merged_params = (
+                            self.azure_native_spec_service.process_provider_api_spec_with_merge(
+                                template=template,
+                                request=request,
+                                default_payload=vm_params,
+                                extra_context={
+                                    "vm_name": vm_definition["vm_name"],
+                                    "nic_id": nic_id,
+                                    "vm_size": candidate_vm_size,
+                                },
+                            )
                         )
+                        if merged_params:
+                            vm_params = merged_params
 
-                operation_tracking.append({
-                    "vm_name": vm_name,
-                    "nic_name": nic_name,
-                    "selected_vm_size": selected_vm_size,
-                    "continuation_token": continuation_token,
-                })
-                self._logger.info("Submitted create operation for VM '%s'", vm_name)
-
-            except Exception as exc:
-                error_msg = f"Failed to create VM '{vm_name}': {exc}"
-                self._logger.error(error_msg)
-                errors.append(error_msg)
-                if "vm_attempt_errors" in locals() and vm_attempt_errors:
-                    structured_errors.extend(vm_attempt_errors)
-                else:
-                    error_details = extract_azure_error_details(exc)
-                    structured_errors.append({
-                        "error_code": self._classify_provisioning_error(exc),
-                        "error_message": error_details["message"],
-                        "instance_id": vm_name,
-                        "resource_group": resource_group,
-                        "instance_type": template.vm_size,
-                        "status_code": error_details["status_code"],
-                        "raw_error_code": error_details["raw_error_code"],
+                    resolved_vm_definitions.append({
+                        **vm_definition,
+                        "vm_payload": vm_params,
                     })
-                # Clean up the NIC we just created (best-effort)
-                if nic_id:
-                    self._delete_nic(resource_group, nic_name)
-                    created_nic_names = [n for n in created_nic_names if n != nic_name]
-                if public_ip_name:
-                    self._delete_public_ip(resource_group, public_ip_name)
 
-        if not created_ids:
+                deployment_name = self.azure_deployment_service.build_deployment_name(
+                    "vm",
+                    str(request.request_id),
+                    template.template_id,
+                    candidate_vm_size,
+                )
+                deployment_template = (
+                    self.azure_deployment_service.build_single_vm_deployment_template(
+                        location=location,
+                        subnet_id=subnet_id,
+                        vm_definitions=resolved_vm_definitions,
+                        enable_accelerated_networking=accel_net,
+                        nsg_id=nsg_id,
+                        load_balancer_backend_pool_ids=backend_pool_ids,
+                        load_balancer_inbound_nat_pool_ids=inbound_nat_pool_ids,
+                        application_gateway_backend_pool_ids=app_gateway_pool_ids,
+                    )
+                )
+                submitted_deployment_name = self.azure_deployment_service.submit_template_deployment(
+                    resource_group=resource_group,
+                    deployment_name=deployment_name,
+                    template=deployment_template,
+                )
+                selected_vm_size = candidate_vm_size
+                break
+            except Exception as exc:
+                error_details = extract_azure_error_details(exc)
+                last_error_details = {
+                    "error_code": self._classify_provisioning_error(exc),
+                    "error_message": error_details["message"],
+                    "resource_group": resource_group,
+                    "instance_type": candidate_vm_size,
+                    "status_code": error_details["status_code"],
+                    "raw_error_code": error_details["raw_error_code"],
+                }
+                if not self._is_capacity_error(exc):
+                    break
+
+        if submitted_deployment_name is None or selected_vm_size is None:
             raise LaunchError(
-                message=f"Failed to create any VMs: {'; '.join(errors)}",
+                message=(
+                    last_error_details["error_message"]
+                    if last_error_details
+                    else "Failed to submit SingleVM deployment"
+                ),
                 template_id=template.template_id,
             )
+
+        created_ids = [vm_definition["vm_name"] for vm_definition in vm_definitions]
+        operation_tracking = [
+            {
+                "vm_name": vm_definition["vm_name"],
+                "nic_name": vm_definition["nic_name"],
+                "public_ip_name": vm_definition["public_ip_name"],
+                "selected_vm_size": selected_vm_size,
+            }
+            for vm_definition in vm_definitions
+        ]
+        self._logger.info(
+            "Submitted create deployment '%s' for %d VM(s)",
+            submitted_deployment_name,
+            len(created_ids),
+        )
 
         return {
             "success": True,
             "resource_ids": created_ids,
             "instances": [],
-            "error_message": "; ".join(errors) if errors else None,
+            "error_message": None,
             "provider_data": {
                 "resource_group": resource_group,
                 "location": location,
-                "created_count": len(created_ids),
-                "failed_count": len(errors),
-                "operation_status": "partial_submitted" if structured_errors else "submitted",
-                "fleet_errors": structured_errors,
+                "submitted_count": len(created_ids),
+                "operation_status": "submitted",
+                "deployment_name": submitted_deployment_name,
+                "fleet_errors": [],
                 "submitted_vms": operation_tracking,
             },
         }
@@ -375,21 +353,10 @@ class SingleVMHandler(AzureHandler):
                     resource_group_name=resource_group,
                     vm_name=vm_name,
                 )
-                continuation_token = None
-                if hasattr(poller, "continuation_token"):
-                    try:
-                        continuation_token = poller.continuation_token()
-                    except Exception as exc:
-                        self._logger.debug(
-                            "Could not capture VM delete continuation token for '%s': %s",
-                            vm_name,
-                            exc,
-                        )
                 submitted_deletions.append(
                     {
                         "requested_id": str(original_id),
                         "vm_name": vm_name,
-                        "continuation_token": continuation_token,
                     }
                 )
             except Exception as exc:
@@ -472,96 +439,6 @@ class SingleVMHandler(AzureHandler):
             "SkuNotAvailable",
             "OverconstrainedAllocationRequest",
         }
-
-    def _create_nic(
-        self,
-        vm_name: str,
-        resource_group: str,
-        location: str,
-        subnet_id: str,
-        public_ip_enabled: bool = False,
-        enable_accelerated_networking: bool = False,
-        nsg_id: Optional[str] = None,
-        load_balancer_backend_pool_ids: Optional[list[str]] = None,
-        load_balancer_inbound_nat_pool_ids: Optional[list[str]] = None,
-        application_gateway_backend_pool_ids: Optional[list[str]] = None,
-    ) -> str:
-        """Create a NIC and return its ARM resource ID."""
-        nic_name = f"nic-{vm_name}"
-        public_ip_name = f"pip-{vm_name}"
-        ip_config_properties: dict[str, Any] = {
-            "subnet": {"id": subnet_id},
-            "privateIPAllocationMethod": "Dynamic",
-        }
-        if public_ip_enabled:
-            public_ip_id = self._create_public_ip(
-                resource_group=resource_group,
-                location=location,
-                public_ip_name=public_ip_name,
-            )
-            ip_config_properties["publicIPAddress"] = {
-                "id": public_ip_id,
-                "deleteOption": "Delete",
-            }
-        if load_balancer_backend_pool_ids:
-            ip_config_properties["loadBalancerBackendAddressPools"] = [
-                {"id": pool_id} for pool_id in load_balancer_backend_pool_ids
-            ]
-        if load_balancer_inbound_nat_pool_ids:
-            ip_config_properties["loadBalancerInboundNatPools"] = [
-                {"id": pool_id} for pool_id in load_balancer_inbound_nat_pool_ids
-            ]
-        if application_gateway_backend_pool_ids:
-            ip_config_properties["applicationGatewayBackendAddressPools"] = [
-                {"id": pool_id} for pool_id in application_gateway_backend_pool_ids
-            ]
-
-        nic_params: dict[str, Any] = {
-            "location": location,
-            "properties": {
-                "ipConfigurations": [
-                    {
-                        "name": "ipconfig1",
-                        "properties": ip_config_properties,
-                    }
-                ],
-                "enableAcceleratedNetworking": enable_accelerated_networking,
-            },
-        }
-        if nsg_id:
-            nic_params["properties"]["networkSecurityGroup"] = {"id": nsg_id}
-
-        network = self.azure_client.network_client
-        poller = network.network_interfaces.begin_create_or_update(
-            resource_group_name=resource_group,
-            network_interface_name=nic_name,
-            parameters=nic_params,
-        )
-        nic_result = poller.result()
-        return nic_result.id
-
-    def _create_public_ip(
-        self,
-        resource_group: str,
-        location: str,
-        public_ip_name: str,
-    ) -> str:
-        """Create a Public IP resource and return its ARM resource ID."""
-        params: dict[str, Any] = {
-            "location": location,
-            "sku": {"name": "Standard"},
-            "properties": {
-                "publicIPAllocationMethod": "Static",
-                "deleteOption": "Delete",
-            },
-        }
-        poller = self.azure_client.network_client.public_ip_addresses.begin_create_or_update(
-            resource_group_name=resource_group,
-            public_ip_address_name=public_ip_name,
-            parameters=params,
-        )
-        public_ip = poller.result()
-        return public_ip.id
 
     @staticmethod
     def _build_vm_params(
@@ -720,7 +597,11 @@ class SingleVMHandler(AzureHandler):
             self.azure_client.network_client.network_interfaces.begin_delete(
                 resource_group_name=resource_group,
                 network_interface_name=nic_name,
-            ).result()
+            )
+            self._logger.debug(
+                "Submitted best-effort NIC delete for '%s'",
+                nic_name,
+            )
         except Exception as exc:
             self._logger.warning("Could not delete NIC '%s': %s", nic_name, exc)
 
@@ -730,7 +611,11 @@ class SingleVMHandler(AzureHandler):
             self.azure_client.network_client.public_ip_addresses.begin_delete(
                 resource_group_name=resource_group,
                 public_ip_address_name=public_ip_name,
-            ).result()
+            )
+            self._logger.debug(
+                "Submitted best-effort Public IP delete for '%s'",
+                public_ip_name,
+            )
         except Exception as exc:
             self._logger.warning("Could not delete Public IP '%s': %s", public_ip_name, exc)
 

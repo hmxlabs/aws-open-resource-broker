@@ -223,6 +223,40 @@ class TestCapacityMetadata:
         assert result.data["instances"] == []
         assert result.metadata["fleet_errors"][0]["error_code"] == "ProvisioningStateFailed"
 
+    def test_describe_resource_instances_surfaces_single_vm_deployment_errors_without_instances(
+        self, strategy
+    ):
+        handler = MagicMock()
+        handler.check_hosts_status.return_value = []
+        strategy._handlers["SingleVM"] = handler
+        strategy._deployment_service = MagicMock()
+        strategy._deployment_service.get_deployment_status.return_value = {
+            "provisioning_state": "Failed",
+            "error_code": "DeploymentFailed",
+            "error_message": "Deployment failed during validation",
+        }
+
+        op = ProviderOperation(
+            operation_type=ProviderOperationType.DESCRIBE_RESOURCE_INSTANCES,
+            parameters={
+                "resource_ids": ["vm-a", "vm-b"],
+                "provider_api": "SingleVM",
+                "template_id": "tmpl-1",
+                "request_metadata": {
+                    "resource_group": "test-rg",
+                    "deployment_name": "dep-singlevm-1",
+                },
+            },
+        )
+
+        result = _run(strategy.execute_operation(op))
+
+        assert result.success
+        assert result.data["instances"] == []
+        assert result.metadata["deployment_name"] == "dep-singlevm-1"
+        assert result.metadata["deployment_provisioning_state"] == "Failed"
+        assert result.metadata["fleet_errors"][0]["error_code"] == "DeploymentFailed"
+
     def test_describe_resource_instances_adds_shortfall_summary(self, strategy):
         handler = MagicMock()
         handler.check_hosts_status.return_value = [

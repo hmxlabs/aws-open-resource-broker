@@ -79,6 +79,7 @@ class AzureProviderStrategy(ProviderStrategy):
         self._client: Optional[AzureClient] = None
         self._azure_client_resolver = azure_client_resolver
         self._resource_manager: Optional[AzureResourceManager] = None
+        self._deployment_service: Optional[Any] = None
         self._handlers: dict[str, AzureHandler] = {}
         self._azure_provisioning_port = azure_provisioning_port
         self._azure_provisioning_port_resolver = azure_provisioning_port_resolver
@@ -123,6 +124,19 @@ class AzureProviderStrategy(ProviderStrategy):
                 logger=self._logger,
             )
         return self._resource_manager
+
+    @property
+    def deployment_service(self) -> Optional[Any]:
+        if self._deployment_service is None and self.azure_client:
+            from providers.azure.infrastructure.services.azure_deployment_service import (
+                AzureDeploymentService,
+            )
+
+            self._deployment_service = AzureDeploymentService(
+                azure_client=self.azure_client,
+                logger=self._logger,
+            )
+        return self._deployment_service
 
     @property
     def handlers(self) -> dict[str, AzureHandler]:
@@ -1403,6 +1417,10 @@ class AzureProviderStrategy(ProviderStrategy):
                 operation=operation,
                 resource_group=resource_group,
             )
+            if provider_api_value == AzureProviderApi.SINGLE_VM.value:
+                deployment_name = self._request_metadata(operation).get("deployment_name")
+                if deployment_name not in (None, ""):
+                    request_metadata["deployment_name"] = str(deployment_name)
             if provider_api_value in (
                 AzureProviderApi.VMSS.value,
                 AzureProviderApi.VMSS_UNIFORM.value,
@@ -1452,6 +1470,12 @@ class AzureProviderStrategy(ProviderStrategy):
                     self._augment_vmss_capacity_metadata(
                         metadata,
                         resource_ids,
+                        resource_group=resource_group,
+                    )
+                elif provider_api_value == AzureProviderApi.SINGLE_VM.value:
+                    self._augment_single_vm_deployment_metadata(
+                        metadata,
+                        request_metadata,
                         resource_group=resource_group,
                     )
                 return ProviderResult.success_result(
@@ -1637,6 +1661,55 @@ class AzureProviderStrategy(ProviderStrategy):
             "provisioned_instance_count": aggregated_fulfilled_capacity,
             "state": aggregate_state,
         }
+
+    def _augment_single_vm_deployment_metadata(
+        self,
+        metadata: dict[str, Any],
+        request_metadata: dict[str, Any],
+        *,
+        resource_group: Optional[str],
+    ) -> None:
+        deployment_name = request_metadata.get("deployment_name")
+        if deployment_name in (None, "") or not resource_group or not self.deployment_service:
+            return
+
+        try:
+            deployment_status = self.deployment_service.get_deployment_status(
+                resource_group=str(resource_group),
+                deployment_name=str(deployment_name),
+            )
+        except Exception as exc:
+            self._logger.warning(
+                "Could not fetch SingleVM deployment status for %s: %s",
+                deployment_name,
+                exc,
+            )
+            return
+
+        if not deployment_status:
+            return
+
+        metadata["deployment_name"] = str(deployment_name)
+        provisioning_state = deployment_status.get("provisioning_state")
+        if provisioning_state not in (None, ""):
+            metadata["deployment_provisioning_state"] = provisioning_state
+
+        error_code = deployment_status.get("error_code")
+        error_message = deployment_status.get("error_message")
+        if str(provisioning_state).lower() == "failed" and error_code in (None, ""):
+            error_code = "DeploymentFailed"
+        if error_code not in (None, "") or error_message not in (None, ""):
+            metadata["fleet_errors"] = [
+                {
+                    "error_code": error_code or "DeploymentFailed",
+                    "error_message": (
+                        error_message
+                        or f"ARM deployment '{deployment_name}' failed"
+                    ),
+                    "resource_group": str(resource_group),
+                    "instance_id": str(deployment_name),
+                }
+            ]
 
     @staticmethod
     def _augment_shortfall_metadata(metadata: dict[str, Any]) -> None:

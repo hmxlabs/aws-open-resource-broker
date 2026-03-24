@@ -407,6 +407,7 @@ class TestCreateMachineRequestHandlerPartial:
                 "provider_data": {
                     "handler_used": "VMSSHandler",
                     "resource_group": "custom-rg",
+                    "deployment_name": "dep-azure-1",
                 },
                 "error_message": None,
             }
@@ -419,6 +420,7 @@ class TestCreateMachineRequestHandlerPartial:
         saved_request = mock_uow.requests.save.call_args[0][0]
         assert saved_request.provider_api == "VMSS"
         assert saved_request.metadata["resource_group"] == "custom-rg"
+        assert saved_request.metadata["deployment_name"] == "dep-azure-1"
         assert saved_request.status == RequestStatus.IN_PROGRESS
 
     @pytest.mark.asyncio

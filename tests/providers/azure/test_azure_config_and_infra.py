@@ -20,6 +20,7 @@ from providers.azure.exceptions.azure_exceptions import (
 )
 from providers.azure.infrastructure.adapters.machine_adapter import AzureMachineAdapter
 from providers.azure.infrastructure.azure_client import AzureClient
+from providers.azure.managers.azure_resource_manager import AzureResourceManager
 from providers.azure.registration import (
     create_azure_config,
     register_azure_provider,
@@ -651,6 +652,29 @@ class TestAzureClientNetworkResolution:
         assert result["subnet_id"].endswith("/subnets/default")
         assert result["vnet_id"].endswith("/virtualNetworks/test-vnet")
         assert result["nic_name"] == "nic-vm-1"
+
+
+class TestAzureResourceManager:
+    def test_tag_resource_submits_requested_tags(self):
+        azure_client = MagicMock()
+        logger = MagicMock()
+        config = AzureProviderConfig(
+            subscription_id="12345678-1234-1234-1234-123456789012",
+            resource_group="rg",
+        )
+        manager = AzureResourceManager(azure_client=azure_client, config=config, logger=logger)
+
+        azure_client.resource_client.tags.begin_create_or_update_at_scope.return_value = MagicMock()
+
+        manager.tag_resource(
+            "/subscriptions/sub/resourceGroups/rg/providers/Microsoft.Compute/virtualMachines/vm-1",
+            {"env": "test"},
+        )
+
+        azure_client.resource_client.tags.begin_create_or_update_at_scope.assert_called_once_with(
+            scope="/subscriptions/sub/resourceGroups/rg/providers/Microsoft.Compute/virtualMachines/vm-1",
+            parameters={"properties": {"tags": {"env": "test"}}},
+        )
 
 
 # ---------------------------------------------------------------------------
