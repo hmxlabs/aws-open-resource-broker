@@ -598,33 +598,12 @@ class SingleVMHandler(AzureHandler):
 
         return params
 
-    def _delete_nic(self, resource_group: str, nic_name: str) -> None:
-        """Best-effort rollback for NICs created before VM submission fails."""
-        try:
-            self.azure_client.network_client.network_interfaces.begin_delete(
-                resource_group_name=resource_group,
-                network_interface_name=nic_name,
-            )
-            self._logger.debug(
-                "Submitted best-effort NIC delete for '%s'",
-                nic_name,
-            )
-        except Exception as exc:
-            self._logger.warning("Could not delete NIC '%s': %s", nic_name, exc)
-
-    def _delete_public_ip(self, resource_group: str, public_ip_name: str) -> None:
-        """Best-effort rollback for Public IPs created before VM submission fails."""
-        try:
-            self.azure_client.network_client.public_ip_addresses.begin_delete(
-                resource_group_name=resource_group,
-                public_ip_address_name=public_ip_name,
-            )
-            self._logger.debug(
-                "Submitted best-effort Public IP delete for '%s'",
-                public_ip_name,
-            )
-        except Exception as exc:
-            self._logger.warning("Could not delete Public IP '%s': %s", public_ip_name, exc)
+    # NIC and Public IP cleanup is handled natively by Azure via
+    # deleteOption: "Delete" on the NIC and Public IP references in the
+    # ARM template.  When a VM is deleted, Azure cascades the deletion
+    # through NIC → Public IP automatically.  For Flexible VMSS this is
+    # the default behaviour.  No ORB-managed rollback methods are needed.
+    # See: https://learn.microsoft.com/en-us/azure/virtual-machines/delete
 
     @classmethod
     def get_example_templates(cls) -> list[dict[str, Any]]:
