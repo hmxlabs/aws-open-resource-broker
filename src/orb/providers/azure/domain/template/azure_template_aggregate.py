@@ -802,9 +802,7 @@ class AzureTemplate(Template):
             }
 
         if self.capacity_reservation_group_id:
-            properties.setdefault("virtualMachineProfile", vm_profile)[
-                "capacityReservation"
-            ] = {
+            vm_profile["capacityReservation"] = {
                 "capacityReservationGroup": {
                     "id": self.capacity_reservation_group_id,
                 },
