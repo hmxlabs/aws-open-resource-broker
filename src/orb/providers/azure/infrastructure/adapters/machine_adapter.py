@@ -187,7 +187,7 @@ class AzureMachineAdapter:
         )
 
     @staticmethod
-    def _raise_azure_lookup_error(machine: Machine, exc: Exception) -> None:
+    def _raise_azure_lookup_error(machine: Machine, exc: Exception) -> NoReturn:
         message = str(exc)
         lower = message.lower()
         if "notfound" in lower or "could not be found" in lower:
