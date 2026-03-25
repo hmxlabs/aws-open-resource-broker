@@ -5,7 +5,7 @@ Provides Azure-specific machine normalization and helper operations.
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any, NoReturn, Optional
 
 from orb.domain.base.dependency_injection import injectable
 from orb.domain.base.ports import LoggingPort
@@ -13,9 +13,17 @@ from orb.domain.machine.aggregate import Machine
 from orb.domain.machine.machine_status import MachineStatus
 from orb.providers.azure.exceptions.azure_exceptions import (
     AzureError,
+    AuthenticationError,
     NetworkError,
     RateLimitError,
     VMNotFoundError,
+)
+from azure.core.exceptions import (
+    ClientAuthenticationError as AzureClientAuthenticationError,
+    HttpResponseError as AzureHttpResponseError,
+    ResourceNotFoundError as AzureResourceNotFoundError,
+    ServiceRequestError as AzureServiceRequestError,
+    ServiceResponseError as AzureServiceResponseError,
 )
 from orb.providers.azure.infrastructure.azure_client import AzureClient
 
@@ -188,15 +196,37 @@ class AzureMachineAdapter:
 
     @staticmethod
     def _raise_azure_lookup_error(machine: Machine, exc: Exception) -> NoReturn:
-        message = str(exc)
-        lower = message.lower()
-        if "notfound" in lower or "could not be found" in lower:
+        """Translate Azure SDK exceptions into domain exceptions.
+
+        Uses the azure.core.exceptions type hierarchy rather than
+        substring matching on error messages.
+        """
+        machine_id = str(machine.machine_id)
+
+        if isinstance(exc, AzureResourceNotFoundError):
             raise VMNotFoundError(
-                f"Azure VM not found: {machine.machine_id}",
-                instance_id=str(machine.machine_id),
+                f"Azure VM not found: {machine_id}",
+                instance_id=machine_id,
             ) from exc
-        if "429" in lower or "throttl" in lower:
-            raise RateLimitError(f"Azure rate limit exceeded: {message}") from exc
-        if "timeout" in lower or "connection" in lower or "network" in lower:
-            raise NetworkError(f"Azure network error: {message}") from exc
-        raise AzureError(f"Azure health check failed: {message}") from exc
+
+        if isinstance(exc, AzureClientAuthenticationError):
+            raise AuthenticationError(
+                f"Azure authentication failed for VM lookup: {machine_id}: {exc}"
+            ) from exc
+
+        if isinstance(exc, AzureHttpResponseError):
+            status_code = getattr(exc, "status_code", None)
+            if status_code == 429:
+                raise RateLimitError(
+                    f"Azure rate limit exceeded looking up VM {machine_id}: {exc}"
+                ) from exc
+            raise AzureError(
+                f"Azure API error for VM {machine_id} (HTTP {status_code}): {exc}"
+            ) from exc
+
+        if isinstance(exc, (AzureServiceRequestError, AzureServiceResponseError)):
+            raise NetworkError(
+                f"Azure network error looking up VM {machine_id}: {exc}"
+            ) from exc
+
+        raise AzureError(f"Azure health check failed for VM {machine_id}: {exc}") from exc
