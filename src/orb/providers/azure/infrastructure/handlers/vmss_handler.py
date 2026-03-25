@@ -342,7 +342,9 @@ class VMSSHandler(AzureHandler):
                     vm_name = vm.get("instance_id")
                     if not vm_name:
                         continue
-                    poller = compute.virtual_machines.begin_delete(
+                    # Fire-and-forget: deletion is async; status is
+                    # reconciled by the caller via check_hosts_status polling.
+                    compute.virtual_machines.begin_delete(
                         resource_group_name=resource_group,
                         vm_name=vm_name,
                     )
@@ -353,7 +355,9 @@ class VMSSHandler(AzureHandler):
                 resource_group,
             )
             try:
-                poller = compute.virtual_machine_scale_sets.begin_delete(
+                # Fire-and-forget: deletion is async; the caller
+                # reconciles completion via check_hosts_status polling.
+                compute.virtual_machine_scale_sets.begin_delete(
                     resource_group_name=resource_group,
                     vm_scale_set_name=vmss_name,
                 )
@@ -386,6 +390,8 @@ class VMSSHandler(AzureHandler):
                     vmss_name,
                 )
                 try:
+                    # Fire-and-forget: deletion is async; the caller
+                    # reconciles completion via check_hosts_status polling.
                     compute.virtual_machine_scale_sets.begin_delete(
                         resource_group_name=resource_group,
                         vm_scale_set_name=vmss_name,
@@ -421,6 +427,8 @@ class VMSSHandler(AzureHandler):
                 if orchestration_mode == AzureVMSSOrchestrationMode.FLEXIBLE:
                     submitted_deletions: list[dict[str, Any]] = []
                     for vm_name in machine_ids:
+                        # Fire-and-forget: deletion is async; the caller
+                        # reconciles completion via check_hosts_status polling.
                         compute.virtual_machines.begin_delete(
                             resource_group_name=resource_group,
                             vm_name=str(vm_name),
@@ -457,6 +465,8 @@ class VMSSHandler(AzureHandler):
                         vmss_name=vmss_name,
                         machine_ids=machine_ids,
                     )
+                    # Fire-and-forget: deletion is async; the caller
+                    # reconciles completion via check_hosts_status polling.
                     compute.virtual_machine_scale_sets.begin_delete_instances(
                         resource_group_name=resource_group,
                         vm_scale_set_name=vmss_name,
