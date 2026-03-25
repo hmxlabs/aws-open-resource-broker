@@ -240,22 +240,25 @@ class VMSSHandler(AzureHandler):
             error_msg = f"Failed to create VMSS '{vmss_name}': {exc}"
             self._logger.error(error_msg)
 
-            # Translate Azure SDK errors into domain exceptions where possible
+            # Translate Azure SDK errors into domain exceptions where possible,
+            # preserving the canonical error code so spot placement retry logic
+            # can classify capacity-like failures.
             error_code = canonical_azure_error_code(exc)
             error_str = extract_azure_error_details(exc)["message"].lower()
             if error_code in {"QuotaExceeded", "OperationNotAllowed", "ResourceQuotaExceeded"} or (
                 "quota" in error_str or "exceeded" in error_str
             ):
-                raise QuotaExceededError(error_msg) from exc
+                raise QuotaExceededError(error_msg, error_code=error_code) from exc
             if error_code in {"InvalidRequest", "InvalidParameter", "BadRequest"} or (
                 "validation" in error_str or "invalid" in error_str
             ):
-                raise AzureValidationError(error_msg) from exc
+                raise AzureValidationError(error_msg, error_code=error_code) from exc
 
             raise VMSSCreationError(
                 message=error_msg,
                 template_id=template.template_id,
                 vmss_name=vmss_name,
+                error_code=error_code,
             ) from exc
 
     # ------------------------------------------------------------------

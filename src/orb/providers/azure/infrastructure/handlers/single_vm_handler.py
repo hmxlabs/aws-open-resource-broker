@@ -229,6 +229,9 @@ class SingleVMHandler(AzureHandler):
                     else "Failed to submit SingleVM deployment"
                 ),
                 template_id=template.template_id,
+                error_code=(
+                    last_error_details["error_code"] if last_error_details else None
+                ),
             )
 
         created_ids = [vm_definition["vm_name"] for vm_definition in vm_definitions]

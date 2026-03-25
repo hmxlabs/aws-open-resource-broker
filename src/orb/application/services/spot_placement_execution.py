@@ -7,6 +7,7 @@ import re
 from typing import Any, Callable
 
 from orb.application.services.spot_placement_planner import PlacementPlanEntry
+from orb.domain.base.exceptions import DomainException
 
 
 @dataclass(frozen=True)
@@ -123,7 +124,16 @@ class SpotPlacementExecutionService:
 
             child_template = build_child_template(plan_entry)
             child_request = build_child_request(requested_for_entry, idx)
-            raw_result = launch_child(child_request, child_template)
+            try:
+                raw_result = launch_child(child_request, child_template)
+            except DomainException as exc:
+                raw_result = {
+                    "success": False,
+                    "resource_ids": [],
+                    "instances": [],
+                    "error_message": self._format_launch_error(exc),
+                    "provider_data": {},
+                }
             child_result = self._normalize_child_result(
                 plan_entry=plan_entry,
                 requested_count=requested_for_entry,
@@ -167,6 +177,20 @@ class SpotPlacementExecutionService:
             terminated_early=terminated_early,
             terminal_error_message=terminal_error_message,
         )
+
+    @staticmethod
+    def _format_launch_error(exc: Exception) -> str:
+        """Format a launch exception preserving the error code for extraction.
+
+        Domain exceptions carry an ``error_code`` attribute (e.g.
+        ``AllocationFailed``).  Prefix the message with the code so that
+        ``_extract_error_codes`` can recover it via the Azure-style regex.
+        """
+        error_code = getattr(exc, "error_code", None)
+        message = str(exc)
+        if error_code and not message.startswith(f"{error_code}:"):
+            return f"{error_code}: {message}"
+        return message
 
     @staticmethod
     def _normalize_child_result(

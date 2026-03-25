@@ -219,6 +219,7 @@ class LaunchError(AzureError):
         template_id: str,
         launch_params: Optional[dict[str, Any]] = None,
         details: Optional[dict[str, Any]] = None,
+        error_code: Optional[str] = None,
     ):
         super().__init__(
             message,
@@ -227,6 +228,7 @@ class LaunchError(AzureError):
                 "launch_params": launch_params or {},
                 **(details or {}),
             },
+            error_code=error_code,
         )
         self.template_id = template_id
         self.launch_params = launch_params or {}
@@ -242,12 +244,14 @@ class VMSSCreationError(LaunchError):
         vmss_name: Optional[str] = None,
         launch_params: Optional[dict[str, Any]] = None,
         details: Optional[dict[str, Any]] = None,
+        error_code: Optional[str] = None,
     ):
         super().__init__(
             message,
             template_id=template_id,
             launch_params=launch_params,
             details={"vmss_name": vmss_name, **(details or {})},
+            error_code=error_code,
         )
         self.vmss_name = vmss_name
 
