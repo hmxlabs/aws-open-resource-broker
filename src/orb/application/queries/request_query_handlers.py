@@ -50,15 +50,28 @@ class GetRequestHandler(BaseQueryHandler[GetRequestQuery, RequestDTO]):
         self._dto_factory = RequestDTOFactory()
 
     async def execute_query(self, query: GetRequestQuery) -> RequestDTO:
-        """Execute get request query."""
+        """Execute get request query.
+
+        Two modes controlled by ``query.lightweight``:
+
+        * **lightweight=False** (default): sync live provider state into the
+          DB, then return the result.  This is the only mode that detects
+          async provider-side transitions (e.g. Azure VMSS creation completing,
+          instances terminating).  Orchestrator polling loops must use this.
+
+        * **lightweight=True**: return stored DB state immediately with no
+          provider call.  Useful for cheap reads where freshness is not
+          critical (e.g. UI polling after a recent full sync).
+
+        The cache sits in front of both modes.  Full-sync queries populate
+        it; all queries (including lightweight) read from it.  This means a
+        lightweight caller benefits from a recent full-sync without paying
+        the provider call cost.
+        """
         self.logger.info("Getting request details for: %s", query.request_id)
 
         try:
-            if (
-                query.lightweight
-                and self._cache_service
-                and self._cache_service.is_caching_enabled()
-            ):
+            if self._cache_service and self._cache_service.is_caching_enabled():
                 cached_result = self._cache_service.get_cached_request(query.request_id)
                 if cached_result:
                     self.logger.info("Cache hit for request: %s", query.request_id)
@@ -107,11 +120,7 @@ class GetRequestHandler(BaseQueryHandler[GetRequestQuery, RequestDTO]):
             machine_objects = await self._query_service.get_machines_for_request(request)
             request_dto = self._dto_factory.create_from_domain(request, machine_objects)
 
-            if (
-                query.lightweight
-                and self._cache_service
-                and self._cache_service.is_caching_enabled()
-            ):
+            if self._cache_service and self._cache_service.is_caching_enabled():
                 self._cache_service.cache_request(query.request_id, request_dto)
 
             self.logger.info("Retrieved request: %s", query.request_id)

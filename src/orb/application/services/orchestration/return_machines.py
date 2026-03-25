@@ -86,8 +86,10 @@ class ReturnMachinesOrchestrator(OrchestratorBase[ReturnMachinesInput, ReturnMac
         consecutive_errors = 0
         while elapsed < timeout_seconds:
             try:
-                # Return completion must use the syncing request-status path so provider-side
-                # termination progress and follow-up cleanup are observed before we exit.
+                # Polling must use the full syncing path (lightweight=False).
+                # See acquire_machines.py for the full rationale — providers
+                # with async termination (Azure) set IN_PROGRESS and rely on
+                # the sync to detect when instances are actually gone.
                 query = GetRequestQuery(request_id=request_id, lightweight=False, verbose=True)
                 result = await self._query_bus.execute(query)
                 consecutive_errors = 0
