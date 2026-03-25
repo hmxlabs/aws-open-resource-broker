@@ -190,12 +190,12 @@ class Application:
                         provider_instance
                     )
                     if not registered:
-                        raise RuntimeError(
-                            f"Failed to register configured provider '{provider_instance.name}'"
+                        self.logger.error(
+                            "Failed to register configured provider '%s'",
+                            provider_instance.name,
                         )
         except Exception as e:
             self.logger.error("Failed to register configured providers: %s", e, exc_info=True)
-            raise
 
     def _log_provider_configuration(self, config_manager) -> None:
         """Log provider configuration information during initialization."""
