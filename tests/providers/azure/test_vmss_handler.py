@@ -633,39 +633,6 @@ def test_vmss_release_marks_uniform_vmss_for_cleanup_when_last_instance_is_retur
         vm_scale_set_name="vmss-azure-test",
     )
 
-
-def test_vmss_delete_vmss_for_flexible_vmss_defers_scale_set_delete_until_empty():
-    azure_client = MagicMock()
-    logger = MagicMock()
-    handler = VMSSHandler(azure_client=azure_client, logger=logger)
-    handler._list_vmss_instances = MagicMock(  # type: ignore[method-assign]
-        return_value=[
-            {"instance_id": "vm-a"},
-            {"instance_id": "vm-b"},
-        ]
-    )
-
-    vmss = MagicMock()
-    vmss.orchestration_mode = AzureVMSSOrchestrationMode.FLEXIBLE.value
-    azure_client.compute_client.virtual_machine_scale_sets.get.return_value = vmss
-    azure_client.compute_client.virtual_machines.begin_delete.return_value = MagicMock()
-
-    result = handler.release_hosts(
-        machine_ids=[],
-        resource_id="vmss-azure-test",
-        context={"resource_group": "test-rg", "delete_vmss": True},
-    )
-
-    assert result["provider_data"]["pending_vmss_cleanup"] == {
-        "resource_group": "test-rg",
-        "vmss_name": "vmss-azure-test",
-        "machine_ids": ["vm-a", "vm-b"],
-        "delete_vmss_when_empty": True,
-    }
-    assert _deleted_vm_names(azure_client) == ["vm-a", "vm-b"]
-    azure_client.compute_client.virtual_machine_scale_sets.begin_delete.assert_not_called()
-
-
 def test_single_vm_status_populates_network_identity():
     azure_client = MagicMock()
     logger = MagicMock()

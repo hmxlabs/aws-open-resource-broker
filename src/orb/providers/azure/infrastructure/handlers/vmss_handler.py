@@ -347,7 +347,7 @@ class VMSSHandler(AzureHandler):
         resource_id: str,
         context: Optional[dict[str, Any]] = None,
     ) -> Optional[dict[str, Any]]:
-        """Delete specific VM instances from a VMSS, or the entire VMSS."""
+        """Delete specific VM instances from a VMSS."""
         context = context or {}
         resource_group = (
             context.get("resource_group") or self.azure_client.resource_group
@@ -362,68 +362,6 @@ class VMSSHandler(AzureHandler):
         compute = self.azure_client.compute_client
         orchestration_mode = self._get_vmss_orchestration_mode(resource_group, vmss_name)
 
-        delete_vmss = bool(context.get("delete_vmss", False))
-
-        if delete_vmss:
-            if orchestration_mode == AzureVMSSOrchestrationMode.FLEXIBLE:
-                attached_vms = self._list_vmss_instances(
-                    resource_group, vmss_name, include_instance_view=False
-                )
-                attached_vm_names = [
-                    str(vm.get("instance_id"))
-                    for vm in attached_vms
-                    if vm.get("instance_id")
-                ]
-                if attached_vm_names:
-                    for vm_name in attached_vm_names:
-                        # Fire-and-forget: deletion is async; status is
-                        # reconciled by the caller via check_hosts_status polling.
-                        compute.virtual_machines.begin_delete(
-                            resource_group_name=resource_group,
-                            vm_name=vm_name,
-                        )
-                    return {
-                        "provider_data": {
-                            "resource_group": resource_group,
-                            "vmss_name": vmss_name,
-                            "operation_status": "submitted",
-                            "submitted_deletions": [
-                                {"vm_name": vm_name} for vm_name in attached_vm_names
-                            ],
-                            "pending_vmss_cleanup": self._build_pending_vmss_cleanup(
-                                resource_group=resource_group,
-                                vmss_name=vmss_name,
-                                machine_ids=attached_vm_names,
-                            ),
-                        }
-                    }
-            # Delete the entire VMSS
-            self._logger.info(
-                "Deleting entire VMSS '%s' in resource group '%s'",
-                vmss_name,
-                resource_group,
-            )
-            try:
-                # Fire-and-forget: deletion is async; the caller
-                # reconciles completion via check_hosts_status polling.
-                compute.virtual_machine_scale_sets.begin_delete(
-                    resource_group_name=resource_group,
-                    vm_scale_set_name=vmss_name,
-                )
-                self._logger.info("Submitted delete for VMSS '%s'", vmss_name)
-                return {
-                    "provider_data": {
-                        "resource_group": resource_group,
-                        "vmss_name": vmss_name,
-                        "operation_status": "submitted",
-                        "delete_vmss": True,
-                    }
-                }
-            except Exception as exc:
-                raise TerminationError(
-                    f"Failed to delete VMSS '{vmss_name}': {exc}",
-                    resource_ids=[vmss_name],
-                ) from exc
         if not machine_ids:
             return None
 
