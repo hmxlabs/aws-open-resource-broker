@@ -701,15 +701,24 @@ class CycleCloudHandler(AzureHandler):
         cyclecloud_request_id = resource_ids[0]
 
         if not cluster_name:
-            self._logger.error("Cannot determine cluster_name for status check")
-            return []
+            message = "cluster_name is required for CycleCloud status check"
+            self._logger.error(message)
+            raise CycleCloudConnectionError(
+                message,
+                url=metadata.get("cyclecloud_url"),
+                details={"request_id": getattr(request, "request_id", None)},
+            )
 
         if not cyclecloud_request_id:
-            self._logger.error(
-                "Cannot determine CycleCloud request identity for status check in cluster '%s'",
-                cluster_name,
+            message = (
+                f"CycleCloud request identity is required for status check in cluster '{cluster_name}'"
             )
-            return []
+            self._logger.error(message)
+            raise CycleCloudConnectionError(
+                message,
+                url=metadata.get("cyclecloud_url"),
+                details={"resource_ids": resource_ids},
+            )
 
         # Build a minimal template to get CycleCloud connection info
         cc_url = metadata.get("cyclecloud_url")

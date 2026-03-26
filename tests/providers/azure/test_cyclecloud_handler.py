@@ -426,13 +426,24 @@ class TestCycleCloudHandlerStatus:
     def test_check_hosts_status_requires_cyclecloud_request_identity(self):
         handler = _make_handler()
         request = _make_request(
-            resource_ids=[],
+            resource_ids=[""],
             metadata={
                 "cluster_name": "my-cluster",
                 "cyclecloud_url": "https://cc.example.com",
             },
         )
-        assert handler.check_hosts_status(request) == []
+        with pytest.raises(CycleCloudConnectionError, match="request identity is required"):
+            handler.check_hosts_status(request)
+
+    def test_check_hosts_status_requires_cluster_name(self):
+        handler = _make_handler()
+        request = _make_request(
+            resource_ids=["req-12345678-1234-1234-1234-123456789012"],
+            metadata={"cyclecloud_url": "https://cc.example.com"},
+        )
+
+        with pytest.raises(CycleCloudConnectionError, match="cluster_name is required"):
+            handler.check_hosts_status(request)
 
     @patch("orb.providers.azure.infrastructure.handlers.cyclecloud_handler.requests.Session")
     def test_check_hosts_status_request_failure_raises(self, mock_session_cls):
