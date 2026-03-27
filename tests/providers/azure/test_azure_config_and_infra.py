@@ -689,7 +689,8 @@ class TestAzureMachineAdapter:
     def test_perform_health_check_raises_vm_not_found(self):
         azure_client = MagicMock()
         azure_client.resource_group = "rg"
-        azure_client.compute_client.virtual_machines.get.side_effect = Exception("NotFound")
+        from azure.core.exceptions import ResourceNotFoundError
+        azure_client.compute_client.virtual_machines.get.side_effect = ResourceNotFoundError("NotFound")
         adapter = AzureMachineAdapter(azure_client=azure_client, logger=MagicMock())
         machine = Machine(
             instance_id=InstanceId(value="vm-1"),

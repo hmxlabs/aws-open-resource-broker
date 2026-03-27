@@ -128,11 +128,23 @@ class SingleVMHandler(AzureHandler):
             if template.network_config else False
         )
 
-        # Resolve ssh_key_name → actual key data if needed.
-        # Done once before the loop so
-        # that _build_vm_params can read the cached ssh_public_keys.
-        if template.ssh_key_name and not template.ssh_public_keys:
-            template.resolve_ssh_keys(self.azure_client.compute_client)
+        # Resolve ssh_key_name → actual key data once before the loop.
+        # Build a local template copy with resolved keys so the mapper
+        # can read them without mutating the original aggregate.
+        resolved_ssh_keys = list(template.ssh_public_keys)
+        if template.ssh_key_name and not resolved_ssh_keys:
+            from orb.providers.azure.infrastructure.services.ssh_key_resolver import (
+                resolve_ssh_keys,
+            )
+
+            resolved_ssh_keys = resolve_ssh_keys(
+                ssh_key_name=template.ssh_key_name,
+                ssh_public_keys=template.ssh_public_keys,
+                resource_group=template.resource_group,
+                compute_client=self.azure_client.compute_client,
+            )
+        if resolved_ssh_keys != list(template.ssh_public_keys):
+            template = template.model_copy(update={"ssh_public_keys": resolved_ssh_keys})
 
         candidate_vm_sizes = [template.vm_size, *(template.vm_sizes or [])]
         vm_definitions: list[dict[str, Any]] = []
@@ -156,7 +168,11 @@ class SingleVMHandler(AzureHandler):
                         "Microsoft.Network/networkInterfaces",
                         vm_definition["nic_name"],
                     )
-                    vm_params = self._build_vm_params(
+                    from orb.providers.azure.infrastructure.services.arm_payload_mapper import (
+                        ArmPayloadMapper,
+                    )
+
+                    vm_params = ArmPayloadMapper.single_vm_payload(
                         template,
                         vm_definition["vm_name"],
                         nic_id,
@@ -447,157 +463,6 @@ class SingleVMHandler(AzureHandler):
             "SkuNotAvailable",
             "OverconstrainedAllocationRequest",
         }
-
-    @staticmethod
-    def _build_vm_params(
-            template: AzureTemplate, vm_name: str, nic_id: str, vm_size_override: Optional[str] = None
-    ) -> dict[str, Any]:
-        """Build ARM VM create parameters for a single VM deployment."""
-        params: dict[str, Any] = {
-            "location": template.location,
-            "properties": {
-                "hardwareProfile": {"vmSize": vm_size_override or template.vm_size},
-                "storageProfile": {},
-                "osProfile": {
-                    "computerName": vm_name[:15],  # Azure host name limit
-                    "adminUsername": template.admin_username,
-                },
-                "networkProfile": {
-                    "networkInterfaces": [
-                        {
-                            "id": nic_id,
-                            "properties": {
-                                "primary": True,
-                                "deleteOption": "Delete",
-                            },
-                        }
-                    ]
-                },
-            },
-            "tags": template.tags or {},
-        }
-
-        # Image
-        if template.image:
-            params["properties"]["storageProfile"]["imageReference"] = (
-                template.image.to_arm_dict()
-            )
-        elif template.image_id:
-            params["properties"]["storageProfile"]["imageReference"] = {
-                "id": template.image_id
-            }
-
-        # OS disk
-        if template.os_disk:
-            params["properties"]["storageProfile"]["osDisk"] = (
-                template.os_disk.to_arm_dict()
-            )
-        else:
-            params["properties"]["storageProfile"]["osDisk"] = {
-                "createOption": "FromImage",
-                "deleteOption": "Delete",
-                "managedDisk": {"storageAccountType": "Standard_LRS"},
-            }
-
-        # Data disks
-        if template.data_disks:
-            params["properties"]["storageProfile"]["dataDisks"] = [
-                disk.to_arm_dict() for disk in template.data_disks
-            ]
-
-        if template.disk_encryption_set_id:
-            os_disk_managed = params["properties"]["storageProfile"].get("osDisk", {}).get("managedDisk")
-            if isinstance(os_disk_managed, dict):
-                os_disk_managed["diskEncryptionSet"] = {
-                    "id": template.disk_encryption_set_id,
-                }
-
-            for data_disk in params["properties"]["storageProfile"].get("dataDisks", []):
-                managed_disk = data_disk.get("managedDisk")
-                if isinstance(managed_disk, dict):
-                    managed_disk["diskEncryptionSet"] = {
-                        "id": template.disk_encryption_set_id,
-                    }
-
-        # SSH keys
-        if template.ssh_public_keys:
-            params["properties"]["osProfile"]["linuxConfiguration"] = {
-                "disablePasswordAuthentication": True,
-                "ssh": {
-                    "publicKeys": [
-                        {
-                            "path": f"/home/{template.admin_username}/.ssh/authorized_keys",
-                            "keyData": key,
-                        }
-                        for key in template.ssh_public_keys
-                    ]
-                },
-            }
-
-        # Custom data
-        if template.custom_data:
-            params["properties"]["osProfile"]["customData"] = template.custom_data
-
-        # Priority / Spot
-        if template.priority.value != "Regular":
-            params["properties"]["priority"] = template.priority.value
-            if template.eviction_policy:
-                params["properties"]["evictionPolicy"] = template.eviction_policy.value
-            if template.billing_profile_max_price is not None:
-                params["properties"]["billingProfile"] = {
-                    "maxPrice": template.billing_profile_max_price
-                }
-
-        # Security profile
-        if template.security_type:
-            security_profile: dict[str, Any] = {
-                "securityType": template.security_type.value,
-            }
-            uefi: dict[str, Any] = {}
-            if template.secure_boot_enabled is not None:
-                uefi["secureBootEnabled"] = template.secure_boot_enabled
-            if template.vtpm_enabled is not None:
-                uefi["vTpmEnabled"] = template.vtpm_enabled
-            if uefi:
-                security_profile["uefiSettings"] = uefi
-            if template.encryption_at_host is not None:
-                security_profile["encryptionAtHost"] = template.encryption_at_host
-            params["properties"]["securityProfile"] = security_profile
-
-        # Capacity reservation
-        if template.capacity_reservation_group_id:
-            params["properties"]["capacityReservation"] = {
-                "capacityReservationGroup": {
-                    "id": template.capacity_reservation_group_id,
-                }
-            }
-
-        # Identity
-        if template.system_assigned_identity or template.user_assigned_identity_ids:
-            identity: dict[str, Any]
-            if template.system_assigned_identity and template.user_assigned_identity_ids:
-                identity = {
-                    "type": "SystemAssigned, UserAssigned",
-                    "userAssignedIdentities": {
-                        uid: {} for uid in template.user_assigned_identity_ids
-                    },
-                }
-            elif template.system_assigned_identity:
-                identity = {"type": "SystemAssigned"}
-            else:
-                identity = {
-                    "type": "UserAssigned",
-                    "userAssignedIdentities": {
-                        uid: {} for uid in template.user_assigned_identity_ids
-                    },
-                }
-            params["identity"] = identity
-
-        # Availability zones
-        if template.zones:
-            params["zones"] = template.zones
-
-        return params
 
     # NIC and Public IP cleanup is handled natively by Azure via
     # deleteOption: "Delete" on the NIC and Public IP references in the

@@ -7,6 +7,7 @@ from orb.providers.azure.domain.template.value_objects import AzureVMSSOrchestra
 from orb.providers.azure.domain.template.azure_template_aggregate import AzureTemplate
 from orb.providers.azure.infrastructure.handlers.single_vm_handler import SingleVMHandler
 from orb.providers.azure.infrastructure.handlers.vmss_handler import VMSSHandler
+from orb.providers.azure.infrastructure.services.arm_payload_mapper import ArmPayloadMapper
 from orb.providers.azure.infrastructure.services.azure_deployment_service import (
     AzureDeploymentService,
 )
@@ -321,7 +322,7 @@ def test_single_vm_build_vm_params_applies_disk_encryption_set_to_os_and_data_di
         data_disks=[{"lun": 0, "disk_size_gb": 128}],
     )
 
-    params = SingleVMHandler._build_vm_params(
+    params = ArmPayloadMapper.single_vm_payload(
         template=template,
         vm_name="vm-test",
         nic_id="/subscriptions/.../networkInterfaces/nic-vm-test",
@@ -775,7 +776,7 @@ def test_single_vm_deployment_template_attaches_public_ip_when_enabled():
         },
     )
     service = AzureDeploymentService(azure_client=MagicMock(), logger=MagicMock())
-    vm_payload = SingleVMHandler._build_vm_params(
+    vm_payload = ArmPayloadMapper.single_vm_payload(
         template=template,
         vm_name="vm-test",
         nic_id=service.resource_id_expression(

@@ -1,4 +1,4 @@
-"""Tests for the Azure domain template aggregate and value objects."""
+"""Tests for the Azure domain template aggregate, value objects, and ARM mapper."""
 
 import pytest
 
@@ -17,6 +17,7 @@ from orb.providers.azure.domain.template.value_objects import (
     AzureSecurityType,
     AzureVMSSOrchestrationMode,
 )
+from orb.providers.azure.infrastructure.services.arm_payload_mapper import ArmPayloadMapper
 
 
 # ---------------------------------------------------------------------------
@@ -283,7 +284,7 @@ class TestArmPayload:
             **_BASE_FIELDS,
             network_config={"subnet_id": "/subscriptions/.../subnets/default"},
         )
-        arm = t.to_azure_api_format()
+        arm = ArmPayloadMapper.vmss_payload(t)
 
         assert arm["type"] == "Microsoft.Compute/virtualMachineScaleSets"
         assert arm["location"] == "eastus2"
@@ -300,7 +301,7 @@ class TestArmPayload:
             priority="Spot",
             billing_profile_max_price=-1.0,
         )
-        arm = t.to_azure_api_format()
+        arm = ArmPayloadMapper.vmss_payload(t)
         vm_profile = arm["properties"]["virtualMachineProfile"]
         assert vm_profile["priority"] == "Spot"
         assert vm_profile["billingProfile"]["maxPrice"] == -1.0
@@ -312,7 +313,7 @@ class TestArmPayload:
             priority="Spot",
             spot_allocation_strategy=AzureAllocationStrategy.CAPACITY_OPTIMIZED,
         )
-        arm = t.to_azure_api_format()
+        arm = ArmPayloadMapper.vmss_payload(t)
 
         assert arm["sku"]["name"] == "Mix"
         assert arm["skuProfile"]["vmSizes"] == [
@@ -330,7 +331,7 @@ class TestArmPayload:
             spot_percentage=70,
             base_regular_priority_count=2,
         )
-        arm = t.to_azure_api_format()
+        arm = ArmPayloadMapper.vmss_payload(t)
 
         vm_profile = arm["properties"]["virtualMachineProfile"]
         assert vm_profile["priority"] == "Spot"
@@ -344,7 +345,7 @@ class TestArmPayload:
             **_BASE_FIELDS,
             zones=["1", "2", "3"],
         )
-        arm = t.to_azure_api_format()
+        arm = ArmPayloadMapper.vmss_payload(t)
         assert arm["zones"] == ["1", "2", "3"]
 
     def test_identity_in_arm_payload(self):
@@ -353,7 +354,7 @@ class TestArmPayload:
             system_assigned_identity=True,
             user_assigned_identity_ids=["/subscriptions/.../identities/my-id"],
         )
-        arm = t.to_azure_api_format()
+        arm = ArmPayloadMapper.vmss_payload(t)
         assert arm["identity"]["type"] == "SystemAssigned, UserAssigned"
 
     def test_disk_encryption_set_is_applied_to_vmss_os_and_data_disks(self):
@@ -362,7 +363,7 @@ class TestArmPayload:
             disk_encryption_set_id="/subscriptions/sub/resourceGroups/rg/providers/Microsoft.Compute/diskEncryptionSets/des-1",
             data_disks=[{"lun": 0, "disk_size_gb": 256}],
         )
-        arm = t.to_azure_api_format()
+        arm = ArmPayloadMapper.vmss_payload(t)
         storage_profile = arm["properties"]["virtualMachineProfile"]["storageProfile"]
 
         assert storage_profile["osDisk"]["managedDisk"]["diskEncryptionSet"] == {
