@@ -195,6 +195,10 @@ class AzureClient:
 
         return self._azure_config
 
+    def get_provider_config(self) -> Optional[AzureProviderConfig]:
+        """Return the active Azure provider configuration, if available."""
+        return self._get_selected_azure_provider_config()
+
     # ------------------------------------------------------------------
     # Credential management
     # ------------------------------------------------------------------

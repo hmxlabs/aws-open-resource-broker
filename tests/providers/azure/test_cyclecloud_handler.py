@@ -2,13 +2,17 @@
 
 import json
 from pathlib import Path
+from unittest.mock import MagicMock, patch
+
 import pytest
 import requests
-from unittest.mock import MagicMock, patch
+from azure.core.exceptions import ClientAuthenticationError
+from azure.identity import CredentialUnavailableError
 
 from orb.providers.azure.configuration.config import AzureProviderConfig
 from orb.providers.azure.domain.template.azure_template_aggregate import AzureTemplate
 from orb.providers.azure.exceptions.azure_exceptions import (
+    AuthenticationError,
     CycleCloudConnectionError,
     CycleCloudNodeError,
     TerminationError,
@@ -45,6 +49,7 @@ def _make_template(**overrides):
 
 def _make_handler():
     azure_client = MagicMock()
+    azure_client.get_provider_config.return_value = None
     logger = MagicMock()
     return CycleCloudHandler(azure_client=azure_client, logger=logger)
 
@@ -211,6 +216,7 @@ class TestCycleCloudHandlerAcquire:
         assert result["provider_data"]["added_count"] == 2
         request_json = mock_session.request.call_args_list[1].kwargs["json"]
         assert request_json["requestId"] == "req-12345678-1234-1234-1234-123456789012"
+        mock_session.close.assert_called_once_with()
 
     @patch("orb.providers.azure.infrastructure.handlers.cyclecloud_handler.requests.Session")
     def test_acquire_hosts_placeholder_nodes(self, mock_session_cls):
@@ -366,6 +372,11 @@ class TestCycleCloudHandlerStatus:
     @patch("orb.providers.azure.infrastructure.handlers.cyclecloud_handler.requests.Session")
     def test_check_hosts_status_uses_request_id_filter(self, mock_session_cls):
         handler = _make_handler()
+        handler.azure_client.get_provider_config.return_value = AzureProviderConfig(
+            region="eastus2",
+            connect_timeout=7,
+            read_timeout=11,
+        )
 
         mock_session = MagicMock()
         mock_session_cls.return_value = mock_session
@@ -406,8 +417,9 @@ class TestCycleCloudHandlerStatus:
             "GET",
             "https://cc.example.com/clusters/my-cluster/nodes",
             params={"request_id": "req-12345678-1234-1234-1234-123456789012"},
-            timeout=30,
+            timeout=(7, 11),
         )
+        mock_session.close.assert_called_once_with()
 
     def test_check_hosts_status_no_resource_ids(self):
         handler = _make_handler()
@@ -579,6 +591,7 @@ class TestCycleCloudHandlerRelease:
         assert "nodes" in calls[0].args[1]
         assert "deallocate" in calls[1].args[1]
         assert "remove" in calls[2].args[1]
+        mock_session.close.assert_called_once_with()
 
     @patch("orb.providers.azure.infrastructure.handlers.cyclecloud_handler.requests.Session")
     def test_release_hosts_resolves_node_id_to_node_name(self, mock_session_cls):
@@ -634,6 +647,81 @@ class TestCycleCloudHandlerRelease:
 
 
 class TestCycleCloudAuthModes:
+    def test_get_azure_bearer_token_returns_none_when_client_has_no_credential(self):
+        handler = _make_handler()
+        type(handler.azure_client).credential = property(
+            lambda _self: (_ for _ in ()).throw(AuthenticationError("no credential"))
+        )
+
+        try:
+            assert (
+                handler._get_azure_bearer_token(["https://cc.example.com/.default"])
+                is None
+            )
+        finally:
+            del type(handler.azure_client).credential
+
+    def test_get_azure_bearer_token_skips_expected_auth_failures(self):
+        handler = _make_handler()
+        credential = MagicMock()
+        credential.get_token.side_effect = [
+            CredentialUnavailableError("missing"),
+            ClientAuthenticationError(message="bad token"),
+            MagicMock(token="tok-123"),
+        ]
+        type(handler.azure_client).credential = property(lambda _self: credential)
+
+        try:
+            token = handler._get_azure_bearer_token(
+                [
+                    "https://scope-1/.default",
+                    "https://scope-2/.default",
+                    "https://scope-3/.default",
+                ]
+            )
+        finally:
+            del type(handler.azure_client).credential
+
+        assert token == "tok-123"
+
+    def test_get_azure_bearer_token_propagates_unexpected_errors(self):
+        handler = _make_handler()
+        credential = MagicMock()
+        credential.get_token.side_effect = RuntimeError("boom")
+        type(handler.azure_client).credential = property(lambda _self: credential)
+
+        try:
+            with pytest.raises(RuntimeError, match="boom"):
+                handler._get_azure_bearer_token(["https://cc.example.com/.default"])
+        finally:
+            del type(handler.azure_client).credential
+
+    def test_cc_request_uses_provider_configured_timeouts(self):
+        handler = _make_handler()
+        handler.azure_client.get_provider_config.return_value = AzureProviderConfig(
+            region="eastus2",
+            connect_timeout=5,
+            read_timeout=13,
+        )
+        session = MagicMock()
+        response = MagicMock()
+        response.content = b"{}"
+        response.json.return_value = {}
+        response.raise_for_status = MagicMock()
+        session.request.return_value = response
+
+        handler._cc_request(
+            session,
+            "GET",
+            "https://cc.example.com/clusters/my-cluster/status",
+        )
+
+        session.request.assert_called_once_with(
+            "GET",
+            "https://cc.example.com/clusters/my-cluster/status",
+            timeout=(5, 13),
+        )
+
     def test_build_session_uses_azure_bearer_when_no_basic_auth(self):
         handler = _make_handler()
 
@@ -661,10 +749,28 @@ class TestCycleCloudAuthModes:
                 request_state={"cyclecloud_auth_mode": "ssh"},
             )
 
+    @patch("orb.providers.azure.infrastructure.handlers.cyclecloud_handler.requests.Session")
+    def test_build_session_closes_session_when_auth_resolution_fails(self, mock_session_cls):
+        handler = _make_handler()
+        mock_session = MagicMock()
+        mock_session_cls.return_value = mock_session
+
+        with patch.object(handler, "_get_azure_bearer_token", return_value=None):
+            with pytest.raises(
+                CycleCloudConnectionError,
+                match="cyclecloud_auth_mode=bearer requested but no bearer token could be resolved",
+            ):
+                handler._build_cc_session(
+                    cc_url="https://cc.example.com",
+                    verify_ssl=True,
+                    request_state={"cyclecloud_auth_mode": "bearer"},
+                )
+
+        mock_session.close.assert_called_once_with()
+
     def test_build_session_loads_cyclecloud_config_from_provider(self):
         handler = _make_handler()
-        handler.azure_client._azure_config = None
-        handler.azure_client._get_selected_azure_provider_config.return_value = AzureProviderConfig(
+        handler.azure_client.get_provider_config.return_value = AzureProviderConfig(
             region="eastus2",
             resource_group="orb-test-rg",
             cyclecloud={
@@ -853,7 +959,7 @@ class TestCycleCloudAuthModes:
             ),
             encoding="utf-8",
         )
-        handler.azure_client._azure_config = AzureProviderConfig(
+        handler.azure_client.get_provider_config.return_value = AzureProviderConfig(
             subscription_id="12345678-1234-1234-1234-123456789012",
             region="eastus2",
             cyclecloud={
@@ -916,7 +1022,7 @@ class TestCycleCloudAuthModes:
             ),
             encoding="utf-8",
         )
-        handler.azure_client._azure_config = AzureProviderConfig(
+        handler.azure_client.get_provider_config.return_value = AzureProviderConfig(
             subscription_id="12345678-1234-1234-1234-123456789012",
             region="eastus2",
             cyclecloud={
@@ -976,7 +1082,7 @@ class TestCycleCloudAuthModes:
             ),
             encoding="utf-8",
         )
-        handler.azure_client._azure_config = AzureProviderConfig(
+        handler.azure_client.get_provider_config.return_value = AzureProviderConfig(
             subscription_id="12345678-1234-1234-1234-123456789012",
             region="eastus2",
             cyclecloud={
