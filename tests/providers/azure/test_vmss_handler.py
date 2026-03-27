@@ -2,6 +2,7 @@
 
 import pytest
 from unittest.mock import MagicMock
+from azure.core.exceptions import ResourceNotFoundError
 
 import orb.providers.azure.infrastructure.handlers.vmss_handler as vmss_handler_module
 from orb.providers.azure.domain.template.value_objects import AzureVMSSOrchestrationMode
@@ -754,6 +755,46 @@ def test_single_vm_status_populates_network_identity():
     assert result[0]["vpc_id"].endswith("/virtualNetworks/test-vnet")
 
 
+def test_single_vm_status_uses_direct_vm_name_lookup_without_listing_resource_group():
+    azure_client = MagicMock()
+    logger = MagicMock()
+    handler = SingleVMHandler(azure_client=azure_client, logger=logger)
+
+    nic_ref = MagicMock()
+    nic_ref.id = (
+        "/subscriptions/sub/resourceGroups/test-rg/providers/"
+        "Microsoft.Network/networkInterfaces/nic-vm-1"
+    )
+    nic_ref.properties.primary = True
+
+    vm = MagicMock()
+    vm.name = "vm-1"
+    vm.vm_id = "vm-guid-1"
+    vm.instance_view.statuses = []
+    vm.hardware_profile.vm_size = "Standard_D4s_v5"
+    vm.location = "eastus2"
+    vm.zones = ["1"]
+    vm.network_profile.network_interfaces = [nic_ref]
+    azure_client.resolve_network_identity_from_vm.return_value = {
+        "private_ip": "10.0.0.4",
+        "public_ip": None,
+        "subnet_id": "/subscriptions/sub/.../subnets/default",
+        "vnet_id": "/subscriptions/sub/.../virtualNetworks/test-vnet",
+        "nic_id": nic_ref.id,
+        "nic_name": "nic-vm-1",
+    }
+    azure_client.compute_client.virtual_machines.get.return_value = vm
+
+    request = MagicMock()
+    request.resource_ids = ["vm-1"]
+    request.metadata = {"resource_group": "test-rg"}
+
+    result = handler.check_hosts_status(request)
+
+    assert result[0]["instance_id"] == "vm-1"
+    azure_client.compute_client.virtual_machines.list.assert_not_called()
+
+
 def test_single_vm_release_returns_submitted_delete_metadata():
     azure_client = MagicMock()
     logger = MagicMock()
@@ -766,6 +807,7 @@ def test_single_vm_release_returns_submitted_delete_metadata():
     vm_2.name = "vm-2"
     vm_2.vm_id = "guid-2"
     azure_client.compute_client.virtual_machines.list.return_value = [vm_1, vm_2]
+    azure_client.compute_client.virtual_machines.get.side_effect = ResourceNotFoundError("NotFound")
 
     azure_client.compute_client.virtual_machines.begin_delete.return_value = MagicMock()
 
@@ -781,6 +823,28 @@ def test_single_vm_release_returns_submitted_delete_metadata():
         {"requested_id": "guid-2", "vm_name": "vm-2"},
     ]
     assert _deleted_vm_names(azure_client) == ["vm-1", "vm-2"]
+
+
+def test_single_vm_release_uses_direct_vm_name_lookup_without_listing_resource_group():
+    azure_client = MagicMock()
+    logger = MagicMock()
+    handler = SingleVMHandler(azure_client=azure_client, logger=logger)
+
+    vm = MagicMock()
+    vm.name = "vm-1"
+    azure_client.compute_client.virtual_machines.get.return_value = vm
+    azure_client.compute_client.virtual_machines.begin_delete.return_value = MagicMock()
+
+    result = handler.release_hosts(
+        machine_ids=["vm-1"],
+        resource_id="unused",
+        context={"resource_group": "test-rg"},
+    )
+
+    assert result["provider_data"]["submitted_deletions"] == [
+        {"requested_id": "vm-1", "vm_name": "vm-1"},
+    ]
+    azure_client.compute_client.virtual_machines.list.assert_not_called()
 
 
 def test_single_vm_create_sets_native_delete_options():

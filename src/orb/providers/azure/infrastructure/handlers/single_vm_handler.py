@@ -10,6 +10,7 @@ from __future__ import annotations
 import uuid
 from typing import Any, Optional
 
+from azure.core.exceptions import ResourceNotFoundError as AzureResourceNotFoundError
 from orb.domain.base.dependency_injection import injectable
 from orb.domain.request.aggregate import Request
 from orb.infrastructure.di.container import get_container
@@ -42,6 +43,14 @@ def _resolve_power_state(statuses: list[Any]) -> str:
         if code.startswith("PowerState/"):
             return _AZURE_STATE_MAP.get(code, "unknown")
     return "unknown"
+
+
+def _looks_like_uuid(value: str) -> bool:
+    try:
+        uuid.UUID(str(value))
+        return True
+    except (ValueError, AttributeError, TypeError):
+        return False
 
 
 @injectable
@@ -409,20 +418,43 @@ class SingleVMHandler(AzureHandler):
 
         try:
             compute = self.azure_client.compute_client
-            vms = compute.virtual_machines.list(resource_group_name=resource_group)
+            resolved: list[str] = []
+            unresolved_ids: list[str] = []
 
-            lookup: dict[str, str] = {}
-            for vm in vms:
-                vm_name = getattr(vm, "name", None)
-                if not vm_name:
+            for machine_id in machine_ids:
+                machine_id_str = str(machine_id)
+                if _looks_like_uuid(machine_id_str):
+                    unresolved_ids.append(machine_id_str)
                     continue
-                lookup[str(vm_name)] = str(vm_name)
 
-                vm_id = getattr(vm, "vm_id", None)
-                if vm_id:
-                    lookup[str(vm_id)] = str(vm_name)
+                try:
+                    vm = compute.virtual_machines.get(
+                        resource_group_name=resource_group,
+                        vm_name=machine_id_str,
+                    )
+                    resolved.append(str(getattr(vm, "name", None) or machine_id_str))
+                except AzureResourceNotFoundError:
+                    unresolved_ids.append(machine_id_str)
 
-            resolved = [lookup.get(str(machine_id), str(machine_id)) for machine_id in machine_ids]
+            if unresolved_ids:
+                vms = compute.virtual_machines.list(resource_group_name=resource_group)
+
+                lookup: dict[str, str] = {}
+                for vm in vms:
+                    vm_name = getattr(vm, "name", None)
+                    if not vm_name:
+                        continue
+                    lookup[str(vm_name)] = str(vm_name)
+
+                    vm_id = getattr(vm, "vm_id", None)
+                    if vm_id:
+                        lookup[str(vm_id)] = str(vm_name)
+
+                resolved.extend(
+                    lookup.get(str(machine_id), str(machine_id))
+                    for machine_id in unresolved_ids
+                )
+
             if resolved != [str(mid) for mid in machine_ids]:
                 self._logger.debug(
                     "Resolved SingleVM IDs in resource_group '%s': %s -> %s",
