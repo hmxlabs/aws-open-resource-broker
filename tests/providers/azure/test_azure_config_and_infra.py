@@ -605,7 +605,7 @@ class TestAzureValidationAdapter:
         assert result["valid"] is False
         assert any("spot_percentage requires Flexible orchestration mode" in error for error in result["errors"])
 
-    def test_validate_template_configuration_rejects_spot_percentage_without_spot_priority(self):
+    def test_validate_template_configuration_accepts_spot_percentage_without_spot_priority(self):
         adapter = AzureValidationAdapter(config=AzureProviderConfig(), logger=MagicMock())
 
         result = adapter.validate_template_configuration({
@@ -619,8 +619,8 @@ class TestAzureValidationAdapter:
             "image": {"publisher": "C", "offer": "o", "sku": "s"},
         })
 
-        assert result["valid"] is False
-        assert any("spot_percentage requires priority='Spot'" in error for error in result["errors"])
+        assert result["valid"] is True
+        assert result["errors"] == []
 
     def test_create_azure_validator_returns_adapter(self):
         validator = create_azure_validator(

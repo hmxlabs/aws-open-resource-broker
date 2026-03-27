@@ -79,8 +79,8 @@ class SingleVMHandler(AzureHandler):
         VM create operations are submitted and tracked via later status checks,
         rather than blocking here until each LRO completes.
         """
-        resource_group = template.resource_group
-        location = template.location
+        resource_group = template.resource_group.value
+        location = template.location.value
         count = request.requested_count
 
         # Resolve subnet for NIC creation
@@ -140,7 +140,7 @@ class SingleVMHandler(AzureHandler):
             resolved_ssh_keys = resolve_ssh_keys(
                 ssh_key_name=template.ssh_key_name,
                 ssh_public_keys=template.ssh_public_keys,
-                resource_group=template.resource_group,
+                resource_group=template.resource_group.value,
                 compute_client=self.azure_client.compute_client,
             )
         if resolved_ssh_keys != list(template.ssh_public_keys):
@@ -373,7 +373,7 @@ class SingleVMHandler(AzureHandler):
                 self._logger.info(
                     "Deleting VM '%s' (requested id='%s')", vm_name, original_id
                 )
-                poller = compute.virtual_machines.begin_delete(
+                compute.virtual_machines.begin_delete(
                     resource_group_name=resource_group,
                     vm_name=vm_name,
                 )

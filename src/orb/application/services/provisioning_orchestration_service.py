@@ -275,18 +275,21 @@ class ProvisioningOrchestrationService:
                     resource_ids=resource_ids,
                     machine_ids=result.data.get("instance_ids", []),
                     instances=instances,
-                    provider_data=result.metadata or {},
+                    provider_data=provider_data,
                     fulfilled_count=len(instances),
                     is_final=(not has_capacity_error and len(instances) >= count)
                     or fulfillment_final,
                 )
             else:
+                provider_data = result.data.get("provider_data", None) or (
+                    result.metadata or {}
+                ).get("provider_data", {})
                 return ProvisioningResult(
                     success=False,
                     resource_ids=[],
                     machine_ids=[],
                     instances=[],
-                    provider_data=result.metadata or {},
+                    provider_data=provider_data,
                     error_message=result.error_message,
                 )
 

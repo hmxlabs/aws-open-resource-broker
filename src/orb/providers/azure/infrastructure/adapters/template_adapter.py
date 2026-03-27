@@ -28,11 +28,13 @@ class AzureTemplateAdapter:
         self._logger.debug("Creating AzureTemplate from data: %s", template_data.get("template_id"))
         return AzureTemplate.from_azure_format(template_data)
 
-    def template_to_dict(self, template: AzureTemplate) -> dict[str, Any]:
+    @staticmethod
+    def template_to_dict(template: AzureTemplate) -> dict[str, Any]:
         """Serialise an ``AzureTemplate`` to a plain dict."""
-        return template.model_dump(by_alias=False, exclude_none=True)
+        return template.model_dump(mode="json", by_alias=False, exclude_none=True)
 
-    def template_to_arm(self, template: AzureTemplate) -> dict[str, Any]:
+    @staticmethod
+    def template_to_arm(template: AzureTemplate) -> dict[str, Any]:
         """Serialise an ``AzureTemplate`` to the ARM resource payload."""
         return ArmPayloadMapper.vmss_payload(template)
 

@@ -5,16 +5,20 @@ import pytest
 from orb.providers.azure.domain.template.azure_template_aggregate import AzureTemplate
 from orb.providers.azure.domain.template.value_objects import (
     AzureAllocationStrategy,
-    AzureCachingType,
+    AzureCapacityReservationGroupId,
     AzureDataDisk,
+    AzureDiskEncryptionSetId,
     AzureEvictionPolicy,
     AzureImageReference,
+    AzureLocationName,
     AzureNetworkConfig,
     AzureOSDiskConfig,
     AzureOSDiskType,
     AzurePriority,
+    AzureProximityPlacementGroupId,
     AzureProviderApi,
-    AzureSecurityType,
+    AzureResourceGroupName,
+    AzureUpgradePolicyMode,
     AzureVMSSOrchestrationMode,
 )
 from orb.providers.azure.infrastructure.services.arm_payload_mapper import ArmPayloadMapper
@@ -57,8 +61,10 @@ class TestAzureTemplateConstruction:
         t = AzureTemplate(**_BASE_FIELDS)
         assert t.template_id == "test-template"
         assert t.vm_size == "Standard_D4s_v5"
-        assert t.resource_group == "test-rg"
-        assert t.location == "eastus2"
+        assert t.resource_group.value == "test-rg"
+        assert t.location.value == "eastus2"
+        assert isinstance(t.resource_group, AzureResourceGroupName)
+        assert isinstance(t.location, AzureLocationName)
         assert t.provider_type == "azure"
         assert t.provider_api == AzureProviderApi.VMSS
 
@@ -116,6 +122,82 @@ class TestAzureTemplateConstruction:
             image={"image_id": "/subscriptions/.../images/my-image"},
         )
         assert t.image.image_id is not None
+
+    def test_azure_identifier_fields_are_typed(self):
+        t = AzureTemplate(
+            **_BASE_FIELDS,
+            proximity_placement_group_id=(
+                "/subscriptions/sub/resourceGroups/rg/providers/"
+                "Microsoft.Compute/proximityPlacementGroups/ppg-1"
+            ),
+            capacity_reservation_group_id=(
+                "/subscriptions/sub/resourceGroups/rg/providers/"
+                "Microsoft.Compute/capacityReservationGroups/crg-1"
+            ),
+            disk_encryption_set_id=(
+                "/subscriptions/sub/resourceGroups/rg/providers/"
+                "Microsoft.Compute/diskEncryptionSets/des-1"
+            ),
+            upgrade_policy_mode="Rolling",
+        )
+        assert isinstance(
+            t.proximity_placement_group_id, AzureProximityPlacementGroupId
+        )
+        assert isinstance(
+            t.capacity_reservation_group_id, AzureCapacityReservationGroupId
+        )
+        assert isinstance(t.disk_encryption_set_id, AzureDiskEncryptionSetId)
+        assert t.upgrade_policy_mode == AzureUpgradePolicyMode.ROLLING
+
+    def test_rejects_invalid_location_slug(self):
+        fields = {**_BASE_FIELDS, "location": "East US 2"}
+        with pytest.raises(ValueError, match="location must be an Azure location slug"):
+            AzureTemplate(**fields)
+
+    def test_rejects_invalid_arm_identifier_type(self):
+        with pytest.raises(ValueError, match="diskEncryptionSets"):
+            AzureTemplate(
+                **_BASE_FIELDS,
+                disk_encryption_set_id=(
+                    "/subscriptions/sub/resourceGroups/rg/providers/"
+                    "Microsoft.Compute/proximityPlacementGroups/ppg-1"
+                ),
+            )
+
+    def test_accepts_mixed_case_arm_identifier_segments(self):
+        t = AzureTemplate(
+            **_BASE_FIELDS,
+            disk_encryption_set_id=(
+                "/SUBSCRIPTIONS/sub/RESOURCEGROUPS/rg/PROVIDERS/"
+                "MICROSOFT.COMPUTE/DISKENCRYPTIONSETS/des-1"
+            ),
+        )
+        assert t.disk_encryption_set_id is not None
+
+    def test_rejects_invalid_upgrade_policy_mode(self):
+        with pytest.raises(ValueError, match="upgrade_policy_mode"):
+            AzureTemplate(**_BASE_FIELDS, upgrade_policy_mode="BlueGreen")
+
+    def test_model_dump_json_serialises_azure_value_objects_as_strings(self):
+        t = AzureTemplate(
+            **_BASE_FIELDS,
+            proximity_placement_group_id=(
+                "/subscriptions/sub/resourceGroups/rg/providers/"
+                "Microsoft.Compute/proximityPlacementGroups/ppg-1"
+            ),
+            upgrade_policy_mode="Rolling",
+        )
+
+        payload = t.model_dump(mode="json", exclude_none=True)
+
+        assert payload["resource_group"] == "test-rg"
+        assert payload["location"] == "eastus2"
+        assert (
+            payload["proximity_placement_group_id"]
+            == "/subscriptions/sub/resourceGroups/rg/providers/"
+            "Microsoft.Compute/proximityPlacementGroups/ppg-1"
+        )
+        assert payload["upgrade_policy_mode"] == "Rolling"
 
     def test_vmss_uniform_rejects_flexible_orchestration_mode(self):
         with pytest.raises(ValueError, match="VMSSUniform"):
@@ -189,9 +271,11 @@ class TestSpotValidation:
         assert t.eviction_policy == AzureEvictionPolicy.DEALLOCATE
         assert t.spot_allocation_strategy == AzureAllocationStrategy.CAPACITY_OPTIMIZED
 
-    def test_spot_percentage_requires_explicit_spot_priority(self):
-        with pytest.raises(ValueError, match="priority='Spot'"):
-            AzureTemplate(**_BASE_FIELDS, spot_percentage=70)
+    def test_spot_percentage_implies_spot_priority(self):
+        t = AzureTemplate(**_BASE_FIELDS, spot_percentage=70)
+        assert t.priority == AzurePriority.SPOT
+        assert t.eviction_policy == AzureEvictionPolicy.DEALLOCATE
+        assert t.spot_allocation_strategy == AzureAllocationStrategy.CAPACITY_OPTIMIZED
 
     def test_spot_percentage_requires_flexible(self):
         with pytest.raises(ValueError, match="Flexible orchestration mode"):

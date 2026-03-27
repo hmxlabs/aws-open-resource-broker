@@ -28,14 +28,20 @@ from orb.domain.template.template_aggregate import Template
 from orb.domain.base.value_objects import AllocationStrategy
 from orb.providers.azure.domain.template.value_objects import (
     AzureAllocationStrategy,
+    AzureCapacityReservationGroupId,
     AzureDataDisk,
+    AzureDiskEncryptionSetId,
     AzureEvictionPolicy,
     AzureImageReference,
+    AzureLocationName,
     AzureNetworkConfig,
     AzureOSDiskConfig,
     AzurePriority,
+    AzureProximityPlacementGroupId,
     AzureProviderApi,
+    AzureResourceGroupName,
     AzureSecurityType,
+    AzureUpgradePolicyMode,
     AzureVMSSOrchestrationMode,
 )
 
@@ -65,12 +71,12 @@ class AzureTemplate(Template):
     # ------------------------------------------------------------------
     # Resource group & location
     # ------------------------------------------------------------------
-    resource_group: str = Field(
+    resource_group: AzureResourceGroupName = Field(
         ...,
         description="Azure resource group for the VMSS.",
         validation_alias=AliasChoices("resource_group", "resourceGroup"),
     )
-    location: str = Field(
+    location: AzureLocationName = Field(
         ...,
         description=(
             "Azure location, e.g. 'eastus2'. Azure templates use the Azure-native "
@@ -199,14 +205,14 @@ class AzureTemplate(Template):
         description="Strictly balance instances across zones.",
         validation_alias=AliasChoices("zone_balance", "zoneBalance"),
     )
-    proximity_placement_group_id: Optional[str] = Field(
+    proximity_placement_group_id: Optional[AzureProximityPlacementGroupId] = Field(
         default=None,
         description="ARM resource ID of a proximity placement group.",
         validation_alias=AliasChoices(
             "proximity_placement_group_id", "proximityPlacementGroupId"
         ),
     )
-    capacity_reservation_group_id: Optional[str] = Field(
+    capacity_reservation_group_id: Optional[AzureCapacityReservationGroupId] = Field(
         default=None,
         description="ARM resource ID of a capacity reservation group.",
         validation_alias=AliasChoices(
@@ -260,7 +266,7 @@ class AzureTemplate(Template):
         description="Enable host-based encryption for all disks.",
         validation_alias=AliasChoices("encryption_at_host", "encryptionAtHost"),
     )
-    disk_encryption_set_id: Optional[str] = Field(
+    disk_encryption_set_id: Optional[AzureDiskEncryptionSetId] = Field(
         default=None,
         description="ARM resource ID of a disk encryption set (CMK).",
         validation_alias=AliasChoices("disk_encryption_set_id", "diskEncryptionSetId"),
@@ -325,8 +331,8 @@ class AzureTemplate(Template):
         default=False,
         description="Enable overprovisioning (VMSS creates extra VMs then removes surplus).",
     )
-    upgrade_policy_mode: str = Field(
-        default="Manual",
+    upgrade_policy_mode: AzureUpgradePolicyMode = Field(
+        default=AzureUpgradePolicyMode.MANUAL,
         description="Upgrade policy: Manual, Rolling, or Automatic.",
         validation_alias=AliasChoices("upgrade_policy_mode", "upgradePolicyMode"),
     )
@@ -443,6 +449,9 @@ class AzureTemplate(Template):
                 data["max_instances"] = data["max_number"]
             data.pop("max_number", None)
 
+        if data.get("spot_percentage") is not None and data.get("priority") in (None, ""):
+            data["priority"] = "Spot"
+
         # Spot VMs need an eviction policy and allocation strategy.
         if data.get("priority") == "Spot":
             data.setdefault("eviction_policy", "Deallocate")
@@ -540,14 +549,6 @@ class AzureTemplate(Template):
                 raise ValueError(
                     "vtpm_enabled is required when security_type is TrustedLaunch"
                 )
-
-        # Upgrade policy must be one of the known values
-        valid_upgrade_policies = {"Manual", "Rolling", "Automatic"}
-        if self.upgrade_policy_mode not in valid_upgrade_policies:
-            raise ValueError(
-                f"upgrade_policy_mode must be one of {valid_upgrade_policies}, "
-                f"got '{self.upgrade_policy_mode}'"
-            )
 
         # Capacity reservation and Spot are mutually exclusive
         if self.capacity_reservation_group_id and self.priority == AzurePriority.SPOT:

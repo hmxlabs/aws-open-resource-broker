@@ -173,4 +173,25 @@ async def test_planned_async_submitted_create_is_not_retried():
     assert result.resource_ids == ["vmss-azure-spot-placement-score-vmss-1234"]
     assert result.instances == []
     assert result.is_final is True
+    assert result.provider_data == {
+        "placement_plan": [
+            {
+                "candidate_id": "azure:eastus2:3:Standard_D2s_v5",
+                "planned_count": 1,
+            }
+        ],
+        "child_results": [
+            {
+                "candidate_id": "azure:eastus2:3:Standard_D2s_v5",
+                "requested_count": 1,
+                "success": True,
+                "resource_ids": ["vmss-azure-spot-placement-score-vmss-1234"],
+                "instances": [],
+            }
+        ],
+        "failed_subplans": [],
+        "unfulfilled_count": 0,
+        "terminal_error_message": None,
+        "fulfillment_final": True,
+    }
     assert provider_selection_port.execute_operation.await_count == 1

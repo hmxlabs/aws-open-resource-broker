@@ -754,6 +754,42 @@ class TestUnsupportedOperation:
         assert result.error_code == "UNSUPPORTED_OPERATION"
 
 
+class TestSpotPlacementScoreAdapter:
+    def test_score_candidates_uses_template_location_value_object(self, logger):
+        adapter = AzureSpotPlacementScoreAdapter(
+            azure_client=MagicMock(),
+            logger=logger,
+            subscription_id="12345678-1234-1234-1234-123456789012",
+            base_location="westeurope",
+        )
+        template = AzureTemplate(
+            template_id="azure-spot-score-test",
+            provider_api="VMSS",
+            vm_size="Standard_D4s_v5",
+            resource_group="test-rg",
+            location="eastus2",
+            ssh_public_keys=["ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQC7 test@host"],
+            image={
+                "publisher": "Canonical",
+                "offer": "0001-com-ubuntu-server-jammy",
+                "sku": "22_04-lts-gen2",
+                "version": "latest",
+            },
+        )
+
+        adapter._fetch_scores = MagicMock(return_value={})
+
+        scores = adapter.score_candidates(requested_count=2, template=template)
+
+        assert [score.candidate.region for score in scores] == ["eastus2"]
+        adapter._fetch_scores.assert_called_once_with(
+            requested_count=2,
+            regions=["eastus2"],
+            vm_sizes=["Standard_D4s_v5"],
+            zones=[],
+        )
+
+
 # ---------------------------------------------------------------------------
 # CREATE_INSTANCES (with missing config → error path)
 # ---------------------------------------------------------------------------
@@ -874,8 +910,8 @@ class TestCreateInstances:
 
         def acquire_hosts(_request, azure_template):
             assert azure_template.vm_size == "Standard_D4s_v5"
-            assert azure_template.resource_group == "test-rg"
-            assert azure_template.location == "eastus2"
+            assert azure_template.resource_group.value == "test-rg"
+            assert azure_template.location.value == "eastus2"
             return {
                 "success": True,
                 "resource_ids": ["azure-resource"],
@@ -949,6 +985,11 @@ class TestCreateInstances:
 
         assert "image" not in dto.metadata
         assert dto.provider_config["image"]["publisher"] == "Canonical"
+        assert template_config["resource_group"] == "test-rg"
+        assert template_config["location"] == "eastus2"
+        round_tripped_template = AzureTemplate.model_validate(template_config)
+        assert round_tripped_template.resource_group.value == "test-rg"
+        assert round_tripped_template.location.value == "eastus2"
 
         op = ProviderOperation(
             operation_type=ProviderOperationType.CREATE_INSTANCES,

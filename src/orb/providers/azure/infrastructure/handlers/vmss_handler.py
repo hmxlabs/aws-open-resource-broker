@@ -161,8 +161,8 @@ class VMSSHandler(AzureHandler):
         later via status checks.
         """
         vmss_name = template.vmss_name or f"vmss-{template.template_id}-{uuid.uuid4().hex[:8]}"
-        resource_group = template.resource_group
-        location = template.location
+        resource_group = template.resource_group.value
+        location = template.location.value
 
         self._logger.info(
             "Creating VMSS '%s' in resource group '%s' (location=%s, capacity=%d)",
@@ -229,7 +229,7 @@ class VMSSHandler(AzureHandler):
                 resolved_keys = resolve_ssh_keys(
                     ssh_key_name=template.ssh_key_name,
                     ssh_public_keys=template.ssh_public_keys,
-                    resource_group=template.resource_group,
+                    resource_group=template.resource_group.value,
                     compute_client=compute,
                 )
                 # Patch the already-built ARM payload with the resolved keys

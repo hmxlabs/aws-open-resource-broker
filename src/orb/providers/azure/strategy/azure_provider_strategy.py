@@ -9,7 +9,7 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass, replace
 from threading import RLock
-from typing import TYPE_CHECKING, Any, Callable, Optional, Protocol, cast
+from typing import Any, Callable, Optional, Protocol, cast
 
 from orb.application.services.spot_placement_planner import (
     PlacementScore,
@@ -70,7 +70,7 @@ class PendingVmssCleanup:
     delete_submitted: bool = False
 
     @classmethod
-    def from_metadata(cls, metadata: dict[str, Any]) -> Optional["PendingVmssCleanup"]:
+    def from_metadata(cls, metadata: dict[str, Any]) -> Optional[PendingVmssCleanup]:
         resource_group = metadata.get("resource_group")
         vmss_name = metadata.get("vmss_name")
         raw_machine_ids = metadata.get("machine_ids", [])
@@ -93,7 +93,7 @@ class PendingVmssCleanup:
             delete_submitted=bool(metadata.get("delete_submitted", False)),
         )
 
-    def combine_for_same_vmss(self, other: "PendingVmssCleanup") -> "PendingVmssCleanup":
+    def combine_for_same_vmss(self, other: PendingVmssCleanup) -> PendingVmssCleanup:
         merged_machine_ids = list(self.machine_ids)
         for machine_id in other.machine_ids:
             if machine_id not in merged_machine_ids:
@@ -291,7 +291,7 @@ class AzureProviderStrategy(ProviderStrategy):
             azure_client=self.azure_client,
             logger=self._logger,
             subscription_id=azure_template.subscription_id or self._azure_config.subscription_id,
-            base_location=azure_template.location or self._azure_config.region,
+            base_location=azure_template.location.value or self._azure_config.region,
         )
         scores = adapter.score_candidates(requested_count=count, template=azure_template)
         plan = self._spot_placement_planner.create_plan(
@@ -362,7 +362,9 @@ class AzureProviderStrategy(ProviderStrategy):
         cloned_data["vm_size"] = selected_vm_size
         cloned_data["vm_sizes"] = []
         cloned_data["allocation_strategy"] = "capacityOptimized"
-        cloned_data["location"] = plan_entry.score.candidate.region or azure_template.location
+        cloned_data["location"] = (
+            plan_entry.score.candidate.region or azure_template.location.value
+        )
         cloned_data["zones"] = (
             [plan_entry.score.candidate.zone] if plan_entry.score.candidate.zone else []
         )

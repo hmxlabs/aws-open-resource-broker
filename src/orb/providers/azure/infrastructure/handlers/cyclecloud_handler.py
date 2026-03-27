@@ -464,7 +464,7 @@ class CycleCloudHandler(AzureHandler):
             for node in nodes:
                 node_name = node.get("Name", "")
                 node_id = node.get("NodeId", "")
-                if machine_id == node_name or machine_id == node_id:
+                if machine_id in {node_name, node_id}:
                     resolved_name = node_name or node_id or machine_id
                     break
             if resolved_name and resolved_name not in seen:
@@ -667,8 +667,8 @@ class CycleCloudHandler(AzureHandler):
                 "operation_id": operation_id,
                 "operation_location": operation_location,
                 "added_count": added_count,
-                "resource_group": template.resource_group,
-                "location": template.location,
+                "resource_group": template.resource_group.value,
+                "location": template.location.value,
                 "error_codes": collect_provider_error_codes(fleet_errors),
                 "fleet_errors": fleet_errors,
                 "cyclecloud_url": base_url,

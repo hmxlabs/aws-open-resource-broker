@@ -113,7 +113,7 @@ class ListTemplatesHandler(BaseQueryHandler[ListTemplatesQuery, list[TemplateDTO
                 template_dtos = await template_manager.load_templates()
 
             if query.filter_expressions:
-                template_dicts = [dto.model_dump() for dto in template_dtos]
+                template_dicts = [dto.to_dict() for dto in template_dtos]
                 filtered_dicts = self._generic_filter_service.apply_filters(
                     template_dicts, query.filter_expressions
                 )

@@ -12,11 +12,9 @@ from typing import Any, Optional
 
 from orb.providers.azure.domain.template.azure_template_aggregate import AzureTemplate
 from orb.providers.azure.domain.template.value_objects import (
-    AzureAllocationStrategy,
     AzureCachingType,
     AzureOSDiskType,
     AzurePriority,
-    AzureSecurityType,
     AzureVMSSOrchestrationMode,
 )
 
@@ -41,7 +39,7 @@ class ArmPayloadMapper:
         properties: dict[str, Any] = {
             "orchestrationMode": template.orchestration_mode.value,
             "singlePlacementGroup": template.single_placement_group,
-            "upgradePolicy": {"mode": template.upgrade_policy_mode},
+            "upgradePolicy": {"mode": template.upgrade_policy_mode.value},
         }
 
         if template.orchestration_mode == AzureVMSSOrchestrationMode.UNIFORM:
@@ -109,7 +107,7 @@ class ArmPayloadMapper:
         resource: dict[str, Any] = {
             "type": "Microsoft.Compute/virtualMachineScaleSets",
             "name": template.vmss_name or f"vmss-{template.template_id}",
-            "location": template.location,
+            "location": template.location.value,
             "sku": {
                 "name": "Mix" if template.vm_sizes else template.vm_size,
                 "capacity": template.max_instances,
@@ -135,12 +133,12 @@ class ArmPayloadMapper:
             resource["identity"] = identity
         if template.proximity_placement_group_id:
             properties["proximityPlacementGroup"] = {
-                "id": template.proximity_placement_group_id,
+                "id": template.proximity_placement_group_id.value,
             }
         if template.capacity_reservation_group_id:
             vm_profile["capacityReservation"] = {
                 "capacityReservationGroup": {
-                    "id": template.capacity_reservation_group_id,
+                    "id": template.capacity_reservation_group_id.value,
                 },
             }
         if template.node_attributes:
@@ -165,7 +163,7 @@ class ArmPayloadMapper:
         Equivalent to the former ``SingleVMHandler._build_vm_params()``.
         """
         params: dict[str, Any] = {
-            "location": template.location,
+            "location": template.location.value,
             "properties": {
                 "hardwareProfile": {"vmSize": vm_size_override or template.vm_size},
                 "storageProfile": {},
@@ -230,7 +228,7 @@ class ArmPayloadMapper:
         if template.capacity_reservation_group_id:
             params["properties"]["capacityReservation"] = {
                 "capacityReservationGroup": {
-                    "id": template.capacity_reservation_group_id,
+                    "id": template.capacity_reservation_group_id.value,
                 }
             }
 
@@ -288,14 +286,14 @@ def _apply_disk_encryption(template: AzureTemplate, storage_profile: dict[str, A
     os_disk_managed = storage_profile.get("osDisk", {}).get("managedDisk")
     if isinstance(os_disk_managed, dict):
         os_disk_managed["diskEncryptionSet"] = {
-            "id": template.disk_encryption_set_id,
+            "id": template.disk_encryption_set_id.value,
         }
 
     for data_disk in storage_profile.get("dataDisks", []):
         managed_disk = data_disk.get("managedDisk")
         if isinstance(managed_disk, dict):
             managed_disk["diskEncryptionSet"] = {
-                "id": template.disk_encryption_set_id,
+                "id": template.disk_encryption_set_id.value,
             }
 
 

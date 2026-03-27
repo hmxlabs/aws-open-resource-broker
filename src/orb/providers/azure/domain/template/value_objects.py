@@ -1,9 +1,18 @@
 """Azure-specific value objects and domain primitives for VMSS-based provisioning."""
 
+import re
+from abc import ABC
 from enum import Enum
-from typing import Any, Optional
+from typing import Any, ClassVar, Optional
 
-from pydantic import ConfigDict, Field, ValidationInfo, field_validator, model_validator
+from pydantic import (
+    ConfigDict,
+    Field,
+    ValidationInfo,
+    field_validator,
+    model_validator,
+    model_serializer,
+)
 
 from orb.domain.base.value_objects import AllocationStrategy, PriceType, ValueObject
 
@@ -127,13 +136,133 @@ class AzureCachingType(str, Enum):
     READ_WRITE = "ReadWrite"
 
 
+class AzureUpgradePolicyMode(str, Enum):
+    """VMSS upgrade policy mode."""
+
+    MANUAL = "Manual"
+    ROLLING = "Rolling"
+    AUTOMATIC = "Automatic"
+
+
+class AzureStringValue(ValueObject, ABC):
+    """Base class for Azure scalar string value objects."""
+
+    value: str
+
+    @model_validator(mode="before")
+    @classmethod
+    def coerce_from_string(cls, data: object) -> object:
+        """Accept raw strings at the model boundary."""
+        if isinstance(data, str):
+            return {"value": data}
+        return data
+
+    @field_validator("value")
+    @classmethod
+    def validate_value(cls, value: str) -> str:
+        """Validate and normalise scalar string values."""
+        if not isinstance(value, str):
+            raise TypeError(f"{cls.__name__} must be a string")
+
+        normalised = value.strip()
+        if not normalised:
+            raise ValueError(f"{cls.__name__} cannot be empty")
+
+        cls._validate_normalised(normalised)
+        return normalised
+
+    @classmethod
+    def _validate_normalised(cls, value: str) -> None:
+        """Subclass hook for value-specific validation."""
+
+    @model_serializer
+    def serialise_model(self) -> str:
+        """Serialise as the raw string value."""
+        return self.value
+
+    def __str__(self) -> str:
+        return self.value
+
+
+class AzureResourceGroupName(AzureStringValue):
+    """Azure resource-group name."""
+
+    _RESOURCE_GROUP_RE: ClassVar[re.Pattern[str]] = re.compile(
+        r"^[a-zA-Z0-9_\-.()\[\]]+$"
+    )
+
+    @classmethod
+    def _validate_normalised(cls, value: str) -> None:
+        if not (1 <= len(value) <= 90):
+            raise ValueError("resource_group must be 1-90 characters")
+        if not cls._RESOURCE_GROUP_RE.match(value):
+            raise ValueError(
+                "resource_group contains invalid characters "
+                "(allowed: alphanumeric, _, -, ., (, ), [, ])"
+            )
+
+
+class AzureLocationName(AzureStringValue):
+    """Azure location slug used by the compute APIs."""
+
+    _LOCATION_RE: ClassVar[re.Pattern[str]] = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]*$")
+
+    @classmethod
+    def _validate_normalised(cls, value: str) -> None:
+        if not cls._LOCATION_RE.match(value):
+            raise ValueError(
+                "location must be an Azure location slug like 'eastus2' or 'westeurope'"
+            )
+
+
+class AzureArmResourceId(AzureStringValue):
+    """Base class for Azure ARM resource identifiers."""
+
+    expected_segment: ClassVar[Optional[str]] = None
+
+    @classmethod
+    def _validate_normalised(cls, value: str) -> None:
+        """Validate Azure ARM resource ID format."""
+        casefolded_value = value.casefold()
+        if not casefolded_value.startswith("/subscriptions/"):
+            raise ValueError(f"{cls.__name__} must be a full ARM resource ID")
+        if "/providers/" not in casefolded_value:
+            raise ValueError(f"{cls.__name__} must include an Azure provider segment")
+
+        expected_segment = (
+            cls.expected_segment.casefold() if cls.expected_segment else None
+        )
+        if expected_segment and expected_segment not in casefolded_value:
+            raise ValueError(
+                f"{cls.__name__} must reference '{cls.expected_segment}'"
+            )
+
+
+class AzureProximityPlacementGroupId(AzureArmResourceId):
+    """ARM resource ID for an Azure proximity placement group."""
+
+    expected_segment = "/providers/Microsoft.Compute/proximityPlacementGroups/"
+
+
+class AzureCapacityReservationGroupId(AzureArmResourceId):
+    """ARM resource ID for an Azure capacity reservation group."""
+
+    expected_segment = "/providers/Microsoft.Compute/capacityReservationGroups/"
+
+
+class AzureDiskEncryptionSetId(AzureArmResourceId):
+    """ARM resource ID for an Azure disk encryption set."""
+
+    expected_segment = "/providers/Microsoft.Compute/diskEncryptionSets/"
+
+
 # ---------------------------------------------------------------------------
 # Value Objects
 # ---------------------------------------------------------------------------
 
 
 class AzureImageReference(ValueObject):
-    """Azure VM image reference – either a Marketplace image or a custom/gallery image.
+    """Azure VM image reference - either a Marketplace image or a custom/gallery image.
 
     See: https://learn.microsoft.com/en-us/azure/virtual-machines/linux/cli-ps-findimage
     """

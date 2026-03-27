@@ -98,7 +98,7 @@ class TemplateDTO(BaseDTO):
         return data
 
     @classmethod
-    def from_domain(cls, template: "Template") -> "TemplateDTO":
+    def from_domain(cls, template: Template) -> TemplateDTO:
         """Convert domain template to DTO."""
         template_dump = template.model_dump(mode="json", exclude_none=True)
         dto_fields = set(cls.model_fields.keys())
@@ -165,7 +165,7 @@ class TemplateDTO(BaseDTO):
 
     def to_template_config(self) -> dict[str, Any]:
         """Return template config with provider-specific config promoted."""
-        template_config = self.model_dump(exclude_none=True)
+        template_config = self.model_dump(mode="json", exclude_none=True)
         provider_config = dict(template_config.pop("provider_config", {}) or {})
         for key, value in provider_config.items():
             template_config.setdefault(key, value)

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import Any, Protocol
 from urllib import request as urllib_request
 
 from orb.application.services.spot_placement_planner import (
@@ -12,7 +12,19 @@ from orb.application.services.spot_placement_planner import (
     SpotPlacementScoreAdapter,
 )
 from orb.domain.base.ports import LoggingPort
+from orb.providers.azure.domain.template.value_objects import AzureLocationName
 from orb.providers.azure.infrastructure.azure_client import AzureClient
+
+
+class AzureSpotPlacementTemplate(Protocol):
+    """Structural template interface required for Azure spot placement scoring."""
+
+    vm_size: str
+    vm_sizes: list[str]
+    location: AzureLocationName
+    placement_regions: list[str]
+    placement_zones: list[str]
+    zones: list[str]
 
 
 class AzureSpotPlacementScoreAdapter(SpotPlacementScoreAdapter):
@@ -38,9 +50,11 @@ class AzureSpotPlacementScoreAdapter(SpotPlacementScoreAdapter):
         self._subscription_id = subscription_id
         self._base_location = base_location
 
-    def score_candidates(self, requested_count: int, template: Any) -> list[PlacementScore]:
+    def score_candidates(
+        self, requested_count: int, template: AzureSpotPlacementTemplate
+    ) -> list[PlacementScore]:
         vm_sizes = [template.vm_size, *(template.vm_sizes or [])]
-        regions = template.placement_regions or [template.location or self._base_location]
+        regions = template.placement_regions or [template.location.value or self._base_location]
         zones = template.placement_zones or template.zones or []
 
         candidates = [
