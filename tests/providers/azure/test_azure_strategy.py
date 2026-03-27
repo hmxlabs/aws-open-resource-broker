@@ -5,6 +5,8 @@ initialise, execute each operation type, health checks, capabilities, cleanup.
 """
 
 import asyncio
+import threading
+import time
 
 import pytest
 from unittest.mock import MagicMock
@@ -22,6 +24,7 @@ from orb.providers.azure.configuration.config import AzureProviderConfig
 from orb.providers.azure.domain.template.azure_template_aggregate import AzureTemplate
 from orb.providers.azure.domain.template.value_objects import AzureProviderApi
 from orb.providers.azure.exceptions.azure_exceptions import CycleCloudConnectionError
+import orb.providers.azure.strategy.azure_provider_strategy as azure_strategy_module
 from orb.providers.azure.strategy.azure_provider_strategy import AzureProviderStrategy
 from orb.providers.base.strategy import (
     ProviderOperation,
@@ -88,6 +91,99 @@ class TestInitialization:
         result = _run(s.execute_operation(op))
         assert not result.success
         assert result.error_code == "NOT_INITIALIZED"
+
+    def test_azure_client_lazy_init_is_thread_safe(self, azure_config, logger):
+        client = MagicMock()
+        strategy = AzureProviderStrategy(
+            config=azure_config,
+            logger=logger,
+            provider_instance_name="azure-default",
+            azure_client_resolver=lambda: None,
+        )
+        strategy.initialize()
+
+        resolver_calls = 0
+        resolver_calls_lock = threading.Lock()
+        start = threading.Event()
+
+        def resolver():
+            nonlocal resolver_calls
+            start.wait(timeout=1)
+            time.sleep(0.05)
+            with resolver_calls_lock:
+                resolver_calls += 1
+            return client
+
+        strategy._azure_client_resolver = resolver
+        strategy._client = None
+
+        results: list[MagicMock] = []
+
+        def worker() -> None:
+            start.wait(timeout=1)
+            results.append(strategy.azure_client)
+
+        threads = [threading.Thread(target=worker) for _ in range(4)]
+        for thread in threads:
+            thread.start()
+        start.set()
+        for thread in threads:
+            thread.join()
+
+        assert resolver_calls == 1
+        assert results == [client, client, client, client]
+
+    def test_handlers_lazy_init_is_thread_safe(self, azure_config, logger, monkeypatch):
+        client = MagicMock()
+        strategy = AzureProviderStrategy(
+            config=azure_config,
+            logger=logger,
+            provider_instance_name="azure-default",
+            azure_client_resolver=lambda: client,
+        )
+        strategy.initialize()
+
+        machine_adapter_calls = 0
+        machine_adapter_lock = threading.Lock()
+        start = threading.Event()
+
+        def machine_adapter_factory(*args, **kwargs):
+            nonlocal machine_adapter_calls
+            start.wait(timeout=1)
+            time.sleep(0.05)
+            with machine_adapter_lock:
+                machine_adapter_calls += 1
+            return MagicMock()
+
+        monkeypatch.setattr(azure_strategy_module, "AzureMachineAdapter", machine_adapter_factory)
+        monkeypatch.setattr(azure_strategy_module, "VMSSHandler", lambda *args, **kwargs: MagicMock())
+        monkeypatch.setattr(
+            azure_strategy_module,
+            "SingleVMHandler",
+            lambda *args, **kwargs: MagicMock(),
+        )
+        monkeypatch.setattr(
+            azure_strategy_module,
+            "CycleCloudHandler",
+            lambda *args, **kwargs: MagicMock(),
+        )
+
+        handler_maps: list[dict[str, MagicMock]] = []
+
+        def worker() -> None:
+            start.wait(timeout=1)
+            handler_maps.append(strategy.handlers)
+
+        threads = [threading.Thread(target=worker) for _ in range(4)]
+        for thread in threads:
+            thread.start()
+        start.set()
+        for thread in threads:
+            thread.join()
+
+        assert machine_adapter_calls == 1
+        assert len({id(handler_map) for handler_map in handler_maps}) == 1
+        assert set(handler_maps[0]) == {"VMSS", "VMSSUniform", "SingleVM", "CycleCloud"}
 
 
 # ---------------------------------------------------------------------------
@@ -1561,6 +1657,57 @@ class TestGetInstanceStatus:
 
 
 class TestDescribeResourceInstances:
+    def test_pending_vmss_cleanup_delete_submission_is_thread_safe(
+        self, azure_config, logger
+    ):
+        strategy = AzureProviderStrategy(
+            config=azure_config,
+            logger=logger,
+            provider_instance_name="azure-default",
+        )
+        strategy.initialize()
+
+        strategy._resource_manager = MagicMock()
+        strategy._resource_manager.get_vmss_member_count.return_value = 0
+        strategy._client = MagicMock()
+        strategy._pending_vmss_cleanups[("test-rg", "vmss-demo")] = (
+            azure_strategy_module.PendingVmssCleanup(
+                resource_group="test-rg",
+                vmss_name="vmss-demo",
+                machine_ids=["vm-a"],
+                delete_vmss_when_empty=True,
+            )
+        )
+
+        start = threading.Event()
+
+        def begin_delete(*args, **kwargs):
+            start.wait(timeout=1)
+            time.sleep(0.05)
+            return MagicMock()
+
+        strategy._client.compute_client.virtual_machine_scale_sets.begin_delete.side_effect = begin_delete
+
+        def worker() -> None:
+            start.wait(timeout=1)
+            strategy._maybe_cleanup_pending_vmss_resource(
+                resource_group="test-rg",
+                vmss_name="vmss-demo",
+                observed_ids=set(),
+            )
+
+        threads = [threading.Thread(target=worker) for _ in range(4)]
+        for thread in threads:
+            thread.start()
+        start.set()
+        for thread in threads:
+            thread.join()
+
+        strategy._client.compute_client.virtual_machine_scale_sets.begin_delete.assert_called_once_with(
+            resource_group_name="test-rg",
+            vm_scale_set_name="vmss-demo",
+        )
+
     def test_missing_resource_ids_returns_error(self, strategy):
         op = ProviderOperation(
             operation_type=ProviderOperationType.DESCRIBE_RESOURCE_INSTANCES,

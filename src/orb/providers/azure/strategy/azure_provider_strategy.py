@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, replace
+from threading import RLock
 from typing import TYPE_CHECKING, Any, Callable, Optional, Protocol, cast
 
 from orb.application.services.spot_placement_planner import (
@@ -157,6 +158,8 @@ class AzureProviderStrategy(ProviderStrategy):
         self._spot_placement_planner = SpotPlacementPlanner()
         self._spot_placement_execution = SpotPlacementExecutionService()
         self._pending_vmss_cleanups: dict[tuple[str, str], PendingVmssCleanup] = {}
+        self._lazy_init_lock = RLock()
+        self._pending_vmss_cleanups_lock = RLock()
 
     # ------------------------------------------------------------------
     # Lazy-initialised properties
@@ -173,71 +176,78 @@ class AzureProviderStrategy(ProviderStrategy):
     @property
     def azure_client(self) -> Optional[AzureClient]:
         """Get the Azure client with lazy initialisation."""
-        if self._client is None:
-            self._logger.debug("Creating Azure client on first access")
-            if self._azure_client_resolver:
-                try:
-                    self._client = self._azure_client_resolver()
-                except Exception as exc:
-                    self._logger.warning("Failed to resolve AzureClient lazily: %s", exc)
-                    self._client = None
-            else:
-                self._logger.warning("AzureClient resolver not provided")
-        return self._client
+        with self._lazy_init_lock:
+            if self._client is None:
+                self._logger.debug("Creating Azure client on first access")
+                if self._azure_client_resolver:
+                    try:
+                        self._client = self._azure_client_resolver()
+                    except Exception as exc:
+                        self._logger.warning("Failed to resolve AzureClient lazily: %s", exc)
+                        self._client = None
+                else:
+                    self._logger.warning("AzureClient resolver not provided")
+            return self._client
 
     @property
     def resource_manager(self) -> Optional[AzureResourceManager]:
-        if self._resource_manager is None and self.azure_client:
-            self._logger.debug("Creating Azure resource manager on first access")
-            self._resource_manager = AzureResourceManager(
-                azure_client=self.azure_client,
-                config=self._azure_config,
-                logger=self._logger,
-            )
-        return self._resource_manager
+        with self._lazy_init_lock:
+            azure_client = self.azure_client
+            if self._resource_manager is None and azure_client:
+                self._logger.debug("Creating Azure resource manager on first access")
+                self._resource_manager = AzureResourceManager(
+                    azure_client=azure_client,
+                    config=self._azure_config,
+                    logger=self._logger,
+                )
+            return self._resource_manager
 
     @property
     def deployment_service(self) -> Optional[Any]:
-        if self._deployment_service is None and self.azure_client:
-            from orb.providers.azure.infrastructure.services.azure_deployment_service import (
-                AzureDeploymentService,
-            )
+        with self._lazy_init_lock:
+            azure_client = self.azure_client
+            if self._deployment_service is None and azure_client:
+                from orb.providers.azure.infrastructure.services.azure_deployment_service import (
+                    AzureDeploymentService,
+                )
 
-            self._deployment_service = AzureDeploymentService(
-                azure_client=self.azure_client,
-                logger=self._logger,
-            )
-        return self._deployment_service
+                self._deployment_service = AzureDeploymentService(
+                    azure_client=azure_client,
+                    logger=self._logger,
+                )
+            return self._deployment_service
 
     @property
     def handlers(self) -> dict[str, AzureHandler]:
         """Get handlers with lazy initialisation."""
-        if not self._handlers and self.azure_client:
-            self._logger.debug("Creating Azure handlers on first access")
-            machine_adapter = AzureMachineAdapter(self.azure_client, self._logger)
-            self._handlers = {
-                AzureProviderApi.VMSS.value: VMSSHandler(
-                    azure_client=self.azure_client,
-                    logger=self._logger,
-                    machine_adapter=machine_adapter,
-                ),
-                AzureProviderApi.VMSS_UNIFORM.value: VMSSHandler(
-                    azure_client=self.azure_client,
-                    logger=self._logger,
-                    machine_adapter=machine_adapter,
-                ),
-                AzureProviderApi.SINGLE_VM.value: SingleVMHandler(
-                    azure_client=self.azure_client,
-                    logger=self._logger,
-                    machine_adapter=machine_adapter,
-                ),
-                AzureProviderApi.CYCLECLOUD.value: CycleCloudHandler(
-                    azure_client=self.azure_client,
-                    logger=self._logger,
-                    machine_adapter=machine_adapter,
-                ),
-            }
-        return self._handlers
+        with self._lazy_init_lock:
+            azure_client = self.azure_client
+            if not self._handlers and azure_client:
+                self._logger.debug("Creating Azure handlers on first access")
+                machine_adapter = AzureMachineAdapter(azure_client, self._logger)
+                self._handlers = {
+                    AzureProviderApi.VMSS.value: VMSSHandler(
+                        azure_client=azure_client,
+                        logger=self._logger,
+                        machine_adapter=machine_adapter,
+                    ),
+                    AzureProviderApi.VMSS_UNIFORM.value: VMSSHandler(
+                        azure_client=azure_client,
+                        logger=self._logger,
+                        machine_adapter=machine_adapter,
+                    ),
+                    AzureProviderApi.SINGLE_VM.value: SingleVMHandler(
+                        azure_client=azure_client,
+                        logger=self._logger,
+                        machine_adapter=machine_adapter,
+                    ),
+                    AzureProviderApi.CYCLECLOUD.value: CycleCloudHandler(
+                        azure_client=azure_client,
+                        logger=self._logger,
+                        machine_adapter=machine_adapter,
+                    ),
+                }
+            return self._handlers
 
     def _build_azure_template_config(self, template_config: dict[str, Any]) -> dict[str, Any]:
         """Coalesce provider-owned and Azure-default fields before AzureTemplate validation."""
@@ -1476,10 +1486,11 @@ class AzureProviderStrategy(ProviderStrategy):
             return
 
         key = (pending.resource_group, pending.vmss_name)
-        existing = self._pending_vmss_cleanups.get(key)
-        self._pending_vmss_cleanups[key] = (
-            pending if existing is None else existing.combine_for_same_vmss(pending)
-        )
+        with self._pending_vmss_cleanups_lock:
+            existing = self._pending_vmss_cleanups.get(key)
+            self._pending_vmss_cleanups[key] = (
+                pending if existing is None else existing.combine_for_same_vmss(pending)
+            )
 
     def _restore_pending_vmss_cleanups(self, operation: ProviderOperation) -> None:
         """Rebuild pending VMSS cleanup state from durable request metadata."""
@@ -1506,11 +1517,12 @@ class AzureProviderStrategy(ProviderStrategy):
         if not resource_group:
             return False
 
-        for resource_id in resource_ids:
-            key = (str(resource_group), str(resource_id))
-            if key in self._pending_vmss_cleanups:
-                return True
-        return False
+        with self._pending_vmss_cleanups_lock:
+            for resource_id in resource_ids:
+                key = (str(resource_group), str(resource_id))
+                if key in self._pending_vmss_cleanups:
+                    return True
+            return False
 
     def _vmss_cleanup_status_metadata(
         self,
@@ -1585,13 +1597,15 @@ class AzureProviderStrategy(ProviderStrategy):
         observed_ids: set[str],
     ) -> None:
         key = (resource_group, vmss_name)
-        pending = self._pending_vmss_cleanups.get(key)
+        with self._pending_vmss_cleanups_lock:
+            pending = self._pending_vmss_cleanups.get(key)
         if not pending:
             return
 
         requested_ids = set(pending.machine_ids)
         if not requested_ids:
-            self._pending_vmss_cleanups.pop(key, None)
+            with self._pending_vmss_cleanups_lock:
+                self._pending_vmss_cleanups.pop(key, None)
             return
 
         if pending.delete_submitted:
@@ -1606,13 +1620,19 @@ class AzureProviderStrategy(ProviderStrategy):
 
         try:
             if self._submit_vmss_delete_if_empty(
+                key=key,
                 pending=pending,
                 resource_group=resource_group,
                 vmss_name=vmss_name,
             ):
                 return
-            self._pending_vmss_cleanups.pop(key, None)
+            with self._pending_vmss_cleanups_lock:
+                self._pending_vmss_cleanups.pop(key, None)
         except Exception as exc:
+            with self._pending_vmss_cleanups_lock:
+                current = self._pending_vmss_cleanups.get(key)
+                if current is not None:
+                    current.delete_submitted = False
             self._logger.warning(
                 "Failed to clean up pending VMSS '%s' in '%s': %s",
                 vmss_name,
@@ -1627,11 +1647,13 @@ class AzureProviderStrategy(ProviderStrategy):
         vmss_name: str,
     ) -> None:
         if self._vmss_exists(resource_group=resource_group, vmss_name=vmss_name) is False:
-            self._pending_vmss_cleanups.pop((resource_group, vmss_name), None)
+            with self._pending_vmss_cleanups_lock:
+                self._pending_vmss_cleanups.pop((resource_group, vmss_name), None)
 
     def _submit_vmss_delete_if_empty(
         self,
         *,
+        key: tuple[str, str],
         pending: PendingVmssCleanup,
         resource_group: str,
         vmss_name: str,
@@ -1650,11 +1672,18 @@ class AzureProviderStrategy(ProviderStrategy):
         if not azure_client:
             return False
 
+        with self._pending_vmss_cleanups_lock:
+            current = self._pending_vmss_cleanups.get(key)
+            if current is None:
+                return False
+            if current.delete_submitted:
+                return True
+            current.delete_submitted = True
+
         azure_client.compute_client.virtual_machine_scale_sets.begin_delete(
             resource_group_name=resource_group,
             vm_scale_set_name=vmss_name,
         )
-        pending.delete_submitted = True
         return True
 
     # ------------------------------------------------------------------
