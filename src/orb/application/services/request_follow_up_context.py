@@ -6,21 +6,6 @@ from typing import Any
 
 FOLLOW_UP_CONTEXT_KEY = "follow_up_context"
 
-_TOP_LEVEL_PROVIDER_DATA_KEYS = (
-    "resource_group",
-    "deployment_name",
-    "cluster_name",
-    "node_array",
-    "node_ids",
-    "operation_id",
-    "operation_location",
-    "cyclecloud_url",
-    "cyclecloud_credential_path",
-    "cyclecloud_verify_ssl",
-    "cyclecloud_auth_mode",
-    "cyclecloud_aad_scope",
-)
-
 
 def get_request_follow_up_context(request: Any) -> dict[str, Any]:
     """Return durable provider follow-up context for a request."""
@@ -39,16 +24,6 @@ def merge_request_metadata_with_follow_up_context(request: Any) -> dict[str, Any
     """Merge request metadata with durable provider follow-up context."""
     request_metadata = dict(getattr(request, "metadata", {}) or {})
     request_metadata = {**get_request_follow_up_context(request), **request_metadata}
-
-    request_provider_data = getattr(request, "provider_data", {}) or {}
-    if not isinstance(request_provider_data, dict):
-        return request_metadata
-
-    for key in _TOP_LEVEL_PROVIDER_DATA_KEYS:
-        value = request_provider_data.get(key)
-        if value not in (None, "") and key not in request_metadata:
-            request_metadata[key] = value
-
     return request_metadata
 
 

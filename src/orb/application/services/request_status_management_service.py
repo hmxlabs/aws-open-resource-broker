@@ -7,6 +7,7 @@ from orb.domain.base.ports import LoggingPort
 from orb.domain.machine.aggregate import Machine
 
 from .provisioning_orchestration_service import ProvisioningResult
+from .request_follow_up_context import with_request_follow_up_context
 
 
 class RequestStatusManagementService:
@@ -49,9 +50,9 @@ class RequestStatusManagementService:
             request = request.add_machine_ids(instance_ids)
             self._logger.info("Populated %d machine IDs immediately", len(instance_ids))
 
-        # Store provider-specific data
-        if provider_data:
-            request.provider_data.update(provider_data)
+        # Store provider-specific data as durable follow-up context
+        if provider_data and isinstance(provider_data, dict):
+            request = with_request_follow_up_context(request, provider_data)
 
         # Handle provider errors for partial success
         provider_errors = (
