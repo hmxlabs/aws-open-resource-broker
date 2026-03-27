@@ -3,6 +3,7 @@
 import pytest
 from unittest.mock import MagicMock
 
+import orb.providers.azure.infrastructure.handlers.vmss_handler as vmss_handler_module
 from orb.providers.azure.domain.template.value_objects import AzureVMSSOrchestrationMode
 from orb.providers.azure.domain.template.azure_template_aggregate import AzureTemplate
 from orb.providers.azure.infrastructure.handlers.single_vm_handler import SingleVMHandler
@@ -67,6 +68,38 @@ def test_acquire_hosts_submits_native_vmss_create_and_returns_submitted_status()
     assert create_call["vm_scale_set_name"] == result["provider_data"]["vmss_name"]
     assert create_call["parameters"]["name"] == result["provider_data"]["vmss_name"]
     assert create_call["parameters"]["sku"]["capacity"] == 2
+
+
+def test_acquire_hosts_does_not_mutate_template_when_network_config_is_derived_from_subnet_ids():
+    azure_client = MagicMock()
+    logger = MagicMock()
+    handler = VMSSHandler(azure_client=azure_client, logger=logger)
+
+    azure_client.compute_client.virtual_machine_scale_sets.begin_create_or_update.return_value = (
+        MagicMock()
+    )
+
+    request = MagicMock()
+    request.requested_count = 1
+    request.request_id = "req-network-copy"
+    request.metadata = {}
+
+    template = _make_template(
+        network_config=None,
+        subnet_ids=["/subscriptions/.../subnets/derived"],
+    )
+
+    result = handler.acquire_hosts(request, template)
+
+    assert result["success"] is True
+    assert template.network_config is None
+    create_call = azure_client.compute_client.virtual_machine_scale_sets.begin_create_or_update.call_args
+    subnet_id = create_call.kwargs["parameters"]["properties"]["virtualMachineProfile"][
+        "networkProfile"
+    ]["networkInterfaceConfigurations"][0]["properties"]["ipConfigurations"][0]["properties"][
+        "subnet"
+    ]["id"]
+    assert subnet_id == "/subscriptions/.../subnets/derived"
 
 
 def test_flexible_vmss_status_returns_only_member_vms():
@@ -462,6 +495,19 @@ def test_vmss_resource_errors_surface_failed_scale_set_without_instances():
     assert errors[0]["instance_id"] == "vmss-azure-test"
 
 
+def test_vmss_resource_errors_logs_and_returns_empty_list_when_vmss_lookup_fails():
+    azure_client = MagicMock()
+    logger = MagicMock()
+    handler = VMSSHandler(azure_client=azure_client, logger=logger)
+
+    azure_client.compute_client.virtual_machine_scale_sets.get.side_effect = RuntimeError("boom")
+
+    errors = handler.get_vmss_resource_errors("test-rg", "vmss-azure-test")
+
+    assert errors == []
+    logger.warning.assert_called_once()
+
+
 def test_vmss_release_deletes_only_requested_uniform_instances():
     azure_client = MagicMock()
     logger = MagicMock()
@@ -633,6 +679,32 @@ def test_vmss_release_marks_uniform_vmss_for_cleanup_when_last_instance_is_retur
         resource_group_name="test-rg",
         vm_scale_set_name="vmss-azure-test",
     )
+
+
+def test_acquire_hosts_handles_missing_azure_error_message_without_key_error(monkeypatch):
+    azure_client = MagicMock()
+    logger = MagicMock()
+    handler = VMSSHandler(azure_client=azure_client, logger=logger)
+
+    azure_client.compute_client.virtual_machine_scale_sets.begin_create_or_update.side_effect = (
+        RuntimeError("quota exceeded")
+    )
+
+    monkeypatch.setattr(
+        vmss_handler_module,
+        "extract_azure_error_details",
+        lambda exc: {"raw_error_code": None, "status_code": None},
+    )
+
+    request = MagicMock()
+    request.requested_count = 1
+    request.request_id = "req-null-message"
+    request.metadata = {}
+
+    with pytest.raises(Exception) as exc_info:
+        handler.acquire_hosts(request, _make_template())
+
+    assert exc_info.type.__name__ == "QuotaExceededError"
 
 def test_single_vm_status_populates_network_identity():
     azure_client = MagicMock()

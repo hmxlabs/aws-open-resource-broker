@@ -173,21 +173,25 @@ class VMSSHandler(AzureHandler):
         )
 
         try:
+            resolved_template = template
             # Resolve subnet_id if network_config is missing
-            if not template.network_config:
+            if not resolved_template.network_config:
                 subnet_id = None
-                if template.subnet_ids:
-                    candidate = template.subnet_ids[0]
+                if resolved_template.subnet_ids:
+                    candidate = resolved_template.subnet_ids[0]
                     if candidate and candidate != "default-subnet":
                         subnet_id = candidate
 
                 if subnet_id:
-                    # Auto-create network_config from subnet_id
+                    # Build a local template copy so subnet normalization does
+                    # not mutate the original aggregate across repeated calls.
                     from orb.providers.azure.domain.template.value_objects import (
                         AzureNetworkConfig,
                     )
 
-                    template.network_config = AzureNetworkConfig(subnet_id=subnet_id)
+                    resolved_template = resolved_template.model_copy(
+                        update={"network_config": AzureNetworkConfig(subnet_id=subnet_id)}
+                    )
                     self._logger.debug("Auto-created network_config from subnet_id: %s", subnet_id)
                 else:
                     raise ValueError(
@@ -199,11 +203,11 @@ class VMSSHandler(AzureHandler):
 
             from orb.providers.azure.infrastructure.services.arm_payload_mapper import ArmPayloadMapper
 
-            arm_payload = ArmPayloadMapper.vmss_payload(template)
+            arm_payload = ArmPayloadMapper.vmss_payload(resolved_template)
 
             if self.azure_native_spec_service:
                 merged_payload = self.azure_native_spec_service.process_provider_api_spec_with_merge(
-                    template=template,
+                    template=resolved_template,
                     request=request,
                     default_payload=arm_payload,
                     extra_context={"vmss_name": vmss_name},
@@ -221,15 +225,15 @@ class VMSSHandler(AzureHandler):
             # Resolve ssh_key_name → actual key data if needed. Must
             # happen after the ARM payload has been built so the resolved
             # keys end up in the payload's osProfile.
-            if template.ssh_key_name and not template.ssh_public_keys:
+            if resolved_template.ssh_key_name and not resolved_template.ssh_public_keys:
                 from orb.providers.azure.infrastructure.services.ssh_key_resolver import (
                     resolve_ssh_keys,
                 )
 
                 resolved_keys = resolve_ssh_keys(
-                    ssh_key_name=template.ssh_key_name,
-                    ssh_public_keys=template.ssh_public_keys,
-                    resource_group=template.resource_group.value,
+                    ssh_key_name=resolved_template.ssh_key_name,
+                    ssh_public_keys=resolved_template.ssh_public_keys,
+                    resource_group=resolved_template.resource_group.value,
                     compute_client=compute,
                 )
                 # Patch the already-built ARM payload with the resolved keys
@@ -286,7 +290,8 @@ class VMSSHandler(AzureHandler):
             # preserving the canonical error code so spot placement retry logic
             # can classify capacity-like failures.
             error_code = canonical_azure_error_code(exc)
-            error_str = extract_azure_error_details(exc)["message"].lower()
+            error_details = extract_azure_error_details(exc)
+            error_str = str(error_details.get("message") or "").lower()
             if error_code in {"QuotaExceeded", "OperationNotAllowed", "ResourceQuotaExceeded"} or (
                 "quota" in error_str or "exceeded" in error_str
             ):
@@ -405,6 +410,9 @@ class VMSSHandler(AzureHandler):
                     vmss_name,
                 )
                 if delete_vmss_when_empty:
+                    # Member deletes have already been submitted above. If the
+                    # follow-up VMSS delete submission fails, Azure will expose
+                    # that intermediate state until async cleanup retries it.
                     self._submit_vmss_delete_if_emptying(
                         resource_group=resource_group,
                         vmss_name=vmss_name,
@@ -658,7 +666,7 @@ class VMSSHandler(AzureHandler):
         self,
         resource_group: str,
         vmss_name: str,
-    ) -> list[dict[str, Any]]:
+    ) -> list[ProviderErrorEntry]:
         """Return VMSS-level provisioning errors even when no instances are visible yet."""
         compute = self.azure_client.compute_client
         try:
@@ -666,10 +674,16 @@ class VMSSHandler(AzureHandler):
                 resource_group_name=resource_group,
                 vm_scale_set_name=vmss_name,
             )
-        except Exception:
+        except Exception as exc:
+            self._logger.warning(
+                "Failed to fetch VMSS resource errors for '%s' in resource group '%s': %s",
+                vmss_name,
+                resource_group,
+                exc,
+            )
             return []
 
-        errors: list[dict[str, Any]] = []
+        errors: list[ProviderErrorEntry] = []
         provisioning_state = str(getattr(vmss, "provisioning_state", "") or "")
         statuses = getattr(vmss, "statuses", None) or []
 
