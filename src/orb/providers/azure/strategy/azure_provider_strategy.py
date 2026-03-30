@@ -505,7 +505,10 @@ class AzureProviderStrategy(ProviderStrategy):
             from orb.providers.azure.infrastructure.dry_run_adapter import azure_dry_run_context
 
             if is_dry_run:
-                # TODO: I don't think this does anything yet, placeholder for if dry run is implemented in this way
+                # Activates the global dry-run flag checked by is_dry_run_active().
+                # Individual operations short-circuit via early returns; the context
+                # manager is the integration point for future SDK-level mocking
+                # (analogous to the AWS moto adapter).
                 with azure_dry_run_context():
                     result = await self._execute_operation_internal(operation)
             else:
@@ -770,7 +773,7 @@ class AzureProviderStrategy(ProviderStrategy):
         if isinstance(handler_result, dict):
             resource_ids = handler_result.get("resource_ids", [])
             instances = handler_result.get("instances", [])
-            success = handler_result.get("success", True)
+            success = handler_result.get("success", False)
             error_message = handler_result.get("error_message")
             provider_data = handler_result.get("provider_data") or {}
 

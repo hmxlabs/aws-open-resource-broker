@@ -5,7 +5,6 @@ provider with the provider registry, template extension registry, and
 DI container.
 """
 
-from contextlib import suppress
 from typing import TYPE_CHECKING, Any, Optional
 
 if TYPE_CHECKING:
@@ -384,5 +383,11 @@ def register_azure_services_with_di(container) -> None:
 # Auto-register extensions on import
 # ------------------------------------------------------------------
 
-with suppress(Exception):
+try:
     register_azure_extensions()
+except Exception:
+    import logging as _logging
+
+    _logging.getLogger(__name__).warning(
+        "Failed to auto-register Azure extensions on import", exc_info=True
+    )

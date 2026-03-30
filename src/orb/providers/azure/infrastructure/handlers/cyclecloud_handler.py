@@ -854,6 +854,8 @@ class CycleCloudHandler(AzureHandler):
 
             cc_state = node.get("State", "Unknown")
             status = _resolve_cc_state(cc_state)
+            if status == "unknown":
+                self._logger.warning("Unmapped CycleCloud node state: %s", cc_state)
 
             private_ip = node.get("PrivateIp")
             public_ip = node.get("PublicIp")
