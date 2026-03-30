@@ -24,6 +24,10 @@ from orb.providers.azure.infrastructure.error_utils import (
     canonical_azure_error_code,
     extract_azure_error_details,
 )
+from orb.providers.azure.infrastructure.handlers._network_identity import (
+    empty_network_identity,
+    network_identity_soft_failure_types,
+)
 from orb.providers.azure.infrastructure.handlers.azure_handler import AzureHandler
 
 
@@ -35,7 +39,6 @@ _AZURE_STATE_MAP: dict[str, str] = {
     "PowerState/deallocating": "shutting-down",
     "PowerState/deallocated": "stopped",
 }
-
 
 def _resolve_power_state(statuses: list[Any]) -> str:
     for status in statuses:
@@ -324,7 +327,16 @@ class SingleVMHandler(AzureHandler):
                     status = _resolve_power_state(instance_view.statuses)
 
                 hw = getattr(vm, "hardware_profile", None)
-                network_identity = self.azure_client.resolve_network_identity_from_vm(vm)
+                network_identity = empty_network_identity()
+                try:
+                    network_identity = self.azure_client.resolve_network_identity_from_vm(vm)
+                except network_identity_soft_failure_types() as exc:
+                    # Optional NIC/IP enrichment must not hide an otherwise visible VM.
+                    self._logger.warning(
+                        "Failed to resolve network identity for VM '%s': %s",
+                        vm_name,
+                        exc,
+                    )
                 results.append({
                     "instance_id": getattr(vm, "name", original_id),
                     "status": status,

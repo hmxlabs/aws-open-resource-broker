@@ -10,7 +10,7 @@ from orb.infrastructure.interfaces.provider import BaseProviderConfig
 class CycleCloudConfig(BaseModel):
     """CycleCloud connection configuration."""
 
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(extra="forbid")
 
     url: Optional[str] = Field(None, description="CycleCloud REST API base URL")
     credential_path: Optional[str] = Field(
@@ -70,7 +70,7 @@ class AzureProviderConfig(BaseProviderConfig):
     Azure-native ``location`` input at the boundary.
     """
 
-    model_config = ConfigDict(populate_by_name=True, extra="allow")
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
 
     # ------------------------------------------------------------------
     # Provider identity
@@ -147,6 +147,8 @@ class AzureProviderConfig(BaseProviderConfig):
 
         if region in (None, "") and location not in (None, ""):
             data["region"] = location
+        if location not in (None, ""):
+            data.pop("location", None)
 
         return data
 

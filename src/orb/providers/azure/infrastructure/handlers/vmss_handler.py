@@ -37,6 +37,10 @@ from orb.providers.azure.infrastructure.error_utils import (
     canonical_azure_error_code,
     extract_azure_error_details,
 )
+from orb.providers.azure.infrastructure.handlers._network_identity import (
+    empty_network_identity,
+    network_identity_soft_failure_types,
+)
 from orb.providers.infrastructure.error_codes import ProviderErrorEntry
 from orb.providers.azure.infrastructure.handlers.azure_handler import AzureHandler
 from orb.providers.azure.domain.template.value_objects import AzureVMSSOrchestrationMode
@@ -55,7 +59,6 @@ _AZURE_STATE_MAP: dict[str, str] = {
     "ProvisioningState/failed": "failed",
     "ProvisioningState/deleting": "shutting-down",
 }
-
 
 def _resolve_power_state(statuses: list[Any]) -> str:
     """Extract the domain status from a list of Azure InstanceViewStatus objects."""
@@ -810,7 +813,17 @@ class VMSSHandler(AzureHandler):
             fleet_errors = []
 
         # Network IPs / subnet / VNet
-        network_identity = self.azure_client.resolve_network_identity_from_vm(vm)
+        network_identity = empty_network_identity()
+        try:
+            network_identity = self.azure_client.resolve_network_identity_from_vm(vm)
+        except network_identity_soft_failure_types() as exc:
+            # Optional NIC/IP enrichment must not hide an otherwise visible VMSS member.
+            self._logger.warning(
+                "Failed to resolve network identity for VMSS member '%s' in '%s': %s",
+                vm_identity.instance_id,
+                vmss_name,
+                exc,
+            )
         private_ip = network_identity["private_ip"]
         public_ip = network_identity["public_ip"]
         subnet_id = network_identity["subnet_id"]

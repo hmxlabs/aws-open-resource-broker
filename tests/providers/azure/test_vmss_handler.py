@@ -480,6 +480,73 @@ def test_vmss_status_populates_network_identity():
     assert result[0]["provider_data"]["nic_name"] == "nic-vmss-1"
 
 
+def test_vmss_status_still_returns_instance_when_network_identity_resolution_fails():
+    azure_client = MagicMock()
+    logger = MagicMock()
+    handler = VMSSHandler(azure_client=azure_client, logger=logger)
+
+    vmss = MagicMock()
+    vmss.orchestration_mode = AzureVMSSOrchestrationMode.UNIFORM.value
+    azure_client.compute_client.virtual_machine_scale_sets.get.return_value = vmss
+    azure_client.resolve_network_identity_from_vm.side_effect = AttributeError(
+        "missing network property"
+    )
+
+    member_vm = MagicMock()
+    member_vm.instance_id = "3"
+    member_vm.name = "vmss-3"
+    member_vm.vm_id = "vm-guid-3"
+    member_vm.instance_view.statuses = []
+    member_vm.hardware_profile.vm_size = "Standard_D4s_v5"
+    member_vm.location = "eastus2"
+    member_vm.zones = ["1"]
+
+    azure_client.compute_client.virtual_machine_scale_set_vms.list.return_value = [member_vm]
+
+    request = MagicMock()
+    request.resource_ids = ["vmss-azure-test"]
+    request.metadata = {"resource_group": "test-rg"}
+
+    result = handler.check_hosts_status(request)
+
+    assert len(result) == 1
+    assert result[0]["instance_id"] == "3"
+    assert result[0]["private_ip"] is None
+    assert result[0]["provider_data"]["nic_id"] is None
+    logger.warning.assert_called()
+
+
+def test_single_vm_status_still_returns_instance_when_network_identity_resolution_fails():
+    azure_client = MagicMock()
+    logger = MagicMock()
+    handler = SingleVMHandler(azure_client=azure_client, logger=logger)
+    azure_client.resolve_network_identity_from_vm.side_effect = AttributeError(
+        "missing network property"
+    )
+
+    vm = MagicMock()
+    vm.name = "vm-single"
+    vm.vm_id = "vm-guid-1"
+    vm.instance_view.statuses = []
+    vm.hardware_profile.vm_size = "Standard_D4s_v5"
+    vm.location = "eastus2"
+    vm.zones = ["1"]
+
+    azure_client.compute_client.virtual_machines.get.return_value = vm
+
+    request = MagicMock()
+    request.resource_ids = ["vm-single"]
+    request.metadata = {"resource_group": "test-rg"}
+
+    result = handler.check_hosts_status(request)
+
+    assert len(result) == 1
+    assert result[0]["instance_id"] == "vm-single"
+    assert result[0]["private_ip"] is None
+    assert result[0]["provider_data"]["nic_id"] is None
+    logger.warning.assert_called()
+
+
 def test_vmss_resource_errors_surface_failed_scale_set_without_instances():
     azure_client = MagicMock()
     logger = MagicMock()

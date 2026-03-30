@@ -93,6 +93,13 @@ class TestAzureProviderConfig:
                 "subscription_id": "not-a-uuid",
             })
 
+    def test_unknown_top_level_provider_fields_are_rejected(self):
+        with pytest.raises(ValueError, match="Extra inputs are not permitted"):
+            AzureProviderConfig(
+                subscription_id="12345678-1234-1234-1234-123456789012",
+                unexpected_option="value",
+            )
+
     def test_cyclecloud_config_rejects_inline_basic_auth(self):
         with pytest.raises(ValueError, match="credential_path"):
             AzureProviderConfig(
@@ -132,6 +139,17 @@ class TestAzureProviderConfig:
         assert config.cyclecloud.verify_ssl is False
         assert config.cyclecloud.auth_mode == "bearer"
         assert config.cyclecloud.aad_scope == "https://cc.example.com/.default"
+
+    def test_cyclecloud_config_rejects_unknown_fields(self):
+        with pytest.raises(ValueError, match="Extra inputs are not permitted"):
+            AzureProviderConfig(
+                subscription_id="12345678-1234-1234-1234-123456789012",
+                cyclecloud={
+                    "url": "https://cc.example.com",
+                    "credential_path": "config/cyclecloud-credentials.json",
+                    "extra_transport_option": "value",
+                },
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -927,6 +945,55 @@ class TestAzureClientNetworkResolution:
         ip_cfg.private_ip_address = "10.0.0.4"
         ip_cfg.subnet = subnet
         ip_cfg.public_ip_address = public_ip_ref
+
+        nic = MagicMock()
+        nic.ip_configurations = [ip_cfg]
+        azure_client.network_client.network_interfaces.get.return_value = nic
+
+        pip = MagicMock()
+        pip.ip_address = "52.1.2.3"
+        azure_client.network_client.public_ip_addresses.get.return_value = pip
+
+        result = AzureClient.resolve_network_identity_from_vm(azure_client, vm)
+
+        assert result["private_ip"] == "10.0.0.4"
+        assert result["public_ip"] == "52.1.2.3"
+        assert result["subnet_id"].endswith("/subnets/default")
+        assert result["vnet_id"].endswith("/virtualNetworks/test-vnet")
+        assert result["nic_name"] == "nic-vm-1"
+
+    def test_resolve_network_identity_tolerates_missing_nested_property_bags(self):
+        from orb.providers.azure.infrastructure.azure_client import AzureClient
+
+        azure_client = object.__new__(AzureClient)
+        azure_client._logger = MagicMock()
+        azure_client._network_client = MagicMock()
+
+        nic_ref = MagicMock()
+        nic_ref.id = (
+            "/subscriptions/sub/resourceGroups/test-rg/providers/"
+            "Microsoft.Network/networkInterfaces/nic-vm-1"
+        )
+        nic_ref.properties = None
+
+        vm = MagicMock()
+        vm.network_profile.network_interfaces = [nic_ref]
+
+        subnet = MagicMock()
+        subnet.id = (
+            "/subscriptions/sub/resourceGroups/test-rg/providers/"
+            "Microsoft.Network/virtualNetworks/test-vnet/subnets/default"
+        )
+        public_ip_ref = MagicMock()
+        public_ip_ref.id = (
+            "/subscriptions/sub/resourceGroups/test-rg/providers/"
+            "Microsoft.Network/publicIPAddresses/pip-vm-1"
+        )
+        ip_cfg = MagicMock()
+        ip_cfg.private_ip_address = "10.0.0.4"
+        ip_cfg.subnet = subnet
+        ip_cfg.public_ip_address = public_ip_ref
+        ip_cfg.properties = None
 
         nic = MagicMock()
         nic.ip_configurations = [ip_cfg]

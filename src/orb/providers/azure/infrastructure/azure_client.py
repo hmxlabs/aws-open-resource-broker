@@ -75,13 +75,13 @@ class AzureResourceRefProtocol(Protocol):
 class AzureNicReferencePropertiesProtocol(Protocol):
     """Subset of NIC reference properties used for primary-NIC ordering."""
 
-    primary: bool
+    primary: Optional[bool]
 
 
 class AzureNicReferenceProtocol(AzureResourceRefProtocol, Protocol):
     """NIC reference shape exposed from a VM network profile."""
 
-    properties: AzureNicReferencePropertiesProtocol
+    properties: Optional[AzureNicReferencePropertiesProtocol]
 
 
 class AzureNetworkProfileProtocol(Protocol):
@@ -104,7 +104,7 @@ class AzureIpConfigurationProtocol(Protocol):
     private_ip_address: Optional[str]
     subnet: Optional[AzureResourceRefProtocol]
     public_ip_address: Optional[AzureResourceRefProtocol]
-    properties: AzureIpConfigurationPropertiesProtocol
+    properties: Optional[AzureIpConfigurationPropertiesProtocol]
 
 
 class AzureNicProtocol(Protocol):
@@ -714,7 +714,10 @@ class AzureClient:
 
     @staticmethod
     def _is_primary_nic_ref(nic_ref: AzureNicReferenceProtocol) -> bool:
-        return bool(nic_ref.properties.primary)
+        nic_properties = nic_ref.properties
+        if nic_properties is None:
+            return False
+        return bool(nic_properties.primary)
 
     @staticmethod
     def _resource_id(value: Optional[AzureResourceRefProtocol]) -> Optional[str]:
@@ -728,19 +731,34 @@ class AzureClient:
 
     @staticmethod
     def _private_ip_from_ip_config(ip_config: AzureIpConfigurationProtocol) -> Optional[str]:
-        return ip_config.private_ip_address or ip_config.properties.private_ip_address
+        if ip_config.private_ip_address:
+            return ip_config.private_ip_address
+        ip_properties = ip_config.properties
+        if ip_properties is None:
+            return None
+        return ip_properties.private_ip_address
 
     @staticmethod
     def _subnet_from_ip_config(
         ip_config: AzureIpConfigurationProtocol,
     ) -> Optional[AzureResourceRefProtocol]:
-        return ip_config.subnet or ip_config.properties.subnet
+        if ip_config.subnet is not None:
+            return ip_config.subnet
+        ip_properties = ip_config.properties
+        if ip_properties is None:
+            return None
+        return ip_properties.subnet
 
     @staticmethod
     def _public_ip_ref_from_ip_config(
         ip_config: AzureIpConfigurationProtocol,
     ) -> Optional[AzureResourceRefProtocol]:
-        return ip_config.public_ip_address or ip_config.properties.public_ip_address
+        if ip_config.public_ip_address is not None:
+            return ip_config.public_ip_address
+        ip_properties = ip_config.properties
+        if ip_properties is None:
+            return None
+        return ip_properties.public_ip_address
 
     @staticmethod
     def _public_ip_address_from_resource(public_ip_resource: Any) -> Optional[str]:
