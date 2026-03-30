@@ -121,39 +121,6 @@ class CycleCloudHandler(AzureHandler):
             return 30, 60
         return provider_cfg.connect_timeout, provider_cfg.read_timeout
 
-    @staticmethod
-    def _configure_cc_session_auth(
-            *,
-        session: requests.Session,
-        settings: CycleCloudSessionSettings,
-    ) -> Optional[str]:
-        auth_mode = settings.auth_mode
-
-        if auth_mode == "ssh":
-            raise CycleCloudConnectionError(
-                "cyclecloud_auth_mode=ssh is not supported. Configure CycleCloud API credentials instead.",
-                url=settings.base_url,
-            )
-
-        cc_user, cc_pass = settings.username, settings.password
-        if cc_user and cc_pass and auth_mode != "bearer":
-            session.auth = (cc_user, cc_pass)
-            return "basic"
-
-        bearer_token = settings.bearer_token
-        if bearer_token:
-            session.headers["Authorization"] = f"Bearer {bearer_token}"
-            return "bearer"
-        if auth_mode == "bearer":
-            raise CycleCloudConnectionError(
-                "cyclecloud_auth_mode=bearer requested but no bearer token could be resolved.",
-                url=settings.base_url,
-            )
-        raise CycleCloudConnectionError(
-            "No CycleCloud auth method resolved. Provide username/password or a bearer token/Azure credential.",
-            url=settings.base_url,
-        )
-
     def _build_cc_session(
         self,
         *,
@@ -170,14 +137,15 @@ class CycleCloudHandler(AzureHandler):
             credential = None
         if credential is not None:
             token_provider = AzureCredentialAccessTokenProvider(credential)
-        settings = CycleCloudSessionBuilder(
+        session_builder = CycleCloudSessionBuilder(
             cc_url=cc_url,
             verify_ssl=verify_ssl,
             template=template,
             request_context=request_context,
             provider_cfg=provider_cfg,
             token_provider=token_provider,
-        ).build_settings()
+        )
+        settings = session_builder.build_settings()
         session: Optional[requests.Session] = None
         try:
             session = requests.Session()
@@ -186,7 +154,7 @@ class CycleCloudHandler(AzureHandler):
                 "Accept": "application/json",
                 "Content-Type": "application/json",
             })
-            resolved_auth_mode = self._configure_cc_session_auth(
+            resolved_auth_mode = session_builder.configure_session_auth(
                 session=session,
                 settings=settings,
             )

@@ -82,7 +82,7 @@ def test_build_settings_returns_no_bearer_token_when_no_token_provider_is_availa
 
     settings = builder.build_settings()
 
-    assert settings.bearer_token is None
+    assert settings.auth_mode == "bearer"
 
 
 def test_build_settings_skips_expected_auth_failures_before_returning_bearer_token():
@@ -113,7 +113,13 @@ def test_build_settings_skips_expected_auth_failures_before_returning_bearer_tok
 
     settings = builder.build_settings()
 
-    assert settings.bearer_token == "tok-123"
+    session = MagicMock()
+    session.headers = {}
+
+    resolved_auth_mode = builder.configure_session_auth(session=session, settings=settings)
+
+    assert resolved_auth_mode == "bearer"
+    assert session.headers["Authorization"] == "Bearer tok-123"
 
 
 def test_build_settings_propagates_unexpected_token_errors():
@@ -136,7 +142,8 @@ def test_build_settings_propagates_unexpected_token_errors():
     )
 
     with pytest.raises(RuntimeError, match="boom"):
-        builder.build_settings()
+        settings = builder.build_settings()
+        builder.configure_session_auth(session=MagicMock(headers={}), settings=settings)
 
 
 def test_build_settings_loads_cyclecloud_config_from_provider():
@@ -162,8 +169,13 @@ def test_build_settings_loads_cyclecloud_config_from_provider():
     assert settings.base_url == "https://cc.example.com"
     assert settings.verify_ssl is False
     assert settings.auth_mode is None
-    assert settings.username == "cc_admin"
-    assert settings.password == "changeme"
+    assert settings.credential_path == "config/cyclecloud-credentials.json"
+
+    session = MagicMock()
+    session.headers = {}
+    resolved_auth_mode = builder.configure_session_auth(session=session, settings=settings)
+    assert resolved_auth_mode == "basic"
+    assert session.auth == ("cc_admin", "changeme")
 
 
 def test_build_settings_loads_credentials_from_file(tmp_path: Path):
@@ -192,8 +204,13 @@ def test_build_settings_loads_credentials_from_file(tmp_path: Path):
 
     assert settings.base_url == "https://cc.example.com"
     assert settings.verify_ssl is False
-    assert settings.username == "file-admin"
-    assert settings.password == "file-secret"
+    assert settings.credential_path == str(credential_file)
+
+    session = MagicMock()
+    session.headers = {}
+    resolved_auth_mode = builder.configure_session_auth(session=session, settings=settings)
+    assert resolved_auth_mode == "basic"
+    assert session.auth == ("file-admin", "file-secret")
 
 
 def test_build_settings_parses_verify_ssl_string_from_request_context():
@@ -215,7 +232,11 @@ def test_build_settings_parses_verify_ssl_string_from_request_context():
     settings = builder.build_settings()
 
     assert settings.verify_ssl is False
-    assert settings.bearer_token == "tok-123"
+    session = MagicMock()
+    session.headers = {}
+    resolved_auth_mode = builder.configure_session_auth(session=session, settings=settings)
+    assert resolved_auth_mode == "bearer"
+    assert session.headers["Authorization"] == "Bearer tok-123"
 
 
 def test_build_settings_takes_verify_ssl_from_credential_file(tmp_path: Path):
@@ -245,3 +266,4 @@ def test_build_settings_takes_verify_ssl_from_credential_file(tmp_path: Path):
 
     assert settings.base_url == "https://cc.example.com"
     assert settings.verify_ssl is False
+    assert settings.credential_path == str(credential_file)

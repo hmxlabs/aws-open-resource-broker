@@ -67,9 +67,6 @@ class CycleCloudSessionSettings:
     verify_ssl: bool
     auth_mode: Optional[str]
     credential_path: Optional[str]
-    username: Optional[str]
-    password: Optional[str]
-    bearer_token: Optional[str]
 
 
 @dataclass(frozen=True)

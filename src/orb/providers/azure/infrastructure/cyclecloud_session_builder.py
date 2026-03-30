@@ -7,6 +7,8 @@ from pathlib import Path
 from typing import Optional
 from urllib.parse import urlparse
 
+import requests
+
 from orb.providers.azure.configuration.config import AzureProviderConfig
 from orb.providers.azure.domain.template.azure_template_aggregate import AzureTemplate
 from orb.providers.azure.exceptions.azure_exceptions import CycleCloudConnectionError
@@ -194,16 +196,48 @@ class CycleCloudSessionBuilder:
         )
         base_url, verify_ssl = self._resolve_transport_settings(credential_data)
         auth_mode = self._resolve_auth_mode(credential_data)
-        bearer_token = self._resolve_bearer_token(
-            base_url=base_url,
-            credential_data=credential_data,
-        )
         return CycleCloudSessionSettings(
             base_url=base_url,
             verify_ssl=verify_ssl,
             auth_mode=auth_mode,
             credential_path=credential_path,
-            username=credential_data.username,
-            password=credential_data.password,
-            bearer_token=bearer_token,
+        )
+
+    def configure_session_auth(
+        self,
+        *,
+        session: requests.Session,
+        settings: CycleCloudSessionSettings,
+    ) -> str:
+        """Resolve auth from the credential source and apply it to a session."""
+        if settings.auth_mode == "ssh":
+            raise CycleCloudConnectionError(
+                "cyclecloud_auth_mode=ssh is not supported. Configure CycleCloud API credentials instead.",
+                url=settings.base_url,
+            )
+
+        credential_data = (
+            self._load_credential_file(settings.credential_path)
+            if settings.credential_path
+            else CycleCloudCredentialData()
+        )
+        if credential_data.username and credential_data.password and settings.auth_mode != "bearer":
+            session.auth = (credential_data.username, credential_data.password)
+            return "basic"
+
+        bearer_token = self._resolve_bearer_token(
+            base_url=settings.base_url,
+            credential_data=credential_data,
+        )
+        if bearer_token:
+            session.headers["Authorization"] = f"Bearer {bearer_token}"
+            return "bearer"
+        if settings.auth_mode == "bearer":
+            raise CycleCloudConnectionError(
+                "cyclecloud_auth_mode=bearer requested but no bearer token could be resolved.",
+                url=settings.base_url,
+            )
+        raise CycleCloudConnectionError(
+            "No CycleCloud auth method resolved. Provide username/password or a bearer token/Azure credential.",
+            url=settings.base_url,
         )

@@ -835,6 +835,30 @@ class TestCycleCloudAuthModes:
         assert session_context.auth_mode == "basic"
         assert session_context.session.auth == ("cc_admin", "changeme")
 
+    def test_build_settings_does_not_carry_raw_credentials_in_repr(self):
+        builder = CycleCloudSessionBuilder(
+            cc_url="https://cc.example.com",
+            verify_ssl=False,
+            template=None,
+            request_context=CycleCloudRequestContext.from_mapping(
+                {"cyclecloud_credential_path": "/tmp/cyclecloud.json"}
+            ),
+            provider_cfg=None,
+        )
+        with patch.object(
+            CycleCloudSessionBuilder,
+            "_load_credential_file",
+            return_value=CycleCloudCredentialData(
+                username="cc_admin",
+                password="changeme",
+            ),
+        ):
+            settings = builder.build_settings()
+
+        settings_repr = repr(settings)
+        assert "cc_admin" not in settings_repr
+        assert "changeme" not in settings_repr
+
     @patch("orb.providers.azure.infrastructure.handlers.cyclecloud_handler.requests.Session")
     def test_acquire_hosts_persists_credential_path(self, mock_session_cls, tmp_path: Path):
         handler = _make_handler()
