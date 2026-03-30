@@ -380,16 +380,35 @@ class VMSSHandler(AzureHandler):
 
         vmss_name = resource_id
         compute = self.azure_client.compute_client
-        orchestration_mode = self._get_vmss_orchestration_mode(resource_group, vmss_name)
 
         if not machine_ids:
             return None
+
+        orchestration_mode = self._get_vmss_orchestration_mode(resource_group, vmss_name)
+        current_members = self._list_vmss_instances(
+            resource_group=resource_group,
+            vmss_name=vmss_name,
+            include_instance_view=False,
+            orchestration_mode=orchestration_mode,
+        )
+        resolved_instance_ids = (
+            self._resolve_vmss_instance_ids(
+                resource_group=resource_group,
+                vmss_name=vmss_name,
+                machine_ids=machine_ids,
+                current_members=current_members,
+            )
+            if orchestration_mode != AzureVMSSOrchestrationMode.FLEXIBLE
+            else [str(machine_id) for machine_id in machine_ids]
+        )
 
         delete_vmss_when_empty = self._should_delete_vmss_when_empty(
             resource_group=resource_group,
             vmss_name=vmss_name,
             orchestration_mode=orchestration_mode,
             machine_ids=machine_ids,
+            current_members=current_members,
+            resolved_instance_ids=resolved_instance_ids,
         )
 
         self._logger.info(
@@ -444,11 +463,6 @@ class VMSSHandler(AzureHandler):
                     }
                 }
 
-            resolved_instance_ids = self._resolve_vmss_instance_ids(
-                resource_group=resource_group,
-                vmss_name=vmss_name,
-                machine_ids=machine_ids,
-            )
             # Fire-and-forget: deletion is async; the caller
             # reconciles completion via check_hosts_status polling.
             compute.virtual_machine_scale_sets.begin_delete_instances(
@@ -580,16 +594,20 @@ class VMSSHandler(AzureHandler):
         vmss_name: str,
         orchestration_mode: AzureVMSSOrchestrationMode,
         machine_ids: list[str],
+        current_members: Optional[list[dict[str, Any]]] = None,
+        resolved_instance_ids: Optional[list[str]] = None,
     ) -> bool:
         """Return whether deleting these exact members would leave the VMSS empty."""
         if not machine_ids:
             return False
 
-        current_members = self._list_vmss_instances(
-            resource_group=resource_group,
-            vmss_name=vmss_name,
-            include_instance_view=False,
-        )
+        if current_members is None:
+            current_members = self._list_vmss_instances(
+                resource_group=resource_group,
+                vmss_name=vmss_name,
+                include_instance_view=False,
+                orchestration_mode=orchestration_mode,
+            )
         if not current_members:
             return False
 
@@ -609,11 +627,13 @@ class VMSSHandler(AzureHandler):
             requested_ids = {str(machine_id) for machine_id in machine_ids if machine_id not in (None, "")}
             return bool(requested_ids) and requested_ids == current_member_ids
 
-        resolved_instance_ids = self._resolve_vmss_instance_ids(
-            resource_group=resource_group,
-            vmss_name=vmss_name,
-            machine_ids=machine_ids,
-        )
+        if resolved_instance_ids is None:
+            resolved_instance_ids = self._resolve_vmss_instance_ids(
+                resource_group=resource_group,
+                vmss_name=vmss_name,
+                machine_ids=machine_ids,
+                current_members=current_members,
+            )
         requested_ids = {
             str(instance_id)
             for instance_id in resolved_instance_ids
@@ -626,31 +646,38 @@ class VMSSHandler(AzureHandler):
         resource_group: str,
         vmss_name: str,
         machine_ids: list[str],
+        current_members: Optional[list[dict[str, Any]]] = None,
     ) -> list[str]:
         """Resolve mixed IDs (vm_id/vm_name/instance_id) to VMSS instance IDs."""
         if not machine_ids:
             return []
 
-        compute = self.azure_client.compute_client
         resolved: list[str] = []
 
         try:
-            vms = compute.virtual_machine_scale_set_vms.list(
-                resource_group_name=resource_group,
-                virtual_machine_scale_set_name=vmss_name,
-            )
             lookup: dict[str, str] = {}
-            for vm in vms:
-                vmss_instance_id = str(getattr(vm, "instance_id", "") or "")
+            if current_members is None:
+                current_members = self._list_vmss_instances(
+                    resource_group=resource_group,
+                    vmss_name=vmss_name,
+                    include_instance_view=False,
+                    orchestration_mode=AzureVMSSOrchestrationMode.UNIFORM,
+                )
+
+            for vm in current_members:
+                if not isinstance(vm, dict):
+                    continue
+                vmss_instance_id = str(vm.get("instance_id", "") or "")
                 if not vmss_instance_id:
                     continue
                 lookup[vmss_instance_id] = vmss_instance_id
 
-                vm_id = getattr(vm, "vm_id", None)
+                provider_data = vm.get("provider_data")
+                vm_id = provider_data.get("vm_id") if isinstance(provider_data, dict) else None
                 if vm_id:
                     lookup[str(vm_id)] = vmss_instance_id
 
-                vm_name = _read_vm_identity(vm).vm_name
+                vm_name = provider_data.get("vm_name") if isinstance(provider_data, dict) else None
                 if vm_name:
                     lookup[str(vm_name)] = vmss_instance_id
 
@@ -679,10 +706,12 @@ class VMSSHandler(AzureHandler):
         resource_group: str,
         vmss_name: str,
         include_instance_view: bool = False,
+        orchestration_mode: Optional[AzureVMSSOrchestrationMode] = None,
     ) -> list[dict[str, Any]]:
         """Return a list of normalised instance dicts for a VMSS."""
         compute = self.azure_client.compute_client
-        orchestration_mode = self._get_vmss_orchestration_mode(resource_group, vmss_name)
+        if orchestration_mode is None:
+            orchestration_mode = self._get_vmss_orchestration_mode(resource_group, vmss_name)
 
         if orchestration_mode == AzureVMSSOrchestrationMode.FLEXIBLE:
             return self._list_flexible_vmss_instances(
