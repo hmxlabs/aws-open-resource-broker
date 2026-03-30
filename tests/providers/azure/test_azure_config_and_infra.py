@@ -20,6 +20,7 @@ from orb.providers.azure.configuration.validator import (
 from orb.providers.azure.configuration.template_extension import AzureTemplateExtensionConfig
 from orb.providers.azure.exceptions.azure_exceptions import (
     AzureError,
+    AzureConfigurationError,
     VMNotFoundError,
 )
 from orb.providers.azure.domain.template.value_objects import AzureProviderApi
@@ -478,6 +479,42 @@ class TestAzureHandlerFactory:
             read_timeout=19,
         )
 
+    def test_azure_client_rejects_non_integer_timeout_values(self):
+        config_port = MagicMock()
+        config_port.get_typed.return_value = types.SimpleNamespace(
+            subscription_id="12345678-1234-1234-1234-123456789012",
+            resource_group="rg-explicit",
+            region="westeurope",
+            max_retries=3,
+            connect_timeout="fast",
+            read_timeout=22,
+        )
+        config_port.get_provider_config.return_value = None
+
+        with pytest.raises(
+            AzureConfigurationError,
+            match=r"connect_timeout.*must be an integer",
+        ):
+            AzureClient(config=config_port, logger=MagicMock())
+
+    def test_azure_client_rejects_timeout_values_below_minimum(self):
+        config_port = MagicMock()
+        config_port.get_typed.return_value = types.SimpleNamespace(
+            subscription_id="12345678-1234-1234-1234-123456789012",
+            resource_group="rg-explicit",
+            region="westeurope",
+            max_retries=3,
+            connect_timeout=0,
+            read_timeout=22,
+        )
+        config_port.get_provider_config.return_value = None
+
+        with pytest.raises(
+            AzureConfigurationError,
+            match=r"connect_timeout.*must be >= 1",
+        ):
+            AzureClient(config=config_port, logger=MagicMock())
+
 
 class TestAzureAuthStrategy:
     def test_auth_strategy_passes_managed_identity_client_id_when_configured(self):
@@ -739,6 +776,16 @@ class TestAzureMachineAdapter:
             adapter.perform_health_check(machine)
 
 class TestAzureClientNetworkResolution:
+    def test_extract_resource_group_and_name_from_arm_id_rejects_incomplete_ids(self):
+        from orb.providers.azure.infrastructure.azure_client import AzureClient
+
+        assert (
+            AzureClient.extract_resource_group_and_name_from_arm_id(
+                "/subscriptions/sub/resourceGroups"
+            )
+            is None
+        )
+
     def test_resolve_network_identity_from_vm_populates_ips_and_subnet(self):
         from orb.providers.azure.infrastructure.azure_client import AzureClient
 

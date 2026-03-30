@@ -100,7 +100,7 @@ class AzureClient:
         azure_provider_config = self._get_selected_azure_provider_config()
 
         self.region_name: str = (
-            getattr(azure_provider_config, "region", None) or "eastus2"
+            azure_provider_config.region if azure_provider_config and azure_provider_config.region else "eastus2"
         )
         self.subscription_id: Optional[str] = (
             azure_provider_config.subscription_id if azure_provider_config else None
@@ -111,12 +111,23 @@ class AzureClient:
 
         self._logger.debug("Azure client region determined: %s", self.region_name)
 
-        max_retries = int(azure_provider_config.max_retries) if azure_provider_config else 3
-        connect_timeout = (
-            int(azure_provider_config.connect_timeout) if azure_provider_config else 30
+        max_retries = self._resolve_int_config_value(
+            field_name="max_retries",
+            raw_value=azure_provider_config.max_retries if azure_provider_config else None,
+            default=3,
+            minimum=0,
         )
-        read_timeout = (
-            int(azure_provider_config.read_timeout) if azure_provider_config else 60
+        connect_timeout = self._resolve_int_config_value(
+            field_name="connect_timeout",
+            raw_value=azure_provider_config.connect_timeout if azure_provider_config else None,
+            default=30,
+            minimum=1,
+        )
+        read_timeout = self._resolve_int_config_value(
+            field_name="read_timeout",
+            raw_value=azure_provider_config.read_timeout if azure_provider_config else None,
+            default=60,
+            minimum=1,
         )
 
         self._max_retries = max_retries
@@ -221,6 +232,138 @@ class AzureClient:
         """
         return self.credential
 
+    def _management_client_init_kwargs(
+        self,
+        *,
+        requires_subscription_id: bool,
+    ) -> dict[str, Any]:
+        """Build constructor kwargs shared by Azure management clients."""
+        client_kwargs = {
+            "credential": self._management_client_credential(),
+            **self._management_client_kwargs(),
+        }
+        if requires_subscription_id:
+            self._ensure_subscription_id()
+            client_kwargs["subscription_id"] = self.subscription_id
+        return client_kwargs
+
+    @staticmethod
+    def _resolve_int_config_value(
+            *,
+        field_name: str,
+        raw_value: Optional[int],
+        default: int,
+        minimum: int,
+    ) -> int:
+        """Resolve an integer config value with explicit validation."""
+        if raw_value is None:
+            return default
+
+        try:
+            value = int(raw_value)
+        except (TypeError, ValueError) as exc:
+            raise AzureConfigurationError(
+                f"Azure provider config '{field_name}' must be an integer, got {raw_value!r}"
+            ) from exc
+
+        if value < minimum:
+            raise AzureConfigurationError(
+                f"Azure provider config '{field_name}' must be >= {minimum}, got {value}"
+            )
+
+        return value
+
+    def _build_compute_client(self) -> ComputeManagementClient:
+        """Construct a Compute management client."""
+        self._logger.debug("Initialising ComputeManagementClient on first use")
+        try:
+            from azure.mgmt.compute import ComputeManagementClient
+        except ImportError as exc:
+            raise AzureConfigurationError(
+                "azure-mgmt-compute package is not installed"
+            ) from exc
+        return ComputeManagementClient(
+            **self._management_client_init_kwargs(requires_subscription_id=True)
+        )
+
+    def _build_network_client(self) -> NetworkManagementClient:
+        """Construct a Network management client."""
+        self._logger.debug("Initialising NetworkManagementClient on first use")
+        try:
+            from azure.mgmt.network import NetworkManagementClient
+        except ImportError as exc:
+            raise AzureConfigurationError(
+                "azure-mgmt-network package is not installed"
+            ) from exc
+        return NetworkManagementClient(
+            **self._management_client_init_kwargs(requires_subscription_id=True)
+        )
+
+    def _build_resource_client(self) -> ResourceManagementClient:
+        """Construct a Resource management client."""
+        self._logger.debug("Initialising ResourceManagementClient on first use")
+        try:
+            from azure.mgmt.resource import ResourceManagementClient
+        except ImportError as exc:
+            raise AzureConfigurationError(
+                "azure-mgmt-resource package is not installed"
+            ) from exc
+        return ResourceManagementClient(
+            **self._management_client_init_kwargs(requires_subscription_id=True)
+        )
+
+    def _build_msi_client(self) -> ManagedServiceIdentityClient:
+        """Construct a Managed Service Identity client."""
+        self._logger.debug("Initialising ManagedServiceIdentityClient on first use")
+        try:
+            from azure.mgmt.msi import ManagedServiceIdentityClient
+        except ImportError as exc:
+            raise AzureConfigurationError(
+                "azure-mgmt-msi package is not installed"
+            ) from exc
+        return ManagedServiceIdentityClient(
+            **self._management_client_init_kwargs(requires_subscription_id=True)
+        )
+
+    def _build_authorization_client(self) -> AuthorizationManagementClient:
+        """Construct an Authorization management client."""
+        self._logger.debug("Initialising AuthorizationManagementClient on first use")
+        try:
+            from azure.mgmt.authorization import AuthorizationManagementClient
+        except ImportError as exc:
+            raise AzureConfigurationError(
+                "azure-mgmt-authorization package is not installed"
+            ) from exc
+        return AuthorizationManagementClient(
+            **self._management_client_init_kwargs(requires_subscription_id=True)
+        )
+
+    def _build_monitor_client(self) -> MonitorManagementClient:
+        """Construct a Monitor management client."""
+        self._logger.debug("Initialising MonitorManagementClient on first use")
+        try:
+            from azure.mgmt.monitor import MonitorManagementClient
+        except ImportError as exc:
+            raise AzureConfigurationError(
+                "azure-mgmt-monitor package is not installed"
+            ) from exc
+        return MonitorManagementClient(
+            **self._management_client_init_kwargs(requires_subscription_id=True)
+        )
+
+    def _build_subscription_client(self) -> SubscriptionClient:
+        """Construct a Subscription client."""
+        self._logger.debug("Initialising SubscriptionClient on first use")
+        try:
+            from azure.mgmt.resource.subscriptions import SubscriptionClient
+        except ImportError as exc:
+            raise AzureConfigurationError(
+                "azure-mgmt-resource package is not installed"
+            ) from exc
+        return SubscriptionClient(
+            **self._management_client_init_kwargs(requires_subscription_id=False)
+        )
+
     @property
     def credential(self) -> AzureCredentialProtocol:
         """Return an Azure ``TokenCredential``, creating it on first access.
@@ -259,122 +402,55 @@ class AzureClient:
     # ------------------------------------------------------------------
 
     @property
-    def compute_client(self) -> "ComputeManagementClient":
+    def compute_client(self) -> ComputeManagementClient:
         """Lazy initialisation of Azure Compute management client.
 
         Provides access to VMs, VMSS, Disks, Images, Availability Sets,
         Proximity Placement Groups, and Galleries.
         """
         if self._compute_client is None:
-            self._logger.debug("Initialising ComputeManagementClient on first use")
-            self._ensure_subscription_id()
-            try:
-                from azure.mgmt.compute import ComputeManagementClient
-
-                self._compute_client = ComputeManagementClient(
-                    credential=self._management_client_credential(),
-                    subscription_id=self.subscription_id,
-                    **self._management_client_kwargs(),
-                )
-            except ImportError as exc:
-                raise AzureConfigurationError(
-                    "azure-mgmt-compute package is not installed"
-                ) from exc
+            self._compute_client = self._build_compute_client()
         return self._compute_client
 
     @property
-    def network_client(self) -> "NetworkManagementClient":
+    def network_client(self) -> NetworkManagementClient:
         """Lazy initialisation of Azure Network management client.
 
         Provides access to VNets, Subnets, NICs, NSGs, Public IPs, and
         Load Balancers.
         """
         if self._network_client is None:
-            self._logger.debug("Initialising NetworkManagementClient on first use")
-            self._ensure_subscription_id()
-            try:
-                from azure.mgmt.network import NetworkManagementClient
-
-                self._network_client = NetworkManagementClient(
-                    credential=self._management_client_credential(),
-                    subscription_id=self.subscription_id,
-                    **self._management_client_kwargs(),
-                )
-            except ImportError as exc:
-                raise AzureConfigurationError(
-                    "azure-mgmt-network package is not installed"
-                ) from exc
+            self._network_client = self._build_network_client()
         return self._network_client
 
     @property
-    def resource_client(self) -> "ResourceManagementClient":
+    def resource_client(self) -> ResourceManagementClient:
         """Lazy initialisation of Azure Resource management client.
 
         Provides access to resource groups, deployments, and providers.
         """
         if self._resource_client is None:
-            self._logger.debug("Initialising ResourceManagementClient on first use")
-            self._ensure_subscription_id()
-            try:
-                from azure.mgmt.resource import ResourceManagementClient
-
-                self._resource_client = ResourceManagementClient(
-                    credential=self._management_client_credential(),
-                    subscription_id=self.subscription_id,
-                    **self._management_client_kwargs(),
-                )
-            except ImportError as exc:
-                raise AzureConfigurationError(
-                    "azure-mgmt-resource package is not installed"
-                ) from exc
+            self._resource_client = self._build_resource_client()
         return self._resource_client
 
     @property
-    def msi_client(self) -> "ManagedServiceIdentityClient":
+    def msi_client(self) -> ManagedServiceIdentityClient:
         """Lazy initialisation of Azure Managed Service Identity client.
 
         Provides access to user-assigned managed identities.
         """
         if self._msi_client is None:
-            self._logger.debug("Initialising ManagedServiceIdentityClient on first use")
-            self._ensure_subscription_id()
-            try:
-                from azure.mgmt.msi import ManagedServiceIdentityClient
-
-                self._msi_client = ManagedServiceIdentityClient(
-                    credential=self._management_client_credential(),
-                    subscription_id=self.subscription_id,
-                    **self._management_client_kwargs(),
-                )
-            except ImportError as exc:
-                raise AzureConfigurationError(
-                    "azure-mgmt-msi package is not installed"
-                ) from exc
+            self._msi_client = self._build_msi_client()
         return self._msi_client
 
     @property
-    def authorization_client(self) -> "AuthorizationManagementClient":
+    def authorization_client(self) -> AuthorizationManagementClient:
         """Lazy initialisation of Azure Authorization management client.
 
         Provides access to role definitions and role assignments.
         """
         if self._authorization_client is None:
-            self._logger.debug(
-                "Initialising AuthorizationManagementClient on first use"
-            )
-            self._ensure_subscription_id()
-            try:
-                from azure.mgmt.authorization import AuthorizationManagementClient
-
-                self._authorization_client = AuthorizationManagementClient(
-                    credential=self._management_client_credential(),
-                    subscription_id=self.subscription_id,
-                    **self._management_client_kwargs(),
-                )
-            except ImportError as exc:
-                raise AzureConfigurationError(
-                    "azure-mgmt-authorization package is not installed"
-                ) from exc
+            self._authorization_client = self._build_authorization_client()
         return self._authorization_client
 
     @property
@@ -384,20 +460,7 @@ class AzureClient:
         Provides access to metrics, diagnostic settings, and activity logs.
         """
         if self._monitor_client is None:
-            self._logger.debug("Initialising MonitorManagementClient on first use")
-            self._ensure_subscription_id()
-            try:
-                from azure.mgmt.monitor import MonitorManagementClient
-
-                self._monitor_client = MonitorManagementClient(
-                    credential=self._management_client_credential(),
-                    subscription_id=self.subscription_id,
-                    **self._management_client_kwargs(),
-                )
-            except ImportError as exc:
-                raise AzureConfigurationError(
-                    "azure-mgmt-monitor package is not installed"
-                ) from exc
+            self._monitor_client = self._build_monitor_client()
         return self._monitor_client
 
     @property
@@ -408,18 +471,7 @@ class AzureClient:
         Does **not** require ``subscription_id`` at construction time.
         """
         if self._subscription_client is None:
-            self._logger.debug("Initialising SubscriptionClient on first use")
-            try:
-                from azure.mgmt.resource.subscriptions import SubscriptionClient
-
-                self._subscription_client = SubscriptionClient(
-                    credential=self._management_client_credential(),
-                    **self._management_client_kwargs(),
-                )
-            except ImportError as exc:
-                raise AzureConfigurationError(
-                    "azure-mgmt-resource package is not installed"
-                ) from exc
+            self._subscription_client = self._build_subscription_client()
         return self._subscription_client
 
     # ------------------------------------------------------------------
@@ -555,19 +607,19 @@ class AzureClient:
     ) -> Optional[tuple[str, str]]:
         """Extract ``(resource_group, resource_name)`` from an ARM resource ID."""
         parts = [segment for segment in str(arm_id).split("/") if segment]
-        if not parts:
+        if len(parts) < 2:
             return None
 
-        try:
-            rg_index = next(
-                idx for idx, value in enumerate(parts) if value.lower() == "resourcegroups"
-            )
-            resource_group = parts[rg_index + 1]
+        resource_name = parts[-1]
+        for idx, value in enumerate(parts[:-1]):
+            if value.lower() != "resourcegroups":
+                continue
+
+            resource_group = parts[idx + 1]
             resource_name = parts[-1]
             if resource_group and resource_name:
                 return resource_group, resource_name
-        except Exception:
-            return None
+
         return None
 
     @staticmethod
