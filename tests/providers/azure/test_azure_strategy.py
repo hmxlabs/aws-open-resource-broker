@@ -28,6 +28,7 @@ from orb.providers.azure.exceptions.azure_exceptions import (
     CycleCloudConnectionError,
     TerminationError,
 )
+from orb.providers.azure.infrastructure.vmss_cleanup import PendingVmssCleanup
 import orb.providers.azure.strategy.azure_provider_strategy as azure_strategy_module
 from orb.providers.azure.strategy.azure_provider_strategy import AzureProviderStrategy
 from orb.providers.base.strategy import (
@@ -1239,6 +1240,9 @@ class TestTerminateInstances:
                     "vmss_name": "vmss-prod-b",
                     "machine_ids": ["orb-1"],
                     "delete_vmss_when_empty": False,
+                    "delete_submission_semantics": "best_effort_without_reverification",
+                    "delete_submitted": False,
+                    "delete_retry_pending": False,
                 }
             }
         }
@@ -1265,6 +1269,9 @@ class TestTerminateInstances:
                     "vmss_name": "vmss-prod-b",
                     "machine_ids": ["orb-1"],
                     "delete_vmss_when_empty": False,
+                    "delete_submission_semantics": "best_effort_without_reverification",
+                    "delete_submitted": False,
+                    "delete_retry_pending": False,
                 }
             }
         ]
@@ -1284,6 +1291,9 @@ class TestTerminateInstances:
                         "vmss_name": "vmss-prod-b",
                         "machine_ids": ["orb-1"],
                         "delete_vmss_when_empty": False,
+                        "delete_submission_semantics": "best_effort_without_reverification",
+                        "delete_submitted": False,
+                        "delete_retry_pending": False,
                     }
                 }
             },
@@ -1294,6 +1304,9 @@ class TestTerminateInstances:
                         "vmss_name": "vmss-prod-b",
                         "machine_ids": ["orb-2"],
                         "delete_vmss_when_empty": False,
+                        "delete_submission_semantics": "best_effort_without_reverification",
+                        "delete_submitted": False,
+                        "delete_retry_pending": False,
                     }
                 }
             },
@@ -1333,6 +1346,9 @@ class TestTerminateInstances:
                     "vmss_name": "vmss-prod-b",
                     "machine_ids": ["orb-1"],
                     "delete_vmss_when_empty": False,
+                    "delete_submission_semantics": "best_effort_without_reverification",
+                    "delete_submitted": False,
+                    "delete_retry_pending": False,
                 }
             }
         ]
@@ -1343,6 +1359,9 @@ class TestTerminateInstances:
                     "vmss_name": "vmss-prod-b",
                     "machine_ids": ["orb-2"],
                     "delete_vmss_when_empty": False,
+                    "delete_submission_semantics": "best_effort_without_reverification",
+                    "delete_submitted": False,
+                    "delete_retry_pending": False,
                 }
             }
         ]
@@ -1873,13 +1892,17 @@ class TestDescribeResourceInstances:
         strategy._resource_manager = MagicMock()
         strategy._resource_manager.get_vmss_member_count.return_value = 0
         strategy._client = MagicMock()
-        strategy._pending_vmss_cleanups[("test-rg", "vmss-demo")] = (
-            azure_strategy_module.PendingVmssCleanup(
-                resource_group="test-rg",
-                vmss_name="vmss-demo",
-                machine_ids=["vm-a"],
-                delete_vmss_when_empty=True,
-            )
+        strategy._vmss_cleanup_coordinator.record(
+            {
+                "provider_data": {
+                    "pending_vmss_cleanup": PendingVmssCleanup(
+                        resource_group="test-rg",
+                        vmss_name="vmss-demo",
+                        machine_ids=["vm-a"],
+                        delete_vmss_when_empty=True,
+                    ).to_metadata()
+                }
+            }
         )
 
         start = threading.Event()
@@ -1893,9 +1916,9 @@ class TestDescribeResourceInstances:
 
         def worker() -> None:
             start.wait(timeout=1)
-            strategy._maybe_cleanup_pending_vmss_resource(
+            strategy._vmss_cleanup_coordinator.reconcile(
                 resource_group="test-rg",
-                vmss_name="vmss-demo",
+                resource_ids=["vmss-demo"],
                 observed_ids=set(),
             )
 
@@ -1970,6 +1993,17 @@ class TestDescribeResourceInstances:
             vm_scale_set_name="vmss-demo",
         )
         assert result.metadata["termination_follow_up_pending"] is True
+        assert result.metadata["termination_follow_up_details"] == [
+            {
+                "resource_group": "test-rg",
+                "vmss_name": "vmss-demo",
+                "machine_ids": ["vm-a"],
+                "delete_vmss_when_empty": True,
+                "delete_submitted": True,
+                "delete_retry_pending": False,
+                "delete_submission_semantics": "best_effort_without_reverification",
+            }
+        ]
 
     def test_describe_resource_instances_clears_pending_cleanup_after_vmss_is_gone(
         self, strategy
@@ -2096,7 +2130,71 @@ class TestDescribeResourceInstances:
             vmss_name="vmss-b",
         )
         assert result.metadata["termination_follow_up_pending"] is True
+        assert result.metadata["termination_follow_up_details"] == [
+            {
+                "resource_group": "test-rg",
+                "vmss_name": "vmss-b",
+                "machine_ids": ["vm-b"],
+                "delete_vmss_when_empty": True,
+                "delete_submitted": False,
+                "delete_retry_pending": False,
+                "delete_submission_semantics": "best_effort_without_reverification",
+            }
+        ]
         strategy._client.compute_client.virtual_machine_scale_sets.begin_delete.assert_not_called()
+
+    def test_describe_resource_instances_surfaces_retry_pending_when_vmss_delete_retry_fails(
+        self, strategy
+    ):
+        handler = MagicMock()
+        handler.check_hosts_status.return_value = []
+        handler.get_vmss_resource_errors.return_value = []
+        strategy._handlers["VMSS"] = handler
+        strategy._resource_manager = MagicMock()
+        strategy._resource_manager.get_vmss_member_count.return_value = 0
+        strategy._client = MagicMock()
+        strategy._client.compute_client.virtual_machine_scale_sets.begin_delete.side_effect = (
+            RuntimeError("delete still blocked")
+        )
+
+        op = ProviderOperation(
+            operation_type=ProviderOperationType.DESCRIBE_RESOURCE_INSTANCES,
+            parameters={
+                "resource_ids": ["vmss-demo"],
+                "provider_api": "VMSS",
+                "template_id": "tmpl-1",
+                "request_metadata": {
+                    "resource_group": "test-rg",
+                    "termination_requests": [
+                        {
+                            "pending_vmss_cleanup": {
+                                "resource_group": "test-rg",
+                                "vmss_name": "vmss-demo",
+                                "machine_ids": ["vm-a"],
+                                "delete_vmss_when_empty": True,
+                            }
+                        }
+                    ],
+                },
+            },
+        )
+
+        result = _run(strategy.execute_operation(op))
+
+        assert result.success
+        assert result.metadata["termination_follow_up_pending"] is True
+        assert result.metadata["termination_follow_up_details"] == [
+            {
+                "resource_group": "test-rg",
+                "vmss_name": "vmss-demo",
+                "machine_ids": ["vm-a"],
+                "delete_vmss_when_empty": True,
+                "delete_submitted": False,
+                "delete_retry_pending": True,
+                "delete_submission_semantics": "best_effort_without_reverification",
+                "last_delete_error": "delete still blocked",
+            }
+        ]
 
     def test_describe_resource_instances_clears_pending_cleanup_when_no_delete_is_required(
         self, strategy

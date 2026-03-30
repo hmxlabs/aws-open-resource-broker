@@ -254,7 +254,9 @@ def _register_azure_components_with_di(
 ) -> None:
     """Register Azure components with DI container for a specific instance."""
     from orb.domain.base.ports import LoggingPort
-    from orb.providers.azure.infrastructure.azure_client import AzureClient
+    from orb.providers.azure.infrastructure.vmss_cleanup import (
+        VmssCleanupCoordinatorFactory,
+    )
 
     def azure_client_factory(container_instance: Any) -> Any:
         logger_port = container_instance.get(LoggingPort)
@@ -267,6 +269,10 @@ def _register_azure_components_with_di(
         return client
 
     container.register_factory(f"AzureClient_{instance_name}", azure_client_factory)
+    container.register_factory(
+        f"VmssCleanupCoordinatorFactory_{instance_name}",
+        lambda _container_instance: VmssCleanupCoordinatorFactory(),
+    )
 
 
 def _create_azure_strategy_with_di(
@@ -277,6 +283,9 @@ def _create_azure_strategy_with_di(
 
     logger = container.get(LoggingPort)
     azure_client = container.get(f"AzureClient_{instance_name}")
+    vmss_cleanup_coordinator_factory = container.get(
+        f"VmssCleanupCoordinatorFactory_{instance_name}"
+    )
 
     from orb.providers.azure.strategy.azure_provider_strategy import AzureProviderStrategy
 
@@ -285,6 +294,7 @@ def _create_azure_strategy_with_di(
         logger=logger,
         provider_instance_name=instance_name,
         azure_client_resolver=lambda: azure_client,
+        vmss_cleanup_coordinator_factory=vmss_cleanup_coordinator_factory,
     )
 
 

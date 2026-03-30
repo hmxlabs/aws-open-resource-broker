@@ -41,6 +41,7 @@ from orb.providers.azure.infrastructure.handlers._network_identity import (
     empty_network_identity,
     network_identity_soft_failure_types,
 )
+from orb.providers.azure.infrastructure.vmss_cleanup import PendingVmssCleanup
 from orb.providers.infrastructure.error_codes import ProviderErrorEntry
 from orb.providers.azure.infrastructure.handlers.azure_handler import AzureHandler
 from orb.providers.azure.domain.template.value_objects import AzureVMSSOrchestrationMode
@@ -397,6 +398,11 @@ class VMSSHandler(AzureHandler):
             vmss_name,
         )
         try:
+            cleanup_submission_state = {
+                "delete_submitted": False,
+                "delete_retry_pending": False,
+                "last_delete_error": None,
+            }
             if orchestration_mode == AzureVMSSOrchestrationMode.FLEXIBLE:
                 submitted_deletions: list[dict[str, Any]] = []
                 for vm_name in machine_ids:
@@ -416,7 +422,7 @@ class VMSSHandler(AzureHandler):
                     # Member deletes have already been submitted above. If the
                     # follow-up VMSS delete submission fails, Azure will expose
                     # that intermediate state until async cleanup retries it.
-                    self._submit_vmss_delete_if_emptying(
+                    cleanup_submission_state = self._submit_vmss_delete_if_emptying(
                         resource_group=resource_group,
                         vmss_name=vmss_name,
                     )
@@ -431,6 +437,9 @@ class VMSSHandler(AzureHandler):
                             vmss_name=vmss_name,
                             machine_ids=machine_ids,
                             delete_vmss_when_empty=delete_vmss_when_empty,
+                            delete_submitted=cleanup_submission_state["delete_submitted"],
+                            delete_retry_pending=cleanup_submission_state["delete_retry_pending"],
+                            last_delete_error=cleanup_submission_state["last_delete_error"],
                         ),
                     }
                 }
@@ -455,7 +464,7 @@ class VMSSHandler(AzureHandler):
                 vmss_name,
             )
             if delete_vmss_when_empty:
-                self._submit_vmss_delete_if_emptying(
+                cleanup_submission_state = self._submit_vmss_delete_if_emptying(
                     resource_group=resource_group,
                     vmss_name=vmss_name,
                 )
@@ -470,6 +479,9 @@ class VMSSHandler(AzureHandler):
                         vmss_name=vmss_name,
                         machine_ids=machine_ids,
                         delete_vmss_when_empty=delete_vmss_when_empty,
+                        delete_submitted=cleanup_submission_state["delete_submitted"],
+                        delete_retry_pending=cleanup_submission_state["delete_retry_pending"],
+                        last_delete_error=cleanup_submission_state["last_delete_error"],
                     ),
                 }
             }
@@ -489,13 +501,19 @@ class VMSSHandler(AzureHandler):
         resource_group: str,
         vmss_name: str,
         machine_ids: list[str],
+        delete_submitted: bool = False,
+        delete_retry_pending: bool = False,
+        last_delete_error: Optional[str] = None,
     ) -> dict[str, Any]:
-        return {
-            "resource_group": resource_group,
-            "vmss_name": vmss_name,
-            "machine_ids": [str(machine_id) for machine_id in machine_ids],
-            "delete_vmss_when_empty": True,
-        }
+        return PendingVmssCleanup.create(
+            resource_group=resource_group,
+            vmss_name=vmss_name,
+            machine_ids=machine_ids,
+            delete_vmss_when_empty=True,
+            delete_submitted=delete_submitted,
+            delete_retry_pending=delete_retry_pending,
+            last_delete_error=last_delete_error,
+        ).to_metadata()
 
     def _release_cleanup_provider_data(
         self,
@@ -504,6 +522,9 @@ class VMSSHandler(AzureHandler):
         vmss_name: str,
         machine_ids: list[str],
         delete_vmss_when_empty: bool,
+        delete_submitted: bool = False,
+        delete_retry_pending: bool = False,
+        last_delete_error: Optional[str] = None,
     ) -> dict[str, Any]:
         if not delete_vmss_when_empty:
             return {}
@@ -513,6 +534,9 @@ class VMSSHandler(AzureHandler):
                 resource_group=resource_group,
                 vmss_name=vmss_name,
                 machine_ids=machine_ids,
+                delete_submitted=delete_submitted,
+                delete_retry_pending=delete_retry_pending,
+                last_delete_error=last_delete_error,
             )
         }
 
@@ -521,7 +545,7 @@ class VMSSHandler(AzureHandler):
         *,
         resource_group: str,
         vmss_name: str,
-    ) -> None:
+    ) -> dict[str, Any]:
         """Best-effort VMSS delete submission when this return should empty the scale set."""
         try:
             self.azure_client.compute_client.virtual_machine_scale_sets.begin_delete(
@@ -532,12 +556,22 @@ class VMSSHandler(AzureHandler):
                 "Submitted immediate delete for VMSS '%s' because return should empty it",
                 vmss_name,
             )
+            return {
+                "delete_submitted": True,
+                "delete_retry_pending": False,
+                "last_delete_error": None,
+            }
         except Exception as exc:
             self._logger.info(
                 "Immediate delete submission for VMSS '%s' did not succeed; async cleanup will retry: %s",
                 vmss_name,
                 exc,
             )
+            return {
+                "delete_submitted": False,
+                "delete_retry_pending": True,
+                "last_delete_error": str(exc),
+            }
 
     def _should_delete_vmss_when_empty(
         self,

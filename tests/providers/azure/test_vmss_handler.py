@@ -671,6 +671,9 @@ def test_vmss_release_marks_flexible_vmss_for_cleanup_when_last_instance_is_retu
         "vmss_name": "vmss-azure-test",
         "machine_ids": ["vm-a"],
         "delete_vmss_when_empty": True,
+        "delete_submission_semantics": "best_effort_without_reverification",
+        "delete_submitted": True,
+        "delete_retry_pending": False,
     }
     assert _deleted_vm_names(azure_client) == ["vm-a"]
     azure_client.compute_client.virtual_machine_scale_sets.begin_delete.assert_called_once_with(
@@ -703,6 +706,9 @@ def test_vmss_release_marks_flexible_vmss_for_cleanup_when_last_instance_id_shap
         "vmss_name": "vmss-azure-test",
         "machine_ids": ["guid-a"],
         "delete_vmss_when_empty": True,
+        "delete_submission_semantics": "best_effort_without_reverification",
+        "delete_submitted": True,
+        "delete_retry_pending": False,
     }
 
 
@@ -742,11 +748,48 @@ def test_vmss_release_marks_uniform_vmss_for_cleanup_when_last_instance_is_retur
         "vmss_name": "vmss-azure-test",
         "machine_ids": ["3"],
         "delete_vmss_when_empty": True,
+        "delete_submission_semantics": "best_effort_without_reverification",
+        "delete_submitted": True,
+        "delete_retry_pending": False,
     }
     azure_client.compute_client.virtual_machine_scale_sets.begin_delete.assert_called_once_with(
         resource_group_name="test-rg",
         vm_scale_set_name="vmss-azure-test",
     )
+
+
+def test_vmss_release_surfaces_retry_pending_when_immediate_empty_vmss_delete_fails():
+    azure_client = MagicMock()
+    logger = MagicMock()
+    handler = VMSSHandler(azure_client=azure_client, logger=logger)
+    handler._list_vmss_instances = MagicMock(  # type: ignore[method-assign]
+        return_value=[{"instance_id": "vm-a"}]
+    )
+
+    vmss = MagicMock()
+    vmss.orchestration_mode = AzureVMSSOrchestrationMode.FLEXIBLE.value
+    azure_client.compute_client.virtual_machine_scale_sets.get.return_value = vmss
+    azure_client.compute_client.virtual_machines.begin_delete.return_value = MagicMock()
+    azure_client.compute_client.virtual_machine_scale_sets.begin_delete.side_effect = RuntimeError(
+        "scale set still has deleting members"
+    )
+
+    result = handler.release_hosts(
+        machine_ids=["vm-a"],
+        resource_id="vmss-azure-test",
+        context={"resource_group": "test-rg"},
+    )
+
+    assert result["provider_data"]["pending_vmss_cleanup"] == {
+        "resource_group": "test-rg",
+        "vmss_name": "vmss-azure-test",
+        "machine_ids": ["vm-a"],
+        "delete_vmss_when_empty": True,
+        "delete_submission_semantics": "best_effort_without_reverification",
+        "delete_submitted": False,
+        "delete_retry_pending": True,
+        "last_delete_error": "scale set still has deleting members",
+    }
 
 
 def test_acquire_hosts_handles_missing_azure_error_message_without_key_error(monkeypatch):

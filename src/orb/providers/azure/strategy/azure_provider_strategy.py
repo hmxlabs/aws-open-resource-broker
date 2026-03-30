@@ -14,24 +14,25 @@ from typing import Any, Callable, Optional, Protocol, cast
 
 from pydantic import ValidationError as PydanticValidationError
 
-from orb.application.services.spot_placement_planner import (
-    PlacementScore,
-    PlacementPlanEntry,
-    SpotPlacementPlanner,
-)
 from orb.application.services.spot_placement_execution import (
     SpotPlacementExecutionService,
     build_planned_execution_metadata,
     create_acquire_request,
 )
-from orb.domain.base.exceptions import ValidationError as DomainValidationError
+from orb.application.services.spot_placement_planner import (
+    PlacementScore,
+    PlacementPlanEntry,
+    SpotPlacementPlanner,
+)
 from orb.domain.base.dependency_injection import injectable
+from orb.domain.base.exceptions import ValidationError as DomainValidationError
 from orb.domain.base.ports import LoggingPort
 from orb.providers.azure.configuration.config import AzureProviderConfig
 from orb.providers.azure.configuration.template_extension import AzureTemplateExtensionConfig
 from orb.providers.azure.configuration.validator import validate_azure_template
 from orb.providers.azure.domain.template.azure_template_aggregate import AzureTemplate
 from orb.providers.azure.domain.template.value_objects import AzureProviderApi
+from orb.providers.azure.exceptions.azure_exceptions import AzureError, AzureValidationError
 from orb.providers.azure.infrastructure.adapters.machine_adapter import AzureMachineAdapter
 from orb.providers.azure.infrastructure.azure_client import AzureClient
 from orb.providers.azure.infrastructure.error_utils import (
@@ -45,8 +46,11 @@ from orb.providers.azure.infrastructure.handlers.vmss_handler import VMSSHandler
 from orb.providers.azure.infrastructure.services.spot_placement_score_adapter import (
     AzureSpotPlacementScoreAdapter,
 )
+from orb.providers.azure.infrastructure.vmss_cleanup import (
+    VmssCleanupCoordinator,
+    VmssCleanupCoordinatorFactory,
+)
 from orb.providers.azure.managers.azure_resource_manager import AzureResourceManager
-from orb.providers.azure.exceptions.azure_exceptions import AzureError, AzureValidationError
 from orb.providers.azure.services.capability_service import AzureCapabilityService
 from orb.providers.base.strategy import (
     ProviderCapabilities,
@@ -56,6 +60,7 @@ from orb.providers.base.strategy import (
     ProviderResult,
     ProviderStrategy,
 )
+
 
 class _AzureVmWithName(Protocol):
     name: Optional[str]
@@ -105,55 +110,6 @@ class _OperationPreparationFailure(Exception):
 
 
 @dataclass
-class PendingVmssCleanup:
-    """Provider-owned follow-up state for empty-VMSS cleanup."""
-
-    resource_group: str
-    vmss_name: str
-    machine_ids: list[str]
-    delete_vmss_when_empty: bool
-    delete_submitted: bool = False
-
-    @classmethod
-    def from_metadata(cls, metadata: dict[str, Any]) -> Optional[PendingVmssCleanup]:
-        resource_group = metadata.get("resource_group")
-        vmss_name = metadata.get("vmss_name")
-        raw_machine_ids = metadata.get("machine_ids", [])
-        if resource_group in (None, "") or vmss_name in (None, ""):
-            return None
-        if not isinstance(raw_machine_ids, list):
-            return None
-
-        machine_ids = []
-        for machine_id in raw_machine_ids:
-            machine_id_str = str(machine_id)
-            if machine_id_str and machine_id_str not in machine_ids:
-                machine_ids.append(machine_id_str)
-
-        return cls(
-            resource_group=str(resource_group),
-            vmss_name=str(vmss_name),
-            machine_ids=machine_ids,
-            delete_vmss_when_empty=bool(metadata.get("delete_vmss_when_empty", False)),
-            delete_submitted=bool(metadata.get("delete_submitted", False)),
-        )
-
-    def combine_for_same_vmss(self, other: PendingVmssCleanup) -> PendingVmssCleanup:
-        merged_machine_ids = list(self.machine_ids)
-        for machine_id in other.machine_ids:
-            if machine_id not in merged_machine_ids:
-                merged_machine_ids.append(machine_id)
-
-        return PendingVmssCleanup(
-            resource_group=self.resource_group,
-            vmss_name=self.vmss_name,
-            machine_ids=merged_machine_ids,
-            delete_vmss_when_empty=self.delete_vmss_when_empty or other.delete_vmss_when_empty,
-            delete_submitted=self.delete_submitted or other.delete_submitted,
-        )
-
-
-@dataclass
 class VmssCapacitySnapshot:
     """Normalized VMSS capacity details for one scale set."""
 
@@ -187,6 +143,7 @@ class AzureProviderStrategy(ProviderStrategy):
         logger: LoggingPort,
         provider_instance_name: str,
         azure_client_resolver: Optional[Callable[[], AzureClient]] = None,
+        vmss_cleanup_coordinator_factory: Optional[VmssCleanupCoordinatorFactory] = None,
     ) -> None:
         if not isinstance(config, AzureProviderConfig):
             raise ValueError("AzureProviderStrategy requires AzureProviderConfig")
@@ -203,9 +160,16 @@ class AzureProviderStrategy(ProviderStrategy):
         self._spot_placement_planner = SpotPlacementPlanner()
         self._spot_placement_execution = SpotPlacementExecutionService()
         self._capability_service = AzureCapabilityService()
-        self._pending_vmss_cleanups: dict[tuple[str, str], PendingVmssCleanup] = {}
         self._lazy_init_lock = RLock()
-        self._pending_vmss_cleanups_lock = RLock()
+        cleanup_coordinator_factory = (
+            vmss_cleanup_coordinator_factory or VmssCleanupCoordinatorFactory()
+        )
+        self._vmss_cleanup_coordinator = cleanup_coordinator_factory.create(
+            logger=self._logger,
+            get_vmss_member_count=self._current_vmss_member_count,
+            vmss_exists=self._vmss_exists,
+            begin_delete_vmss=self._begin_delete_vmss,
+        )
 
     # ------------------------------------------------------------------
     # Lazy-initialised properties
@@ -736,8 +700,7 @@ class AzureProviderStrategy(ProviderStrategy):
         self._resource_manager = None
         self._deployment_service = None
         self._handlers = {}
-        with self._pending_vmss_cleanups_lock:
-            self._pending_vmss_cleanups.clear()
+        self._vmss_cleanup_coordinator.clear()
         self._initialized = False
         self._logger.debug("Azure provider cleaned up")
 
@@ -1654,43 +1617,13 @@ class AzureProviderStrategy(ProviderStrategy):
         return candidate_ids
 
     def _record_pending_vmss_cleanup(self, handler_result: Any) -> None:
-        if not isinstance(handler_result, dict):
-            return
-
-        provider_data = handler_result.get("provider_data")
-        if not isinstance(provider_data, dict):
-            return
-
-        pending_metadata = provider_data.get("pending_vmss_cleanup")
-        if not isinstance(pending_metadata, dict):
-            return
-
-        pending = PendingVmssCleanup.from_metadata(pending_metadata)
-        if pending is None:
-            return
-
-        key = (pending.resource_group, pending.vmss_name)
-        with self._pending_vmss_cleanups_lock:
-            existing = self._pending_vmss_cleanups.get(key)
-            self._pending_vmss_cleanups[key] = (
-                pending if existing is None else existing.combine_for_same_vmss(pending)
-            )
+        self._vmss_cleanup_coordinator.record(handler_result)
 
     def _restore_pending_vmss_cleanups(self, operation: ProviderOperation) -> None:
         """Rebuild pending VMSS cleanup state from durable request metadata."""
-        request_metadata = self._request_metadata(operation)
-
-        direct_pending = request_metadata.get("pending_vmss_cleanup")
-        if isinstance(direct_pending, dict):
-            self._record_pending_vmss_cleanup({"provider_data": request_metadata})
-
-        termination_requests = request_metadata.get("termination_requests")
-        if not isinstance(termination_requests, list):
-            return
-
-        for termination_request in termination_requests:
-            if isinstance(termination_request, dict):
-                self._record_pending_vmss_cleanup({"provider_data": termination_request})
+        self._vmss_cleanup_coordinator.restore_from_request_metadata(
+            self._request_metadata(operation)
+        )
 
     def _has_pending_vmss_cleanup(
         self,
@@ -1698,15 +1631,10 @@ class AzureProviderStrategy(ProviderStrategy):
         resource_group: Optional[str],
         resource_ids: list[str],
     ) -> bool:
-        if not resource_group:
-            return False
-
-        with self._pending_vmss_cleanups_lock:
-            for resource_id in resource_ids:
-                key = (str(resource_group), str(resource_id))
-                if key in self._pending_vmss_cleanups:
-                    return True
-            return False
+        return self._vmss_cleanup_coordinator.has_pending(
+            resource_group=resource_group,
+            resource_ids=resource_ids,
+        )
 
     def _vmss_cleanup_status_metadata(
         self,
@@ -1714,12 +1642,10 @@ class AzureProviderStrategy(ProviderStrategy):
         resource_group: Optional[str],
         resource_ids: list[str],
     ) -> dict[str, Any]:
-        return {
-            "termination_follow_up_pending": self._has_pending_vmss_cleanup(
-                resource_group=resource_group,
-                resource_ids=resource_ids,
-            )
-        }
+        return self._vmss_cleanup_coordinator.status_metadata(
+            resource_group=resource_group,
+            resource_ids=resource_ids,
+        )
 
     def _current_vmss_member_count(self, *, resource_group: str, vmss_name: str) -> Optional[int]:
         if not self.resource_manager:
@@ -1739,6 +1665,15 @@ class AzureProviderStrategy(ProviderStrategy):
             vmss_name=vmss_name,
         )
 
+    def _begin_delete_vmss(self, *, resource_group: str, vmss_name: str) -> None:
+        azure_client = self.azure_client
+        if not azure_client:
+            raise RuntimeError("Azure client not available for VMSS cleanup delete")
+        azure_client.compute_client.virtual_machine_scale_sets.begin_delete(
+            resource_group_name=resource_group,
+            vm_scale_set_name=vmss_name,
+        )
+
     def _maybe_cleanup_pending_vmss(
         self,
         *,
@@ -1746,16 +1681,11 @@ class AzureProviderStrategy(ProviderStrategy):
         resource_ids: list[str],
         instance_details: list[dict[str, Any]],
     ) -> None:
-        if not resource_group or not resource_ids:
-            return
-
-        observed_ids = self._observed_status_ids(instance_details)
-        for vmss_name in self._dedupe_resource_ids(resource_ids):
-            self._maybe_cleanup_pending_vmss_resource(
-                resource_group=str(resource_group),
-                vmss_name=vmss_name,
-                observed_ids=observed_ids,
-            )
+        self._vmss_cleanup_coordinator.reconcile(
+            resource_group=resource_group,
+            resource_ids=resource_ids,
+            observed_ids=self._observed_status_ids(instance_details),
+        )
 
     @staticmethod
     def _observed_status_ids(instance_details: list[dict[str, Any]]) -> set[str]:
@@ -1772,103 +1702,6 @@ class AzureProviderStrategy(ProviderStrategy):
             if vmss_name and vmss_name not in deduped:
                 deduped.append(vmss_name)
         return deduped
-
-    def _maybe_cleanup_pending_vmss_resource(
-        self,
-        *,
-        resource_group: str,
-        vmss_name: str,
-        observed_ids: set[str],
-    ) -> None:
-        key = (resource_group, vmss_name)
-        with self._pending_vmss_cleanups_lock:
-            pending = self._pending_vmss_cleanups.get(key)
-        if not pending:
-            return
-
-        requested_ids = set(pending.machine_ids)
-        if not requested_ids:
-            with self._pending_vmss_cleanups_lock:
-                self._pending_vmss_cleanups.pop(key, None)
-            return
-
-        if pending.delete_submitted:
-            self._clear_submitted_cleanup_if_vmss_is_gone(
-                resource_group=resource_group,
-                vmss_name=vmss_name,
-            )
-            return
-
-        if requested_ids & observed_ids:
-            return
-
-        try:
-            if self._submit_vmss_delete_if_empty(
-                key=key,
-                pending=pending,
-                resource_group=resource_group,
-                vmss_name=vmss_name,
-            ):
-                return
-            with self._pending_vmss_cleanups_lock:
-                self._pending_vmss_cleanups.pop(key, None)
-        except Exception as exc:
-            with self._pending_vmss_cleanups_lock:
-                current = self._pending_vmss_cleanups.get(key)
-                if current is not None:
-                    current.delete_submitted = False
-            self._logger.warning(
-                "Failed to clean up pending VMSS '%s' in '%s': %s",
-                vmss_name,
-                resource_group,
-                exc,
-            )
-
-    def _clear_submitted_cleanup_if_vmss_is_gone(
-        self,
-        *,
-        resource_group: str,
-        vmss_name: str,
-    ) -> None:
-        if self._vmss_exists(resource_group=resource_group, vmss_name=vmss_name) is False:
-            with self._pending_vmss_cleanups_lock:
-                self._pending_vmss_cleanups.pop((resource_group, vmss_name), None)
-
-    def _submit_vmss_delete_if_empty(
-        self,
-        *,
-        key: tuple[str, str],
-        pending: PendingVmssCleanup,
-        resource_group: str,
-        vmss_name: str,
-    ) -> bool:
-        if not pending.delete_vmss_when_empty:
-            return False
-
-        member_count = self._current_vmss_member_count(
-            resource_group=resource_group,
-            vmss_name=vmss_name,
-        )
-        if member_count is None or member_count > 0:
-            return True
-
-        azure_client = self.azure_client
-        if not azure_client:
-            return False
-
-        with self._pending_vmss_cleanups_lock:
-            current = self._pending_vmss_cleanups.get(key)
-            if current is None:
-                return False
-            if current.delete_submitted:
-                return True
-            current.delete_submitted = True
-
-        azure_client.compute_client.virtual_machine_scale_sets.begin_delete(
-            resource_group_name=resource_group,
-            vm_scale_set_name=vmss_name,
-        )
-        return True
 
     # ------------------------------------------------------------------
     # DESCRIBE_RESOURCE_INSTANCES
