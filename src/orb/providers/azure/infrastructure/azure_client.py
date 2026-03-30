@@ -25,8 +25,10 @@ Note:
 from __future__ import annotations
 
 import threading
-from typing import TYPE_CHECKING, Any, Optional, Protocol
+from typing import TYPE_CHECKING, Any, Optional, Protocol, cast
 
+from orb.config import PerformanceConfig
+from orb.domain.base.exceptions import ConfigurationError
 from orb.domain.base.dependency_injection import injectable
 from orb.domain.base.ports import LoggingPort
 from orb.monitoring.metrics import MetricsCollector
@@ -62,6 +64,65 @@ class AzureCredentialProtocol(Protocol):
     """Credential surface this module requires from Azure identity objects."""
 
     def get_token(self, *scopes: str, **kwargs: Any) -> Any: ...
+
+
+class AzureResourceRefProtocol(Protocol):
+    """Minimal ARM resource reference carrying an Azure resource ID."""
+
+    id: Optional[str]
+
+
+class AzureNicReferencePropertiesProtocol(Protocol):
+    """Subset of NIC reference properties used for primary-NIC ordering."""
+
+    primary: bool
+
+
+class AzureNicReferenceProtocol(AzureResourceRefProtocol, Protocol):
+    """NIC reference shape exposed from a VM network profile."""
+
+    properties: AzureNicReferencePropertiesProtocol
+
+
+class AzureNetworkProfileProtocol(Protocol):
+    """VM network profile surface needed for NIC reference enumeration."""
+
+    network_interfaces: list[AzureNicReferenceProtocol]
+
+
+class AzureIpConfigurationPropertiesProtocol(Protocol):
+    """Fallback property bag exposed by Azure IP configuration objects."""
+
+    private_ip_address: Optional[str]
+    subnet: Optional[AzureResourceRefProtocol]
+    public_ip_address: Optional[AzureResourceRefProtocol]
+
+
+class AzureIpConfigurationProtocol(Protocol):
+    """IP configuration fields used to resolve private/public network identity."""
+
+    private_ip_address: Optional[str]
+    subnet: Optional[AzureResourceRefProtocol]
+    public_ip_address: Optional[AzureResourceRefProtocol]
+    properties: AzureIpConfigurationPropertiesProtocol
+
+
+class AzureNicProtocol(Protocol):
+    """NIC surface used to enumerate IP configurations."""
+
+    ip_configurations: list[AzureIpConfigurationProtocol]
+
+
+class AzurePublicIpProtocol(Protocol):
+    """Public IP resource surface used to read the resolved IP address."""
+
+    ip_address: Optional[str]
+
+
+class AzureVmNetworkIdentityProtocol(Protocol):
+    """VM surface used to enter the network-identity resolution flow."""
+
+    network_profile: Optional[AzureNetworkProfileProtocol]
 
 
 @injectable
@@ -199,10 +260,12 @@ class AzureClient:
 
         try:
             self._azure_config = self._config_manager.get_typed(AzureProviderConfig)
-            if self._azure_config is not None:
-                self._logger.debug("Loaded Azure provider config via configuration port")
-        except Exception as e:
-            self._logger.debug("Could not load Azure provider config: %s", e)
+        except ConfigurationError as exc:
+            self._logger.debug("Could not load Azure provider config: %s", exc)
+            return None
+
+        if self._azure_config is not None:
+            self._logger.debug("Loaded Azure provider config via configuration port")
 
         return self._azure_config
 
@@ -493,7 +556,7 @@ class AzureClient:
             self._credentials_validated = True
             self._logger.info("Azure credentials validated successfully")
             return True
-        except Exception as exc:
+        except self._credential_validation_error_types() as exc:
             self._logger.error("Azure credential validation failed: %s", exc)
             return False
 
@@ -515,7 +578,7 @@ class AzureClient:
                 sub.state,
             )
             return True
-        except Exception as exc:
+        except self._subscription_validation_error_types() as exc:
             self._logger.error(
                 "Azure subscription validation failed for %s: %s",
                 self.subscription_id,
@@ -527,45 +590,9 @@ class AzureClient:
     # Performance / caching configuration
     # ------------------------------------------------------------------
 
-    def _load_performance_config(self) -> dict[str, Any]:
-        """Load performance configuration from the configuration port.
-
-        Returns:
-            Performance configuration dictionary with sensible defaults.
-        """
-        try:
-            from orb.config import PerformanceConfig
-
-            perf_config = self._config_manager.get_typed(PerformanceConfig)
-            if perf_config:
-                self._logger.debug(
-                    "Loaded performance configuration from ConfigurationManager"
-                )
-                return {
-                    "enable_batching": perf_config.enable_batching,
-                    "batch_sizes": {
-                        "deallocate_vms": perf_config.batch_sizes.terminate_instances
-                        if hasattr(perf_config.batch_sizes, "terminate_instances")
-                        else 25,
-                        "create_tags": perf_config.batch_sizes.create_tags
-                        if hasattr(perf_config.batch_sizes, "create_tags")
-                        else 20,
-                        "describe_vms": perf_config.batch_sizes.describe_instances
-                        if hasattr(perf_config.batch_sizes, "describe_instances")
-                        else 25,
-                    },
-                    "enable_parallel": perf_config.enable_parallel,
-                    "max_workers": perf_config.max_workers,
-                    "enable_caching": perf_config.enable_caching,
-                    "cache_ttl": perf_config.cache_ttl,
-                }
-        except Exception as e:
-            self._logger.debug(
-                "Could not load performance config from ConfigurationManager: %s",
-                e,
-            )
-
-        # Sensible defaults
+    @staticmethod
+    def _default_performance_config() -> dict[str, Any]:
+        """Return the default Azure client performance settings."""
         return {
             "enable_batching": True,
             "batch_sizes": {
@@ -578,6 +605,42 @@ class AzureClient:
             "enable_caching": True,
             "cache_ttl": 300,
         }
+
+    @classmethod
+    def _map_performance_config(cls, perf_config: PerformanceConfig) -> dict[str, Any]:
+        """Project the shared performance config onto Azure client settings."""
+        performance_settings = cls._default_performance_config()
+        performance_settings.update(
+            {
+                "enable_batching": perf_config.enable_batching,
+                "enable_parallel": perf_config.enable_parallel,
+                "max_workers": perf_config.max_workers,
+                "enable_caching": perf_config.caching.request_status.enabled,
+                "cache_ttl": perf_config.caching.request_status.ttl_seconds,
+            }
+        )
+        return performance_settings
+
+    def _load_performance_config(self) -> dict[str, Any]:
+        """Load performance configuration from the configuration port."""
+        try:
+            perf_config = self._config_manager.get_typed(PerformanceConfig)
+        except ConfigurationError as exc:
+            self._logger.debug(
+                "Could not load performance config from ConfigurationManager: %s",
+                exc,
+            )
+            return self._default_performance_config()
+
+        if not isinstance(perf_config, PerformanceConfig):
+            self._logger.debug(
+                "Ignoring unexpected performance config type: %s",
+                type(perf_config).__name__,
+            )
+            return self._default_performance_config()
+
+        self._logger.debug("Loaded performance configuration from ConfigurationManager")
+        return self._map_performance_config(perf_config)
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -592,13 +655,96 @@ class AzureClient:
             )
 
     @staticmethod
-    def _sdk_attr(value: Any, attr: str, default: Any = None) -> Any:
-        """Read an SDK-style attribute from an Azure SDK model or test double."""
+    def _credential_validation_error_types() -> tuple[type[BaseException], ...]:
+        """Return errors that should result in a soft credential validation failure."""
+        azure_error_type: Optional[type[BaseException]]
+        client_authentication_error_type: Optional[type[BaseException]]
+        error_types: list[type[BaseException]] = [AuthenticationError]
+        try:
+            from azure.core.exceptions import AzureError, ClientAuthenticationError
+
+            azure_error_type = AzureError
+            client_authentication_error_type = ClientAuthenticationError
+        except ImportError:
+            azure_error_type = None
+            client_authentication_error_type = None
+
+        if azure_error_type is not None:
+            error_types.append(azure_error_type)
+        if client_authentication_error_type is not None:
+            error_types.append(client_authentication_error_type)
+
+        return tuple(dict.fromkeys(error_types))
+
+    @classmethod
+    def _subscription_validation_error_types(cls) -> tuple[type[BaseException], ...]:
+        """Return errors that should result in a soft subscription validation failure."""
+        error_types: list[type[BaseException]] = [AzureConfigurationError]
+        error_types.extend(cls._credential_validation_error_types())
+        return tuple(dict.fromkeys(error_types))
+
+    @staticmethod
+    def _network_lookup_error_types() -> tuple[type[BaseException], ...]:
+        """Return Azure/network lookup errors that should not abort status enrichment."""
+        azure_error_type: Optional[type[BaseException]]
+        error_types: list[type[BaseException]] = [AzureConfigurationError]
+        try:
+            from azure.core.exceptions import AzureError
+
+            azure_error_type = AzureError
+        except ImportError:
+            azure_error_type = None
+
+        if azure_error_type is not None:
+            error_types.append(azure_error_type)
+
+        return tuple(dict.fromkeys(error_types))
+
+    @staticmethod
+    def _network_profile_from_vm(vm: Any) -> Optional[AzureNetworkProfileProtocol]:
+        return cast(AzureVmNetworkIdentityProtocol, vm).network_profile
+
+    @staticmethod
+    def _network_interface_refs_from_profile(
+        network_profile: Optional[AzureNetworkProfileProtocol],
+    ) -> list[AzureNicReferenceProtocol]:
+        if network_profile is None:
+            return []
+        return list(network_profile.network_interfaces or [])
+
+    @staticmethod
+    def _is_primary_nic_ref(nic_ref: AzureNicReferenceProtocol) -> bool:
+        return bool(nic_ref.properties.primary)
+
+    @staticmethod
+    def _resource_id(value: Optional[AzureResourceRefProtocol]) -> Optional[str]:
         if value is None:
-            return default
-        if hasattr(value, attr):
-            return getattr(value, attr)
-        return default
+            return None
+        return value.id
+
+    @staticmethod
+    def _ip_configurations_from_nic(nic: Any) -> list[AzureIpConfigurationProtocol]:
+        return list(cast(AzureNicProtocol, nic).ip_configurations or [])
+
+    @staticmethod
+    def _private_ip_from_ip_config(ip_config: AzureIpConfigurationProtocol) -> Optional[str]:
+        return ip_config.private_ip_address or ip_config.properties.private_ip_address
+
+    @staticmethod
+    def _subnet_from_ip_config(
+        ip_config: AzureIpConfigurationProtocol,
+    ) -> Optional[AzureResourceRefProtocol]:
+        return ip_config.subnet or ip_config.properties.subnet
+
+    @staticmethod
+    def _public_ip_ref_from_ip_config(
+        ip_config: AzureIpConfigurationProtocol,
+    ) -> Optional[AzureResourceRefProtocol]:
+        return ip_config.public_ip_address or ip_config.properties.public_ip_address
+
+    @staticmethod
+    def _public_ip_address_from_resource(public_ip_resource: Any) -> Optional[str]:
+        return cast(AzurePublicIpProtocol, public_ip_resource).ip_address
 
     @classmethod
     def extract_resource_group_and_name_from_arm_id(
@@ -634,11 +780,14 @@ class AzureClient:
 
     def resolve_network_identity_from_vm(self, vm: Any) -> dict[str, Any]:
         """Resolve network identity fields from a VM or VMSS VM object."""
-        net_profile = self._sdk_attr(vm, "network_profile")
-        nic_refs = self._sdk_attr(net_profile, "network_interfaces", []) or []
+        net_profile = self._network_profile_from_vm(vm)
+        nic_refs = self._network_interface_refs_from_profile(net_profile)
         return self.resolve_network_identity_from_nic_refs(nic_refs)
 
-    def resolve_network_identity_from_nic_refs(self, nic_refs: list[Any]) -> dict[str, Any]:
+    def resolve_network_identity_from_nic_refs(
+        self,
+        nic_refs: list[AzureNicReferenceProtocol],
+    ) -> dict[str, Any]:
         """Resolve private/public IP and subnet/VNet identity from NIC refs."""
         network_identity = {
             "private_ip": None,
@@ -653,13 +802,11 @@ class AzureClient:
 
         ordered_refs = sorted(
             nic_refs,
-            key=lambda ref: (
-                not bool(self._sdk_attr(self._sdk_attr(ref, "properties", {}), "primary", False))
-            ),
+            key=lambda ref: not self._is_primary_nic_ref(ref),
         )
 
         for nic_ref in ordered_refs:
-            nic_id = self._sdk_attr(nic_ref, "id")
+            nic_id = self._resource_id(nic_ref)
             if not nic_id:
                 continue
 
@@ -673,24 +820,19 @@ class AzureClient:
                     resource_group_name=nic_rg,
                     network_interface_name=nic_name,
                 )
-            except Exception as exc:
+            except self._network_lookup_error_types() as exc:
                 self._logger.debug("Failed to resolve NIC %s: %s", nic_id, exc)
                 continue
 
-            ip_configs = self._sdk_attr(nic, "ip_configurations", []) or []
+            ip_configs = self._ip_configurations_from_nic(nic)
             for ip_cfg in ip_configs:
-                ip_cfg_props = self._sdk_attr(ip_cfg, "properties", {})
-                private_ip = self._sdk_attr(ip_cfg, "private_ip_address") or self._sdk_attr(
-                    ip_cfg_props, "private_ip_address"
-                )
-                subnet = self._sdk_attr(ip_cfg, "subnet") or self._sdk_attr(ip_cfg_props, "subnet")
-                subnet_id = self._sdk_attr(subnet, "id")
-                public_ip_ref = self._sdk_attr(ip_cfg, "public_ip_address") or self._sdk_attr(
-                    ip_cfg_props, "public_ip_address"
-                )
+                private_ip = self._private_ip_from_ip_config(ip_cfg)
+                subnet = self._subnet_from_ip_config(ip_cfg)
+                subnet_id = self._resource_id(subnet)
+                public_ip_ref = self._public_ip_ref_from_ip_config(ip_cfg)
 
                 public_ip = None
-                public_ip_id = self._sdk_attr(public_ip_ref, "id")
+                public_ip_id = self._resource_id(public_ip_ref)
                 if public_ip_id:
                     public_ip_lookup = self.extract_resource_group_and_name_from_arm_id(
                         str(public_ip_id)
@@ -702,8 +844,8 @@ class AzureClient:
                                 resource_group_name=pip_rg,
                                 public_ip_address_name=pip_name,
                             )
-                            public_ip = self._sdk_attr(pip, "ip_address")
-                        except Exception as exc:
+                            public_ip = self._public_ip_address_from_resource(pip)
+                        except self._network_lookup_error_types() as exc:
                             self._logger.debug(
                                 "Failed to resolve public IP %s: %s", public_ip_id, exc
                             )

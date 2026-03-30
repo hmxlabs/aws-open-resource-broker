@@ -7,6 +7,8 @@ import pytest
 from unittest.mock import MagicMock, Mock, patch
 
 from orb.bootstrap.infrastructure_services import register_infrastructure_services
+from orb.config import PerformanceConfig
+from orb.domain.base.exceptions import ConfigurationError
 from orb.domain.base.value_objects import InstanceId, InstanceType
 from orb.domain.base.ports.logging_port import LoggingPort
 from orb.domain.template.factory import TemplateFactory
@@ -19,6 +21,7 @@ from orb.providers.azure.configuration.validator import (
 )
 from orb.providers.azure.configuration.template_extension import AzureTemplateExtensionConfig
 from orb.providers.azure.exceptions.azure_exceptions import (
+    AuthenticationError,
     AzureError,
     AzureConfigurationError,
     VMNotFoundError,
@@ -571,6 +574,113 @@ class TestAzureAuthStrategy:
         fake_ctor.assert_called_once_with()
 
 
+class TestAzureClientOperationalBehavior:
+    def test_azure_client_maps_typed_performance_config(self):
+        azure_config = AzureProviderConfig(
+            subscription_id="12345678-1234-1234-1234-123456789012",
+            resource_group="rg-explicit",
+            region="westeurope",
+        )
+        perf_config = PerformanceConfig(
+            enable_batching=False,
+            enable_parallel=False,
+            max_workers=3,
+            caching={"request_status": {"enabled": False, "ttl_seconds": 42}},
+        )
+        config_port = MagicMock()
+        config_port.get_typed.side_effect = lambda config_type: (
+            azure_config if config_type is AzureProviderConfig else perf_config
+        )
+
+        client = AzureClient(config=config_port, logger=MagicMock())
+
+        assert client.perf_config["enable_batching"] is False
+        assert client.perf_config["enable_parallel"] is False
+        assert client.perf_config["max_workers"] == 3
+        assert client.perf_config["enable_caching"] is False
+        assert client.perf_config["cache_ttl"] == 42
+        assert client.perf_config["batch_sizes"] == {
+            "deallocate_vms": 25,
+            "create_tags": 20,
+            "describe_vms": 25,
+        }
+
+    def test_azure_client_falls_back_to_default_performance_config_on_config_error(self):
+        azure_config = AzureProviderConfig(
+            subscription_id="12345678-1234-1234-1234-123456789012",
+            resource_group="rg-explicit",
+            region="westeurope",
+        )
+        config_port = MagicMock()
+
+        def get_typed(config_type):
+            if config_type is AzureProviderConfig:
+                return azure_config
+            if config_type is PerformanceConfig:
+                raise ConfigurationError("perf config missing")
+            raise AssertionError(f"unexpected config type {config_type}")
+
+        config_port.get_typed.side_effect = get_typed
+
+        client = AzureClient(config=config_port, logger=MagicMock())
+
+        assert client.perf_config["enable_batching"] is True
+        assert client.perf_config["enable_parallel"] is True
+        assert client.perf_config["max_workers"] == 10
+        assert client.perf_config["enable_caching"] is True
+        assert client.perf_config["cache_ttl"] == 300
+
+    def test_validate_credentials_returns_false_for_authentication_error(self):
+        client = object.__new__(AzureClient)
+        client._logger = MagicMock()
+        client._credentials_validated = False
+        type(client).credential = property(
+            lambda _self: MagicMock(
+                get_token=MagicMock(side_effect=AuthenticationError("bad credential"))
+            )
+        )
+
+        try:
+            assert AzureClient.validate_credentials(client) is False
+        finally:
+            del type(client).credential
+
+    def test_validate_credentials_reraises_unexpected_errors(self):
+        client = object.__new__(AzureClient)
+        client._logger = MagicMock()
+        client._credentials_validated = False
+        type(client).credential = property(
+            lambda _self: MagicMock(get_token=MagicMock(side_effect=RuntimeError("boom")))
+        )
+
+        try:
+            with pytest.raises(RuntimeError, match="boom"):
+                AzureClient.validate_credentials(client)
+        finally:
+            del type(client).credential
+
+    def test_validate_subscription_returns_false_for_known_azure_errors(self):
+        from azure.core.exceptions import ResourceNotFoundError
+
+        client = object.__new__(AzureClient)
+        client._logger = MagicMock()
+        client.subscription_id = "12345678-1234-1234-1234-123456789012"
+        client._subscription_client = MagicMock()
+        client._subscription_client.subscriptions.get.side_effect = ResourceNotFoundError("missing")
+
+        assert AzureClient.validate_subscription(client) is False
+
+    def test_validate_subscription_reraises_unexpected_errors(self):
+        client = object.__new__(AzureClient)
+        client._logger = MagicMock()
+        client.subscription_id = "12345678-1234-1234-1234-123456789012"
+        client._subscription_client = MagicMock()
+        client._subscription_client.subscriptions.get.side_effect = RuntimeError("boom")
+
+        with pytest.raises(RuntimeError, match="boom"):
+            AzureClient.validate_subscription(client)
+
+
 class TestAzureValidationAdapter:
     def test_validate_template_configuration_uses_azure_rules(self):
         adapter = AzureValidationAdapter(config=AzureProviderConfig(), logger=MagicMock())
@@ -833,6 +943,52 @@ class TestAzureClientNetworkResolution:
         assert result["subnet_id"].endswith("/subnets/default")
         assert result["vnet_id"].endswith("/virtualNetworks/test-vnet")
         assert result["nic_name"] == "nic-vm-1"
+
+    def test_resolve_network_identity_skips_known_nic_lookup_errors(self):
+        from azure.core.exceptions import ResourceNotFoundError
+
+        azure_client = object.__new__(AzureClient)
+        azure_client._logger = MagicMock()
+        azure_client._network_client = MagicMock()
+
+        nic_ref = MagicMock()
+        nic_ref.id = (
+            "/subscriptions/sub/resourceGroups/test-rg/providers/"
+            "Microsoft.Network/networkInterfaces/nic-vm-1"
+        )
+        nic_ref.properties.primary = True
+
+        azure_client.network_client.network_interfaces.get.side_effect = ResourceNotFoundError(
+            "missing"
+        )
+
+        result = AzureClient.resolve_network_identity_from_nic_refs(azure_client, [nic_ref])
+
+        assert result == {
+            "private_ip": None,
+            "public_ip": None,
+            "subnet_id": None,
+            "vnet_id": None,
+            "nic_id": None,
+            "nic_name": None,
+        }
+
+    def test_resolve_network_identity_reraises_unexpected_nic_lookup_errors(self):
+        azure_client = object.__new__(AzureClient)
+        azure_client._logger = MagicMock()
+        azure_client._network_client = MagicMock()
+
+        nic_ref = MagicMock()
+        nic_ref.id = (
+            "/subscriptions/sub/resourceGroups/test-rg/providers/"
+            "Microsoft.Network/networkInterfaces/nic-vm-1"
+        )
+        nic_ref.properties.primary = True
+
+        azure_client.network_client.network_interfaces.get.side_effect = RuntimeError("boom")
+
+        with pytest.raises(RuntimeError, match="boom"):
+            AzureClient.resolve_network_identity_from_nic_refs(azure_client, [nic_ref])
 
 
 class TestAzureResourceManager:
