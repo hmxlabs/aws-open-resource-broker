@@ -1,0 +1,116 @@
+"""Focused tests for AzureValidationAdapter."""
+
+from unittest.mock import MagicMock
+
+from orb.providers.azure.configuration.config import AzureProviderConfig
+from orb.providers.azure.infrastructure.adapters.azure_validation_adapter import (
+    AzureValidationAdapter,
+)
+from orb.providers.azure.registration import create_azure_validator
+
+
+def test_validate_template_configuration_uses_azure_rules():
+    adapter = AzureValidationAdapter(config=AzureProviderConfig(), logger=MagicMock())
+
+    result = adapter.validate_template_configuration({
+        "provider_api": "VMSS",
+        "template_id": "t1",
+        "vm_size": "Standard_D4s_v5",
+        "resource_group": "rg",
+        "location": "eastus2",
+        "ssh_public_keys": ["ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQC7 test@host"],
+        "image": {"publisher": "C", "offer": "o", "sku": "s"},
+    })
+
+    assert result["valid"] is True
+    assert "provider_api" in result["validated_fields"]
+
+
+def test_validate_template_configuration_rejects_unsupported_provider_api():
+    adapter = AzureValidationAdapter(config=AzureProviderConfig(), logger=MagicMock())
+
+    result = adapter.validate_template_configuration({
+        "provider_api": "BogusApi",
+        "template_id": "t1",
+        "vm_size": "Standard_D4s_v5",
+        "resource_group": "rg",
+        "location": "eastus2",
+        "ssh_public_keys": ["ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQC7 test@host"],
+        "image": {"publisher": "C", "offer": "o", "sku": "s"},
+    })
+
+    assert result["valid"] is False
+    assert any("Unsupported provider API" in error for error in result["errors"])
+
+
+def test_validate_provider_api_fallback_accepts_vmss_uniform():
+    adapter = AzureValidationAdapter(config=AzureProviderConfig(), logger=MagicMock())
+
+    assert adapter.validate_provider_api("VMSSUniform") is True
+
+
+def test_validate_provider_api_does_not_accept_dead_config_only_api_names():
+    adapter = AzureValidationAdapter(config=AzureProviderConfig(), logger=MagicMock())
+
+    assert adapter.validate_provider_api("AzureFleet") is False
+    assert "AzureFleet" not in adapter.get_supported_provider_apis()
+
+
+def test_get_api_capabilities_reports_spot_support_for_vmss():
+    adapter = AzureValidationAdapter(config=AzureProviderConfig(), logger=MagicMock())
+
+    capabilities = adapter.get_api_capabilities("VMSS")
+
+    assert capabilities["supports_spot"] is True
+    assert capabilities["supports_on_demand"] is True
+    assert capabilities["max_instances"] == 1000
+
+
+def test_validate_template_configuration_rejects_spot_percentage_for_uniform():
+    adapter = AzureValidationAdapter(config=AzureProviderConfig(), logger=MagicMock())
+
+    result = adapter.validate_template_configuration({
+        "provider_api": "VMSS",
+        "template_id": "t1",
+        "orchestration_mode": "Uniform",
+        "spot_percentage": 70,
+        "vm_size": "Standard_D4s_v5",
+        "resource_group": "rg",
+        "location": "eastus2",
+        "ssh_public_keys": ["ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQC7 test@host"],
+        "image": {"publisher": "C", "offer": "o", "sku": "s"},
+    })
+
+    assert result["valid"] is False
+    assert any("spot_percentage requires Flexible orchestration mode" in error for error in result["errors"])
+
+
+def test_validate_template_configuration_accepts_spot_percentage_without_spot_priority():
+    adapter = AzureValidationAdapter(config=AzureProviderConfig(), logger=MagicMock())
+
+    result = adapter.validate_template_configuration({
+        "provider_api": "VMSS",
+        "template_id": "t1",
+        "spot_percentage": 70,
+        "vm_size": "Standard_D4s_v5",
+        "resource_group": "rg",
+        "location": "eastus2",
+        "ssh_public_keys": ["ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQC7 test@host"],
+        "image": {"publisher": "C", "offer": "o", "sku": "s"},
+    })
+
+    assert result["valid"] is True
+    assert result["errors"] == []
+
+
+def test_create_azure_validator_returns_adapter():
+    validator = create_azure_validator(
+        {
+            "subscription_id": "12345678-1234-1234-1234-123456789012",
+            "resource_group": "rg",
+            "region": "eastus2",
+        }
+    )
+
+    assert isinstance(validator, AzureValidationAdapter)
+

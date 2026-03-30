@@ -115,3 +115,116 @@ def test_vmss_cleanup_coordinator_reconciles_delete_retry_state():
         ],
     }
     logger.warning.assert_called_once()
+
+
+def test_vmss_cleanup_coordinator_restores_pending_state_from_request_metadata():
+    logger = MagicMock()
+    coordinator = VmssCleanupCoordinator(
+        logger=logger,
+        get_vmss_member_count=lambda **_: 1,
+        vmss_exists=lambda **_: True,
+        begin_delete_vmss=lambda **_: None,
+    )
+
+    coordinator.restore_from_request_metadata(
+        {
+            "termination_requests": [
+                {
+                    "pending_vmss_cleanup": {
+                        "resource_group": "test-rg",
+                        "vmss_name": "vmss-demo",
+                        "machine_ids": ["vm-a"],
+                        "delete_vmss_when_empty": True,
+                    }
+                }
+            ]
+        }
+    )
+
+    assert coordinator.has_pending(resource_group="test-rg", resource_ids=["vmss-demo"]) is True
+    assert coordinator.status_metadata(
+        resource_group="test-rg",
+        resource_ids=["vmss-demo"],
+    )["termination_follow_up_details"] == [
+        {
+            "resource_group": "test-rg",
+            "vmss_name": "vmss-demo",
+            "machine_ids": ["vm-a"],
+            "delete_vmss_when_empty": True,
+            "delete_submission_semantics": "best_effort_without_reverification",
+            "delete_submitted": False,
+            "delete_retry_pending": False,
+        }
+    ]
+
+
+def test_vmss_cleanup_coordinator_clears_pending_state():
+    coordinator = VmssCleanupCoordinator(
+        logger=MagicMock(),
+        get_vmss_member_count=lambda **_: 1,
+        vmss_exists=lambda **_: True,
+        begin_delete_vmss=lambda **_: None,
+    )
+    coordinator.record(
+        {
+            "provider_data": {
+                "pending_vmss_cleanup": {
+                    "resource_group": "test-rg",
+                    "vmss_name": "vmss-demo",
+                    "machine_ids": ["vm-a"],
+                    "delete_vmss_when_empty": True,
+                }
+            }
+        }
+    )
+
+    coordinator.clear()
+
+    assert coordinator.has_pending(resource_group="test-rg", resource_ids=["vmss-demo"]) is False
+
+
+def test_vmss_cleanup_coordinator_submits_delete_when_vmss_is_empty():
+    begin_delete_vmss = MagicMock()
+    coordinator = VmssCleanupCoordinator(
+        logger=MagicMock(),
+        get_vmss_member_count=lambda **_: 0,
+        vmss_exists=lambda **_: True,
+        begin_delete_vmss=begin_delete_vmss,
+    )
+    coordinator.record(
+        {
+            "provider_data": {
+                "pending_vmss_cleanup": {
+                    "resource_group": "test-rg",
+                    "vmss_name": "vmss-demo",
+                    "machine_ids": ["vm-a"],
+                    "delete_vmss_when_empty": True,
+                }
+            }
+        }
+    )
+
+    coordinator.reconcile(
+        resource_group="test-rg",
+        resource_ids=["vmss-demo"],
+        observed_ids=set(),
+    )
+
+    begin_delete_vmss.assert_called_once_with(resource_group="test-rg", vmss_name="vmss-demo")
+    assert coordinator.status_metadata(
+        resource_group="test-rg",
+        resource_ids=["vmss-demo"],
+    ) == {
+        "termination_follow_up_pending": True,
+        "termination_follow_up_details": [
+            {
+                "resource_group": "test-rg",
+                "vmss_name": "vmss-demo",
+                "machine_ids": ["vm-a"],
+                "delete_vmss_when_empty": True,
+                "delete_submission_semantics": "best_effort_without_reverification",
+                "delete_submitted": True,
+                "delete_retry_pending": False,
+            }
+        ],
+    }
