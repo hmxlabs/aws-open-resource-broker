@@ -19,7 +19,11 @@ class CycleCloudConfig(BaseModel):
     )
     verify_ssl: Optional[bool] = Field(
         None,
-        description="Whether to verify TLS certificates for CycleCloud API calls.",
+        description=(
+            "Whether to verify TLS certificates for CycleCloud API calls. "
+            "None means 'unset here' so request/template/credential-file/default "
+            "precedence can resolve the effective value later."
+        ),
     )
     auth_mode: Optional[str] = Field(
         None,
