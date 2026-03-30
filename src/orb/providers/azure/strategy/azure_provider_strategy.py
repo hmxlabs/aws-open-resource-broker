@@ -603,14 +603,16 @@ class AzureProviderStrategy(ProviderStrategy):
         return self._capability_service.get_supported_apis()
 
     def cleanup(self) -> None:
-        try:
-            self._client = None
-            self._resource_manager = None
-            self._handlers = {}
-            self._initialized = False
-            self._logger.debug("Azure provider cleaned up")
-        except Exception as exc:
-            self._logger.warning("Failed during Azure provider cleanup: %s", exc)
+        if self._client is not None:
+            self._client.close()
+        self._client = None
+        self._resource_manager = None
+        self._deployment_service = None
+        self._handlers = {}
+        with self._pending_vmss_cleanups_lock:
+            self._pending_vmss_cleanups.clear()
+        self._initialized = False
+        self._logger.debug("Azure provider cleaned up")
 
     @staticmethod
     def _normalize_provider_api_value(provider_api: Any) -> Any:

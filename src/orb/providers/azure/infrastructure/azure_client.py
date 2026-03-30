@@ -2,6 +2,7 @@
 
 This module provides a unified wrapper for Azure SDK interactions with:
 - Lazy initialization of Azure service clients
+- Explicit lifecycle cleanup for owned Azure SDK resources
 - Configuration resolution via ProviderSelectionService / fallback
 - Optional metrics instrumentation
 - Thread-safe resource caching and adaptive batch sizing
@@ -37,6 +38,11 @@ from orb.providers.azure.exceptions.azure_exceptions import (
     AuthenticationError,
     AzureConfigurationError,
 )
+from orb.providers.azure.infrastructure.credential_factory import (
+    AzureCredentialProtocol,
+    create_default_azure_credential,
+)
+
 
 class TypedConfigPort(Protocol):
     """Minimal config interface for AzureClient.
@@ -58,13 +64,6 @@ if TYPE_CHECKING:
     from azure.mgmt.network import NetworkManagementClient
     from azure.mgmt.resource import ResourceManagementClient
     from azure.mgmt.resource.subscriptions import SubscriptionClient
-
-
-class AzureCredentialProtocol(Protocol):
-    """Credential surface this module requires from Azure identity objects."""
-
-    def get_token(self, *scopes: str, **kwargs: Any) -> Any: ...
-
 
 class AzureResourceRefProtocol(Protocol):
     """Minimal ARM resource reference carrying an Azure resource ID."""
@@ -217,6 +216,7 @@ class AzureClient:
         self._monitor_client: Optional[MonitorManagementClient] = None
         self._subscription_client: Optional[SubscriptionClient] = None
         self._credentials_validated = False
+        self._closed = False
 
         # Metrics instrumentation (extension point)
         self._metrics = metrics
@@ -336,8 +336,14 @@ class AzureClient:
 
         return value
 
+    def _ensure_open(self) -> None:
+        """Raise if the Azure client has already been closed."""
+        if self._closed:
+            raise RuntimeError("AzureClient has been closed")
+
     def _build_compute_client(self) -> ComputeManagementClient:
         """Construct a Compute management client."""
+        self._ensure_open()
         self._logger.debug("Initialising ComputeManagementClient on first use")
         try:
             from azure.mgmt.compute import ComputeManagementClient
@@ -351,6 +357,7 @@ class AzureClient:
 
     def _build_network_client(self) -> NetworkManagementClient:
         """Construct a Network management client."""
+        self._ensure_open()
         self._logger.debug("Initialising NetworkManagementClient on first use")
         try:
             from azure.mgmt.network import NetworkManagementClient
@@ -364,6 +371,7 @@ class AzureClient:
 
     def _build_resource_client(self) -> ResourceManagementClient:
         """Construct a Resource management client."""
+        self._ensure_open()
         self._logger.debug("Initialising ResourceManagementClient on first use")
         try:
             from azure.mgmt.resource import ResourceManagementClient
@@ -377,6 +385,7 @@ class AzureClient:
 
     def _build_msi_client(self) -> ManagedServiceIdentityClient:
         """Construct a Managed Service Identity client."""
+        self._ensure_open()
         self._logger.debug("Initialising ManagedServiceIdentityClient on first use")
         try:
             from azure.mgmt.msi import ManagedServiceIdentityClient
@@ -390,6 +399,7 @@ class AzureClient:
 
     def _build_authorization_client(self) -> AuthorizationManagementClient:
         """Construct an Authorization management client."""
+        self._ensure_open()
         self._logger.debug("Initialising AuthorizationManagementClient on first use")
         try:
             from azure.mgmt.authorization import AuthorizationManagementClient
@@ -403,6 +413,7 @@ class AzureClient:
 
     def _build_monitor_client(self) -> MonitorManagementClient:
         """Construct a Monitor management client."""
+        self._ensure_open()
         self._logger.debug("Initialising MonitorManagementClient on first use")
         try:
             from azure.mgmt.monitor import MonitorManagementClient
@@ -416,6 +427,7 @@ class AzureClient:
 
     def _build_subscription_client(self) -> SubscriptionClient:
         """Construct a Subscription client."""
+        self._ensure_open()
         self._logger.debug("Initialising SubscriptionClient on first use")
         try:
             from azure.mgmt.resource.subscriptions import SubscriptionClient
@@ -440,25 +452,100 @@ class AzureClient:
         Raises:
             AuthenticationError: If no valid credential can be obtained.
         """
+        self._ensure_open()
         if self._credential is None:
             self._logger.debug("Creating Azure credential on first use")
             try:
-                from azure.identity import DefaultAzureCredential
-                credential_kwargs: dict[str, Any] = {}
-                if self._azure_config and self._azure_config.client_id:
-                    credential_kwargs["managed_identity_client_id"] = self._azure_config.client_id
-
-                self._credential = DefaultAzureCredential(**credential_kwargs)
-                self._logger.info("Azure DefaultAzureCredential initialised")
+                self._credential = create_default_azure_credential(
+                    client_id=self._azure_config.client_id if self._azure_config else None,
+                    logger=self._logger,
+                )
             except ImportError as exc:
                 raise AuthenticationError(
                     "azure-identity package is not installed"
                 ) from exc
-            except Exception as exc:
-                raise AuthenticationError(
-                    f"Failed to create Azure credential: {exc}"
-                ) from exc
         return self._credential
+
+    def _close_management_client(
+        self,
+        resource_name: str,
+        client: Any,
+    ) -> None:
+        """Close one concrete Azure SDK management client owned by this wrapper."""
+        if client is None:
+            return
+
+        client.close()
+
+        self._logger.debug("Closed Azure resource %s", resource_name)
+
+    def _close_credential(
+        self,
+        credential: Optional[AzureCredentialProtocol],
+    ) -> None:
+        """Close the owned Azure credential."""
+        if credential is None:
+            return
+
+        credential.close()
+
+        self._logger.debug("Closed Azure resource credential")
+
+    def close(self) -> None:
+        """Close owned Azure SDK resources and prevent further use.
+
+        The Azure client owns its lazily-created credentials and management
+        clients, so cleanup belongs here rather than in unrelated orchestration
+        layers.
+        """
+        if self._closed:
+            return
+
+        subscription_client = self._subscription_client
+        self._subscription_client = None
+        self._close_management_client("subscription_client", subscription_client)
+
+        monitor_client = self._monitor_client
+        self._monitor_client = None
+        self._close_management_client("monitor_client", monitor_client)
+
+        authorization_client = self._authorization_client
+        self._authorization_client = None
+        self._close_management_client("authorization_client", authorization_client)
+
+        msi_client = self._msi_client
+        self._msi_client = None
+        self._close_management_client("msi_client", msi_client)
+
+        resource_client = self._resource_client
+        self._resource_client = None
+        self._close_management_client("resource_client", resource_client)
+
+        network_client = self._network_client
+        self._network_client = None
+        self._close_management_client("network_client", network_client)
+
+        compute_client = self._compute_client
+        self._compute_client = None
+        self._close_management_client("compute_client", compute_client)
+
+        credential = self._credential
+        self._credential = None
+        self._close_credential(credential)
+
+        self._credentials_validated = False
+        self._resource_cache.clear()
+        self._batch_history.clear()
+        self._closed = True
+
+    def __enter__(self) -> AzureClient:
+        """Enter a managed Azure client scope."""
+        self._ensure_open()
+        return self
+
+    def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
+        """Exit a managed Azure client scope and close owned resources."""
+        self.close()
 
     # ------------------------------------------------------------------
     # Lazy management-client properties

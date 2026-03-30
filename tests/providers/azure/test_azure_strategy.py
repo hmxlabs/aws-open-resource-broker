@@ -2109,6 +2109,21 @@ class TestCleanup:
         assert strategy._handlers == {}
         assert strategy._client is None
 
+    def test_cleanup_closes_owned_azure_client(self, azure_config, logger):
+        client = MagicMock()
+        strategy = AzureProviderStrategy(
+            config=azure_config,
+            logger=logger,
+            provider_instance_name="azure-default",
+            azure_client_resolver=lambda: client,
+        )
+        strategy.initialize()
+        strategy._client = client
+
+        strategy.cleanup()
+
+        client.close.assert_called_once_with()
+
 
 class TestSpotPlacementPlanning:
     def test_create_instances_returns_generic_planning_error_for_capacity_exhaustion(

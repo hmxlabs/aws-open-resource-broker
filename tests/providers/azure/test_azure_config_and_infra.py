@@ -538,20 +538,28 @@ class TestAzureHandlerFactory:
 
 
 class TestAzureAuthStrategy:
+    @staticmethod
+    def _build_auth_context():
+        from orb.infrastructure.adapters.ports.auth import AuthContext
+
+        return AuthContext(
+            method="GET",
+            path="/providers/azure/health",
+            headers={},
+            query_params={},
+        )
+
     def test_auth_strategy_passes_managed_identity_client_id_when_configured(self):
         from orb.providers.azure.auth.azure_auth_strategy import AzureAuthStrategy
 
-        class ConcreteAzureAuthStrategy(AzureAuthStrategy):
-            def is_enabled(self) -> bool:
-                return self.enabled
-
-        strategy = ConcreteAzureAuthStrategy(
+        strategy = AzureAuthStrategy(
             logger=MagicMock(),
             client_id="managed-identity-client-id",
         )
 
         fake_identity = types.ModuleType("azure.identity")
-        fake_ctor = MagicMock(return_value=MagicMock())
+        fake_credential = MagicMock()
+        fake_ctor = MagicMock(return_value=fake_credential)
         fake_identity.DefaultAzureCredential = fake_ctor
 
         with patch.dict(
@@ -561,7 +569,9 @@ class TestAzureAuthStrategy:
                 "azure.identity": fake_identity,
             },
         ):
-            _ = strategy._get_credential()
+            credential = strategy._create_credential()
+
+        assert credential is fake_credential
 
         fake_ctor.assert_called_once_with(
             managed_identity_client_id="managed-identity-client-id"
@@ -570,14 +580,11 @@ class TestAzureAuthStrategy:
     def test_auth_strategy_omits_managed_identity_client_id_when_unset(self):
         from orb.providers.azure.auth.azure_auth_strategy import AzureAuthStrategy
 
-        class ConcreteAzureAuthStrategy(AzureAuthStrategy):
-            def is_enabled(self) -> bool:
-                return self.enabled
-
-        strategy = ConcreteAzureAuthStrategy(logger=MagicMock())
+        strategy = AzureAuthStrategy(logger=MagicMock())
 
         fake_identity = types.ModuleType("azure.identity")
-        fake_ctor = MagicMock(return_value=MagicMock())
+        fake_credential = MagicMock()
+        fake_ctor = MagicMock(return_value=fake_credential)
         fake_identity.DefaultAzureCredential = fake_ctor
 
         with patch.dict(
@@ -587,12 +594,71 @@ class TestAzureAuthStrategy:
                 "azure.identity": fake_identity,
             },
         ):
-            _ = strategy._get_credential()
+            credential = strategy._create_credential()
+
+        assert credential is fake_credential
 
         fake_ctor.assert_called_once_with()
 
+    @pytest.mark.asyncio
+    async def test_auth_strategy_returns_failed_result_for_expected_azure_auth_error(self):
+        from orb.providers.azure.auth.azure_auth_strategy import AzureAuthStrategy
+        from orb.providers.azure.infrastructure import credential_factory
+
+        strategy = AzureAuthStrategy(logger=MagicMock())
+        auth_error_type = credential_factory.get_default_azure_credential_error_types()
+        error = (
+            auth_error_type[0]("credential unavailable")
+            if auth_error_type
+            else ImportError("azure-identity package is not installed")
+        )
+
+        with patch.object(strategy, "_create_credential", side_effect=error):
+            result = await strategy.authenticate(self._build_auth_context())
+
+        assert result.status.name == "FAILED"
+        assert "credential unavailable" in result.error_message or "not installed" in result.error_message
+
+    @pytest.mark.asyncio
+    async def test_auth_strategy_propagates_unexpected_errors(self):
+        from orb.providers.azure.auth.azure_auth_strategy import AzureAuthStrategy
+
+        strategy = AzureAuthStrategy(logger=MagicMock())
+
+        with patch.object(strategy, "_create_credential", side_effect=RuntimeError("boom")):
+            with pytest.raises(RuntimeError, match="boom"):
+                await strategy.authenticate(self._build_auth_context())
+
+    @pytest.mark.asyncio
+    async def test_auth_strategy_closes_credential_after_authenticate(self):
+        from orb.providers.azure.auth.azure_auth_strategy import AzureAuthStrategy
+
+        strategy = AzureAuthStrategy(logger=MagicMock())
+        credential = MagicMock()
+        credential.get_token.return_value = types.SimpleNamespace(token="access-token")
+
+        with patch.object(strategy, "_create_credential", return_value=credential):
+            result = await strategy.authenticate(self._build_auth_context())
+
+        assert result.status.name == "SUCCESS"
+        credential.close.assert_called_once_with()
+
 
 class TestAzureClientOperationalBehavior:
+    @staticmethod
+    def _build_client(logger: MagicMock | None = None) -> AzureClient:
+        config_port = MagicMock()
+        config_port.get_typed.side_effect = lambda config_type: (
+            AzureProviderConfig(
+                subscription_id="12345678-1234-1234-1234-123456789012",
+                resource_group="rg-explicit",
+                region="westeurope",
+            )
+            if config_type is AzureProviderConfig
+            else PerformanceConfig()
+        )
+        return AzureClient(config=config_port, logger=logger or MagicMock())
+
     def test_azure_client_maps_typed_performance_config(self):
         azure_config = AzureProviderConfig(
             subscription_id="12345678-1234-1234-1234-123456789012",
@@ -697,6 +763,93 @@ class TestAzureClientOperationalBehavior:
 
         with pytest.raises(RuntimeError, match="boom"):
             AzureClient.validate_subscription(client)
+
+    def test_close_releases_owned_azure_resources_and_prevents_reuse(self):
+        logger = MagicMock()
+        client = self._build_client(logger=logger)
+        subscription_client = MagicMock()
+        monitor_client = MagicMock()
+        authorization_client = MagicMock()
+        msi_client = MagicMock()
+        resource_client = MagicMock()
+        network_client = MagicMock()
+        compute_client = MagicMock()
+        credential = MagicMock()
+        client._subscription_client = subscription_client
+        client._monitor_client = monitor_client
+        client._authorization_client = authorization_client
+        client._msi_client = msi_client
+        client._resource_client = resource_client
+        client._network_client = network_client
+        client._compute_client = compute_client
+        client._credential = credential
+        client._credentials_validated = True
+        client._resource_cache = {"vm": "cached"}
+        client._batch_history = {"describe_vms": [25]}
+        client._closed = False
+
+        AzureClient.close(client)
+
+        subscription_client.close.assert_called_once_with()
+        monitor_client.close.assert_called_once_with()
+        authorization_client.close.assert_called_once_with()
+        msi_client.close.assert_called_once_with()
+        resource_client.close.assert_called_once_with()
+        network_client.close.assert_called_once_with()
+        compute_client.close.assert_called_once_with()
+        credential.close.assert_called_once_with()
+        assert client._credentials_validated is False
+        assert client._resource_cache == {}
+        assert client._batch_history == {}
+        assert client._closed is True
+
+        with pytest.raises(RuntimeError, match="AzureClient has been closed"):
+            client._ensure_open()
+
+    def test_close_is_idempotent(self):
+        client = self._build_client()
+        subscription_client = MagicMock()
+        client._subscription_client = subscription_client
+        client._monitor_client = None
+        client._authorization_client = None
+        client._msi_client = None
+        client._resource_client = None
+        client._network_client = None
+        client._compute_client = None
+        client._credential = None
+        client._credentials_validated = False
+        client._resource_cache = {}
+        client._batch_history = {}
+        client._closed = False
+
+        AzureClient.close(client)
+        AzureClient.close(client)
+
+        subscription_client.close.assert_called_once_with()
+
+    def test_context_manager_closes_owned_resources_on_exit(self):
+        client = self._build_client()
+        client._subscription_client = None
+        client._monitor_client = None
+        client._authorization_client = None
+        client._msi_client = None
+        resource_client = MagicMock()
+        credential = MagicMock()
+        client._resource_client = resource_client
+        client._network_client = None
+        client._compute_client = None
+        client._credential = credential
+        client._credentials_validated = False
+        client._resource_cache = {}
+        client._batch_history = {}
+        client._closed = False
+
+        with client as scoped_client:
+            assert scoped_client is client
+
+        resource_client.close.assert_called_once_with()
+        credential.close.assert_called_once_with()
+        assert client._closed is True
 
 
 class TestAzureValidationAdapter:
