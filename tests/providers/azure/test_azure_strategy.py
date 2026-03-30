@@ -823,6 +823,35 @@ class TestCreateInstances:
         assert not result.success
         assert result.error_code == "MISSING_TEMPLATE_CONFIG"
 
+    def test_missing_create_handler_returns_error(self, strategy):
+        op = ProviderOperation(
+            operation_type=ProviderOperationType.CREATE_INSTANCES,
+            parameters={
+                "template_config": {
+                    "template_id": "azure-vmss-test",
+                    "provider_api": "VMSS",
+                    "vm_size": "Standard_D4s_v5",
+                    "resource_group": "test-rg",
+                    "location": "eastus2",
+                    "ssh_public_keys": [
+                        "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQC7 test@host"
+                    ],
+                    "image": {
+                        "publisher": "Canonical",
+                        "offer": "0001-com-ubuntu-server-jammy",
+                        "sku": "22_04-lts-gen2",
+                        "version": "latest",
+                    },
+                },
+                "count": 1,
+            },
+        )
+
+        result = _run(strategy.execute_operation(op))
+
+        assert not result.success
+        assert result.error_code == "HANDLER_NOT_FOUND"
+
     def test_dry_run_short_circuits_before_handler(self, azure_config, logger):
         strategy = AzureProviderStrategy(config=azure_config, logger=logger, provider_instance_name="azure-default")
         strategy.initialize()
@@ -1136,6 +1165,17 @@ class TestTerminateInstances:
         result = _run(strategy.execute_operation(op))
         assert not result.success
         assert result.error_code == "MISSING_PROVIDER_API"
+
+    def test_missing_terminate_handler_returns_error(self, strategy):
+        op = ProviderOperation(
+            operation_type=ProviderOperationType.TERMINATE_INSTANCES,
+            parameters={"instance_ids": ["orb-1"], "provider_api": "VMSS"},
+        )
+
+        result = _run(strategy.execute_operation(op))
+
+        assert not result.success
+        assert result.error_code == "HANDLER_NOT_FOUND"
 
     def test_fallback_handler_uses_grouped_resource_ids(self, azure_config, logger):
         strategy = AzureProviderStrategy(config=azure_config, logger=logger, provider_instance_name="azure-default")
@@ -1469,6 +1509,28 @@ class TestGetInstanceStatus:
         assert not result.success
         assert result.error_code == "MISSING_INSTANCE_IDS"
 
+    def test_missing_resource_group_returns_error_when_not_in_request_or_config(self, logger):
+        strategy = AzureProviderStrategy(
+            config=AzureProviderConfig(
+                subscription_id="12345678-1234-1234-1234-123456789012",
+                resource_group=None,
+                region="eastus2",
+            ),
+            logger=logger,
+            provider_instance_name="azure-default",
+        )
+        strategy.initialize()
+
+        op = ProviderOperation(
+            operation_type=ProviderOperationType.GET_INSTANCE_STATUS,
+            parameters={"instance_ids": ["vm-1"]},
+        )
+
+        result = _run(strategy.execute_operation(op))
+
+        assert not result.success
+        assert result.error_code == "MISSING_RESOURCE_GROUP"
+
     def test_get_instance_status_uses_request_metadata_resource_group(self, strategy):
         handler = MagicMock()
         handler.check_hosts_status.return_value = [
@@ -1738,6 +1800,23 @@ class TestGetInstanceStatus:
         assert result.data["machines"][0]["private_ip"] == "10.0.0.4"
         assert result.data["machines"][0]["subnet_id"].endswith("/subnets/default")
         assert result.data["machines"][0]["vpc_id"].endswith("/virtualNetworks/test-vnet")
+
+    def test_sdk_status_fallback_requires_azure_client(self, strategy):
+        strategy._client = None
+        strategy._azure_client_resolver = lambda: None
+
+        op = ProviderOperation(
+            operation_type=ProviderOperationType.GET_INSTANCE_STATUS,
+            parameters={
+                "instance_ids": ["vm-1"],
+                "request_metadata": {"resource_group": "test-rg"},
+            },
+        )
+
+        result = _run(strategy.execute_operation(op))
+
+        assert not result.success
+        assert result.error_code == "AZURE_CLIENT_NOT_AVAILABLE"
 
     def test_get_instance_status_accepts_enum_provider_api(self, azure_config, logger):
         strategy = AzureProviderStrategy(

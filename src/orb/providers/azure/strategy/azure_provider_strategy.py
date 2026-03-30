@@ -65,6 +65,46 @@ AzureProviderApiRef = AzureProviderApi | str
 
 
 @dataclass
+class CreateOperationContext:
+    """Typed create-operation inputs after strategy-level resolution."""
+
+    template_config: dict[str, Any]
+    count: int
+    provider_api: AzureProviderApiRef
+    provider_api_key: str
+    handler: AzureHandler
+    azure_template: AzureTemplate
+
+
+@dataclass
+class TerminationOperationContext:
+    """Typed termination-operation inputs after strategy-level resolution."""
+
+    instance_ids: list[str]
+    grouped_resource_mapping: dict[str, list[str]]
+    release_context: dict[str, Any]
+    handler: AzureHandler
+    default_resource_id: str
+
+
+@dataclass
+class StatusOperationContext:
+    """Typed status-operation inputs after strategy-level resolution."""
+
+    instance_ids: list[str]
+    resource_group: str
+    provider_api: Optional[AzureProviderApiRef]
+
+
+class _OperationPreparationFailure(Exception):
+    """Internal strategy control flow for returning a prepared ProviderResult."""
+
+    def __init__(self, result: ProviderResult) -> None:
+        super().__init__(result.error_message or "Operation preparation failed")
+        self.result = result
+
+
+@dataclass
 class PendingVmssCleanup:
     """Provider-owned follow-up state for empty-VMSS cleanup."""
 
@@ -796,32 +836,48 @@ class AzureProviderStrategy(ProviderStrategy):
 
     def _resolve_create_handler(
         self, provider_api: AzureProviderApiRef
-    ) -> ProviderResult | AzureHandler:
+    ) -> Optional[AzureHandler]:
         """Resolve the concrete create handler for the requested provider API."""
-        handler = self.handlers.get(self._provider_api_key(provider_api))
-        if handler:
-            return handler
-
-        return ProviderResult.error_result(
-            f"No handler available for provider_api: {self._provider_api_key(provider_api)}",
-            "HANDLER_NOT_FOUND",
-        )
+        return self.handlers.get(self._provider_api_key(provider_api))
 
     def _build_create_template(
         self,
         template_config: dict[str, Any],
-    ) -> ProviderResult | AzureTemplate:
+    ) -> AzureTemplate:
         """Build and validate the Azure template aggregate for create."""
         enhanced_config = self._build_azure_template_config(template_config)
-        try:
-            self._logger.debug("Creating AzureTemplate from config: %s", enhanced_config)
-            return AzureTemplate.model_validate(enhanced_config)
-        except Exception as exc:
-            self._logger.error("Error validating AzureTemplate: %s", exc)
-            return ProviderResult.error_result(
-                f"Invalid template configuration: {exc!s}",
-                "INVALID_TEMPLATE_CONFIG",
+        self._logger.debug("Creating AzureTemplate from config: %s", enhanced_config)
+        return AzureTemplate.model_validate(enhanced_config)
+
+    def _build_create_operation_context(
+        self, operation: ProviderOperation
+    ) -> CreateOperationContext:
+        """Resolve create-time strategy inputs into a typed context object."""
+        template_config = self._get_create_template_config(operation)
+        count = self._get_create_count(operation)
+        validation_error = self._validate_create_template_config(template_config)
+        if validation_error:
+            raise _OperationPreparationFailure(validation_error)
+
+        provider_api = self._resolve_create_provider_api(template_config)
+        provider_api_key = self._provider_api_key(provider_api)
+        handler = self._resolve_create_handler(provider_api)
+        if handler is None:
+            raise _OperationPreparationFailure(
+                ProviderResult.error_result(
+                    f"No handler available for provider_api: {provider_api_key}",
+                    "HANDLER_NOT_FOUND",
+                )
             )
+
+        return CreateOperationContext(
+            template_config=template_config,
+            count=count,
+            provider_api=provider_api,
+            provider_api_key=provider_api_key,
+            handler=handler,
+            azure_template=self._build_create_template(template_config),
+        )
 
     def _build_create_request(
         self,
@@ -900,73 +956,82 @@ class AzureProviderStrategy(ProviderStrategy):
             },
         )
 
+    @staticmethod
+    def _create_instances_dry_run_result(
+        create_context: CreateOperationContext,
+    ) -> ProviderResult:
+        return ProviderResult.success_result(
+            {
+                "resource_ids": ["dry-run-resource-id"],
+                "instances": [],
+                "provider_api": create_context.provider_api_key,
+                "count": create_context.count,
+                "template_id": create_context.azure_template.template_id,
+            },
+            {
+                "operation": "create_instances",
+                "template_config": create_context.template_config,
+                "handler_used": create_context.provider_api_key,
+                "method": "dry_run",
+                "provider_data": {"dry_run": True},
+            },
+        )
+
+    def _execute_create_handler(
+        self,
+        *,
+        create_context: CreateOperationContext,
+        request: Any,
+    ) -> ProviderResult:
+        handler_result = create_context.handler.acquire_hosts(
+            request, create_context.azure_template
+        )
+        return self._normalize_handler_create_result(
+            handler_result,
+            create_context.template_config,
+            create_context.provider_api,
+            create_context.count,
+            create_context.azure_template.template_id,
+        )
+
     async def _handle_create_instances(
         self, operation: ProviderOperation
     ) -> ProviderResult:
         template_config: dict[str, Any] = {}
         provider_api_key: Optional[str] = None
         try:
-            template_config = self._get_create_template_config(operation)
-            count = self._get_create_count(operation)
-            validation_error = self._validate_create_template_config(template_config)
-            if validation_error:
-                return validation_error
-
-            provider_api = self._resolve_create_provider_api(template_config)
-            provider_api_key = self._provider_api_key(provider_api)
-            handler = self._resolve_create_handler(provider_api)
-            if isinstance(handler, ProviderResult):
-                return handler
-
-            azure_template = self._build_create_template(template_config)
-            if isinstance(azure_template, ProviderResult):
-                return azure_template
+            create_context = self._build_create_operation_context(operation)
+            template_config = create_context.template_config
+            provider_api_key = create_context.provider_api_key
 
             request = self._build_create_request(
                 operation=operation,
-                azure_template=azure_template,
-                count=count,
-                provider_api=provider_api,
+                azure_template=create_context.azure_template,
+                count=create_context.count,
+                provider_api=create_context.provider_api,
             )
 
             if bool(operation.context and operation.context.get("dry_run", False)):
-                return ProviderResult.success_result(
-                    {
-                        "resource_ids": ["dry-run-resource-id"],
-                        "instances": [],
-                        "provider_api": self._provider_api_key(provider_api),
-                        "count": count,
-                        "template_id": azure_template.template_id,
-                    },
-                    {
-                        "operation": "create_instances",
-                        "template_config": template_config,
-                        "handler_used": self._provider_api_key(provider_api),
-                        "method": "dry_run",
-                        "provider_data": {"dry_run": True},
-                    },
-                )
+                return self._create_instances_dry_run_result(create_context)
 
-            if self._should_use_spot_placement(azure_template):
+            if self._should_use_spot_placement(create_context.azure_template):
                 return self._execute_planned_spot_launches(
-                    azure_template=azure_template,
-                    provider_api=provider_api,
-                    count=count,
+                    azure_template=create_context.azure_template,
+                    provider_api=create_context.provider_api,
+                    count=create_context.count,
                     template_config=template_config,
                     operation=operation,
                 )
 
-            handler_result = handler.acquire_hosts(request, azure_template)
-            return self._normalize_handler_create_result(
-                handler_result,
-                template_config,
-                provider_api,
-                count,
-                azure_template.template_id,
+            return self._execute_create_handler(
+                create_context=create_context,
+                request=request,
             )
 
         except asyncio.CancelledError:
             raise
+        except _OperationPreparationFailure as exc:
+            return exc.result
         except (AzureValidationError, DomainValidationError, PydanticValidationError) as exc:
             return self._validation_error_result(
                 message=f"Failed to create instances: {exc!s}",
@@ -1091,71 +1156,94 @@ class AzureProviderStrategy(ProviderStrategy):
 
         return termination_provider_data
 
-    def _handle_terminate_instances(self, operation: ProviderOperation) -> ProviderResult:
-        self._logger.debug("_handle_terminate_instances")
-        try:
-            instance_ids = operation.parameters.get("instance_ids", [])
-            raw_resource_mapping = operation.parameters.get("resource_mapping", {})
-            grouped_resource_mapping = self._group_instance_ids_by_resource(
-                instance_ids,
-                raw_resource_mapping,
-            )
-
-            if not instance_ids:
-                return ProviderResult.error_result(
+    def _build_termination_operation_context(
+        self, operation: ProviderOperation
+    ) -> TerminationOperationContext:
+        instance_ids = operation.parameters.get("instance_ids", [])
+        if not instance_ids:
+            raise _OperationPreparationFailure(
+                ProviderResult.error_result(
                     "Instance IDs are required for termination",
                     "MISSING_INSTANCE_IDS",
                 )
+            )
+
+        provider_api = self._resolve_operation_provider_api(operation)
+        if provider_api in (None, ""):
+            raise _OperationPreparationFailure(
+                ProviderResult.error_result(
+                    "provider_api is required for Azure termination",
+                    "MISSING_PROVIDER_API",
+                )
+            )
+        provider_api_key = self._provider_api_key(provider_api)
+        handler = self.handlers.get(provider_api_key)
+        if handler is None:
+            raise _OperationPreparationFailure(
+                ProviderResult.error_result(
+                    f"No handler available for provider_api: {provider_api_key}",
+                    "HANDLER_NOT_FOUND",
+                )
+            )
+
+        raw_resource_mapping = operation.parameters.get("resource_mapping", {})
+        grouped_resource_mapping = self._group_instance_ids_by_resource(
+            instance_ids,
+            raw_resource_mapping,
+        )
+        default_resource_id = operation.parameters.get("resource_id")
+        if not default_resource_id and grouped_resource_mapping:
+            default_resource_id = next(iter(grouped_resource_mapping.keys()))
+
+        release_context = self._build_cyclecloud_request_metadata(
+            operation=operation,
+            resource_group=self._resolve_operation_resource_group(operation),
+        )
+        release_context["resource_id"] = default_resource_id or "unknown"
+
+        return TerminationOperationContext(
+            instance_ids=instance_ids,
+            grouped_resource_mapping=grouped_resource_mapping,
+            release_context=release_context,
+            handler=handler,
+            default_resource_id=default_resource_id or "unknown",
+        )
+
+    def _handle_terminate_instances(self, operation: ProviderOperation) -> ProviderResult:
+        self._logger.debug("_handle_terminate_instances")
+        try:
+            termination_context = self._build_termination_operation_context(operation)
 
             if bool(operation.context and operation.context.get("dry_run", False)):
                 return ProviderResult.success_result(
-                    {"success": True, "terminated_count": len(instance_ids)},
+                    {
+                        "success": True,
+                        "terminated_count": len(termination_context.instance_ids),
+                    },
                     {
                         "operation": "terminate_instances",
-                        "instance_ids": instance_ids,
+                        "instance_ids": termination_context.instance_ids,
                         "method": "dry_run",
                         "provider_data": {"dry_run": True},
                     },
                 )
 
-            resource_group = self._resolve_operation_resource_group(operation)
-            default_resource_id = operation.parameters.get("resource_id")
-            if not default_resource_id and grouped_resource_mapping:
-                default_resource_id = next(iter(grouped_resource_mapping.keys()))
-
-            release_context = self._build_cyclecloud_request_metadata(
-                operation=operation,
-                resource_group=resource_group,
-            )
-            release_context["resource_id"] = default_resource_id or "unknown"
-
-            provider_api = self._resolve_operation_provider_api(operation)
-            if provider_api in (None, ""):
-                return ProviderResult.error_result(
-                    "provider_api is required for Azure termination",
-                    "MISSING_PROVIDER_API",
-                )
-            provider_api_key = self._provider_api_key(provider_api)
-            handler = self.handlers.get(provider_api_key)
-            if not handler:
-                return ProviderResult.error_result(
-                    f"No handler available for provider_api: {provider_api_key}",
-                    "HANDLER_NOT_FOUND",
-                )
-
             termination_provider_data = self._dispatch_termination(
-                handler=handler,
-                instance_ids=instance_ids,
-                grouped_resource_mapping=grouped_resource_mapping,
-                default_resource_id=default_resource_id or "unknown",
-                context=release_context,
+                handler=termination_context.handler,
+                instance_ids=termination_context.instance_ids,
+                grouped_resource_mapping=termination_context.grouped_resource_mapping,
+                default_resource_id=termination_context.default_resource_id,
+                context=termination_context.release_context,
             )
 
             return ProviderResult.success_result(
-                {"success": True, "terminated_count": len(instance_ids)},
+                {
+                    "success": True,
+                    "terminated_count": len(termination_context.instance_ids),
+                },
                 {
                     "operation": "terminate_instances",
-                    "instance_ids": instance_ids,
+                    "instance_ids": termination_context.instance_ids,
                     "method": "handler",
                     "provider_data": {
                         "termination_requests": termination_provider_data,
@@ -1165,6 +1253,8 @@ class AzureProviderStrategy(ProviderStrategy):
 
         except asyncio.CancelledError:
             raise
+        except _OperationPreparationFailure as exc:
+            return exc.result
         except (AzureValidationError, DomainValidationError, PydanticValidationError) as exc:
             return self._validation_error_result(
                 message=f"Failed to terminate instances: {exc!s}",
@@ -1187,119 +1277,160 @@ class AzureProviderStrategy(ProviderStrategy):
     # GET_INSTANCE_STATUS
     # ------------------------------------------------------------------
 
-    def _handle_get_instance_status(self, operation: ProviderOperation) -> ProviderResult:
-        try:
-            instance_ids = operation.parameters.get("instance_ids", [])
-            if not instance_ids:
-                return ProviderResult.error_result(
+    def _build_status_operation_context(
+        self, operation: ProviderOperation
+    ) -> StatusOperationContext:
+        instance_ids = operation.parameters.get("instance_ids", [])
+        if not instance_ids:
+            raise _OperationPreparationFailure(
+                ProviderResult.error_result(
                     "Instance IDs are required for status query",
                     "MISSING_INSTANCE_IDS",
                 )
+            )
 
-            if bool(operation.context and operation.context.get("dry_run", False)):
-                return ProviderResult.success_result(
-                    {
-                        "machines": [
-                            {
-                                "instance_id": instance_id,
-                                "status": "unknown",
-                                "provider_type": "azure",
-                                "provider_data": {"dry_run": True},
-                            }
-                            for instance_id in instance_ids
-                        ],
-                        "queried_count": len(instance_ids),
-                    },
-                    {
-                        "operation": "get_instance_status",
-                        "instance_ids": instance_ids,
-                        "method": "dry_run",
-                        "provider_data": {"dry_run": True},
-                    },
-                )
-
-            resource_group = self._resolve_operation_resource_group(operation)
-            if not resource_group:
-                return ProviderResult.error_result(
+        resource_group = self._resolve_operation_resource_group(operation)
+        if not resource_group:
+            raise _OperationPreparationFailure(
+                ProviderResult.error_result(
                     "resource_group is required for status query",
                     "MISSING_RESOURCE_GROUP",
                 )
+            )
+
+        return StatusOperationContext(
+            instance_ids=instance_ids,
+            resource_group=resource_group,
+            provider_api=self._resolve_operation_provider_api(operation),
+        )
+
+    @staticmethod
+    def _status_dry_run_result(instance_ids: list[str]) -> ProviderResult:
+        return ProviderResult.success_result(
+            {
+                "machines": [
+                    {
+                        "instance_id": instance_id,
+                        "status": "unknown",
+                        "provider_type": "azure",
+                        "provider_data": {"dry_run": True},
+                    }
+                    for instance_id in instance_ids
+                ],
+                "queried_count": len(instance_ids),
+            },
+            {
+                "operation": "get_instance_status",
+                "instance_ids": instance_ids,
+                "method": "dry_run",
+                "provider_data": {"dry_run": True},
+            },
+        )
+
+    def _status_handler_result(
+        self,
+        *,
+        operation: ProviderOperation,
+        status_context: StatusOperationContext,
+        handler_machines: list[dict[str, Any]],
+    ) -> ProviderResult:
+        resource_ids: list[str] = []
+        metadata = {
+            "operation": "get_instance_status",
+            "instance_ids": status_context.instance_ids,
+            "method": "handler",
+        }
+        if status_context.provider_api in (
+            AzureProviderApi.VMSS,
+            AzureProviderApi.VMSS_UNIFORM,
+        ):
+            resource_ids = self._status_resource_ids(operation, status_context.instance_ids)
+            if resource_ids:
+                self._maybe_cleanup_pending_vmss(
+                    resource_group=status_context.resource_group,
+                    resource_ids=resource_ids,
+                    instance_details=handler_machines,
+                )
+            metadata.update(
+                self._vmss_cleanup_status_metadata(
+                    resource_group=status_context.resource_group,
+                    resource_ids=resource_ids,
+                )
+            )
+
+        return ProviderResult.success_result(
+            {
+                "machines": handler_machines,
+                "queried_count": len(status_context.instance_ids),
+            },
+            metadata,
+        )
+
+    def _sdk_status_result(self, status_context: StatusOperationContext) -> ProviderResult:
+        azure_client = self.azure_client
+        if not azure_client:
+            return ProviderResult.error_result(
+                "Azure client not available", "AZURE_CLIENT_NOT_AVAILABLE"
+            )
+
+        machines: list[dict[str, Any]] = []
+        compute = azure_client.compute_client
+
+        for vm_id in status_context.instance_ids:
+            try:
+                vm = compute.virtual_machines.get(
+                    resource_group_name=status_context.resource_group,
+                    vm_name=vm_id,
+                    expand="instanceView",
+                )
+                machines.append(self._convert_azure_instance_to_machine(vm))
+            except Exception as exc:
+                self._logger.error("Failed to get status for VM '%s': %s", vm_id, exc)
+                machines.append({
+                    "instance_id": vm_id,
+                    "status": "unknown",
+                    "provider_type": "azure",
+                    "error": str(exc),
+                })
+
+        return ProviderResult.success_result(
+            {
+                "machines": machines,
+                "queried_count": len(status_context.instance_ids),
+            },
+            {
+                "operation": "get_instance_status",
+                "instance_ids": status_context.instance_ids,
+            },
+        )
+
+    def _handle_get_instance_status(self, operation: ProviderOperation) -> ProviderResult:
+        try:
+            status_context = self._build_status_operation_context(operation)
+
+            if bool(operation.context and operation.context.get("dry_run", False)):
+                return self._status_dry_run_result(status_context.instance_ids)
 
             self._restore_pending_vmss_cleanups(operation)
 
             handler_machines = self._get_instance_status_via_handlers(
                 operation=operation,
-                instance_ids=instance_ids,
-                resource_group=resource_group,
+                instance_ids=status_context.instance_ids,
+                resource_group=status_context.resource_group,
             )
             if handler_machines is not None:
-                provider_api_value = self._resolve_operation_provider_api(operation)
-                resource_ids: list[str] = []
-                if provider_api_value in (
-                    AzureProviderApi.VMSS,
-                    AzureProviderApi.VMSS_UNIFORM,
-                ):
-                    resource_ids = self._status_resource_ids(operation, instance_ids)
-                    if resource_ids:
-                        self._maybe_cleanup_pending_vmss(
-                            resource_group=resource_group,
-                            resource_ids=resource_ids,
-                            instance_details=handler_machines,
-                        )
-                metadata = {
-                    "operation": "get_instance_status",
-                    "instance_ids": instance_ids,
-                    "method": "handler",
-                }
-                if provider_api_value in (
-                    AzureProviderApi.VMSS,
-                    AzureProviderApi.VMSS_UNIFORM,
-                ):
-                    metadata.update(
-                        self._vmss_cleanup_status_metadata(
-                            resource_group=resource_group,
-                            resource_ids=resource_ids,
-                        )
-                    )
-                return ProviderResult.success_result(
-                    {"machines": handler_machines, "queried_count": len(instance_ids)},
-                    metadata,
+                return self._status_handler_result(
+                    operation=operation,
+                    status_context=status_context,
+                    handler_machines=handler_machines,
                 )
 
-            azure_client = self.azure_client
-            if not azure_client:
-                return ProviderResult.error_result(
-                    "Azure client not available", "AZURE_CLIENT_NOT_AVAILABLE"
-                )
-
-            machines: list[dict[str, Any]] = []
-            compute = azure_client.compute_client
-
-            for vm_id in instance_ids:
-                try:
-                    vm = compute.virtual_machines.get(
-                        resource_group_name=resource_group,
-                        vm_name=vm_id,
-                        expand="instanceView",
-                    )
-                    machine = self._convert_azure_instance_to_machine(vm)
-                    machines.append(machine)
-                except Exception as exc:
-                    self._logger.error("Failed to get status for VM '%s': %s", vm_id, exc)
-                    machines.append({
-                        "instance_id": vm_id,
-                        "status": "unknown",
-                        "provider_type": "azure",
-                        "error": str(exc),
-                    })
-
-            return ProviderResult.success_result(
-                {"machines": machines, "queried_count": len(instance_ids)},
-                {"operation": "get_instance_status", "instance_ids": instance_ids},
-            )
+            return self._sdk_status_result(status_context)
 
         except asyncio.CancelledError:
             raise
+        except _OperationPreparationFailure as exc:
+            return exc.result
         except (AzureValidationError, DomainValidationError, PydanticValidationError) as exc:
             return self._validation_error_result(
                 message=f"Failed to get instance status: {exc!s}",
