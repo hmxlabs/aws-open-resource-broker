@@ -28,7 +28,7 @@ async def test_populate_machine_ids_forwards_provider_context_for_azure():
     request.provider_data = {
         "follow_up_context": {
             "resource_group": "orb-test-rg",
-            "vmss_name": "vmss-demo",
+            "resource_id": "vmss-demo",
         }
     }
 
@@ -66,7 +66,7 @@ async def test_populate_machine_ids_forwards_provider_context_for_azure():
     assert operation.parameters["provider_api"] == "VMSS"
     assert operation.parameters["template_id"] == "azure-cheapest-vmss"
     assert operation.parameters["request_metadata"]["resource_group"] == "orb-test-rg"
-    assert operation.parameters["request_metadata"]["vmss_name"] == "vmss-demo"
+    assert operation.parameters["request_metadata"]["resource_id"] == "vmss-demo"
     assert (
         operation.parameters["request_metadata"]["provider_selection_reason"]
         == "configured-default"

@@ -543,7 +543,7 @@ class VMSSHandler(AzureHandler):
             return {}
 
         return {
-            "pending_vmss_cleanup": self._build_pending_vmss_cleanup(
+            "pending_resource_cleanup": self._build_pending_vmss_cleanup(
                 resource_group=resource_group,
                 vmss_name=vmss_name,
                 machine_ids=machine_ids,

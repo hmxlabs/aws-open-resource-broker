@@ -32,9 +32,9 @@ class PendingVmssCleanup:
     @classmethod
     def from_metadata(cls, metadata: Mapping[str, object]) -> Optional[PendingVmssCleanup]:
         resource_group = metadata.get("resource_group")
-        vmss_name = metadata.get("vmss_name")
+        resource_id = metadata.get("resource_id")
         raw_machine_ids = metadata.get("machine_ids", [])
-        if resource_group in (None, "") or vmss_name in (None, ""):
+        if resource_group in (None, "") or resource_id in (None, ""):
             return None
         if not isinstance(raw_machine_ids, list):
             return None
@@ -47,7 +47,7 @@ class PendingVmssCleanup:
 
         return cls(
             resource_group=str(resource_group),
-            vmss_name=str(vmss_name),
+            vmss_name=str(resource_id),
             machine_ids=machine_ids,
             delete_vmss_when_empty=bool(metadata.get("delete_vmss_when_empty", False)),
             delete_submitted=bool(metadata.get("delete_submitted", False)),
@@ -117,7 +117,7 @@ class PendingVmssCleanup:
     def to_metadata(self) -> dict[str, Any]:
         metadata: dict[str, object] = {
             "resource_group": self.resource_group,
-            "vmss_name": self.vmss_name,
+            "resource_id": self.vmss_name,
             "machine_ids": list(self.machine_ids),
             "delete_vmss_when_empty": self.delete_vmss_when_empty,
             "delete_submission_semantics": self.delete_submission_semantics,
@@ -162,7 +162,7 @@ class VmssCleanupCoordinator:
         if not isinstance(provider_data, Mapping):
             return
 
-        pending_metadata = provider_data.get("pending_vmss_cleanup")
+        pending_metadata = provider_data.get("pending_resource_cleanup")
         if not isinstance(pending_metadata, Mapping):
             return
 
@@ -178,7 +178,7 @@ class VmssCleanupCoordinator:
             )
 
     def restore_from_request_metadata(self, request_metadata: Mapping[str, object]) -> None:
-        direct_pending = request_metadata.get("pending_vmss_cleanup")
+        direct_pending = request_metadata.get("pending_resource_cleanup")
         if isinstance(direct_pending, Mapping):
             self.record({"provider_data": request_metadata})
 

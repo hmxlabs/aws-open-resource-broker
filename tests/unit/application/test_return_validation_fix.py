@@ -233,9 +233,9 @@ class TestReturnValidationFix:
                 "provider_data": {
                     "termination_requests": [
                         {
-                            "pending_vmss_cleanup": {
+                            "pending_resource_cleanup": {
                                 "resource_group": "test-rg",
-                                "vmss_name": "vmss-demo",
+                                "resource_id": "vmss-demo",
                                 "machine_ids": ["machine-001"],
                                 "delete_vmss_when_empty": True,
                             }
@@ -254,8 +254,8 @@ class TestReturnValidationFix:
         request.set_provider_data.assert_called_once()
         persisted_provider_data = request.set_provider_data.call_args.args[0]
         assert persisted_provider_data["follow_up_context"]["termination_requests"][0][
-            "pending_vmss_cleanup"
-        ]["vmss_name"] == "vmss-demo"
+            "pending_resource_cleanup"
+        ]["resource_id"] == "vmss-demo"
         saved_request = self.mock_uow.requests.save.call_args[0][0]
         assert saved_request is updated_request
         statuses = [call.args[0].status for call in command_bus.execute.await_args_list]

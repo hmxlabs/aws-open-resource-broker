@@ -205,7 +205,6 @@ class MachineSyncService:
         candidate_resource_ids = (
             instance_data.get("resource_id"),
             provider_data.get("resource_id") if isinstance(provider_data, dict) else None,
-            provider_data.get("vmss_name") if isinstance(provider_data, dict) else None,
             request_resource_ids[0] if request_resource_ids else None,
         )
         for resource_id in candidate_resource_ids:
@@ -237,12 +236,12 @@ class MachineSyncService:
         for termination_request in termination_requests:
             if not isinstance(termination_request, dict):
                 continue
-            pending_cleanup = termination_request.get("pending_vmss_cleanup")
+            pending_cleanup = termination_request.get("pending_resource_cleanup")
             if not isinstance(pending_cleanup, dict):
                 continue
 
-            vmss_name = pending_cleanup.get("vmss_name")
-            if vmss_name in (None, ""):
+            resource_id = pending_cleanup.get("resource_id")
+            if resource_id in (None, ""):
                 continue
 
             pending_machine_ids = pending_cleanup.get("machine_ids", [])
@@ -252,7 +251,7 @@ class MachineSyncService:
             for machine_id in pending_machine_ids:
                 machine_id_str = str(machine_id)
                 if machine_id_str and machine_id_str in requested_ids:
-                    mapping.setdefault(machine_id_str, (str(vmss_name), 1))
+                    mapping.setdefault(machine_id_str, (str(resource_id), 1))
 
         return mapping
 

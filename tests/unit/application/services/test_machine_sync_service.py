@@ -146,9 +146,9 @@ async def test_fetch_provider_machines_for_return_rebuilds_vmss_mapping_from_fol
             "resource_group": "orb-test-rg",
             "termination_requests": [
                 {
-                    "pending_vmss_cleanup": {
+                    "pending_resource_cleanup": {
                         "resource_group": "orb-test-rg",
-                        "vmss_name": "vmss-demo",
+                        "resource_id": "vmss-demo",
                         "machine_ids": ["vmss-demo_000001"],
                         "delete_vmss_when_empty": True,
                     }
@@ -189,7 +189,6 @@ async def test_fetch_provider_machines_preserves_instance_owned_resource_id_for_
                         "provider_type": "azure",
                         "provider_data": {
                             "resource_id": "vmss-b",
-                            "vmss_name": "vmss-b",
                         },
                     }
                 ]
