@@ -639,8 +639,7 @@ def orb_config_dir_cqrs(orb_config_dir):
             for provider in cfg["provider"]["providers"]:
                 provider.get("config", {}).pop("profile", None)
         except (KeyError, TypeError):
-            pass
-        config_path.write_text(_json.dumps(cfg, indent=2))
+            pass  # config structure may vary; profile removal is best-effort
 
     default_cfg_path = orb_config_dir / "default_config.json"
     if default_cfg_path.exists():
@@ -650,8 +649,7 @@ def orb_config_dir_cqrs(orb_config_dir):
                 "ami-12345678"
             )
         except (KeyError, TypeError):
-            pass
-        default_cfg_path.write_text(_json.dumps(cfg, indent=2))
+            pass  # default config may not have this path; image_id override is best-effort
 
     return orb_config_dir
 
@@ -674,7 +672,7 @@ def cqrs_buses(orb_config_dir_cqrs):
             for instance in provider_config.get_active_providers():
                 registry.ensure_provider_instance_registered_from_config(instance)
     except Exception:
-        pass
+        pass  # provider registration is best-effort in test setup; missing config is non-fatal
 
     from orb.application.ports.command_bus_port import CommandBusPort
     from orb.application.ports.query_bus_port import QueryBusPort
