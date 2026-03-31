@@ -76,7 +76,12 @@ def _resolve_power_state(statuses: list[Any]) -> str:
 
 
 def _status_attr(status: Any, attr: str, default: Any = None) -> Any:
-    """Read Azure status attributes from SDK objects or attribute-based test doubles."""
+    """Read Azure status attributes from SDK objects or attribute-based test doubles.
+
+    getattr is necessary here: callers pass heterogeneous status-like objects
+    (SDK InstanceViewStatus, plain dicts wrapped in SimpleNamespace, etc.) and
+    the requested attribute varies per call-site.
+    """
     if hasattr(status, attr):
         return getattr(status, attr)
     return default
@@ -760,7 +765,9 @@ class VMSSHandler(AzureHandler):
             return []
 
         errors: list[ProviderErrorEntry] = []
-        provisioning_state = str(getattr(vmss, "provisioning_state", "") or "")
+        provisioning_state = str(vmss.provisioning_state or "")
+        # getattr: VirtualMachineScaleSet has no `statuses` attribute; it only
+        # appears on the instance-view sub-resource which may not be expanded.
         statuses = getattr(vmss, "statuses", None) or []
 
         errors.extend(
@@ -793,7 +800,7 @@ class VMSSHandler(AzureHandler):
             resource_group_name=resource_group,
             vm_scale_set_name=vmss_name,
         )
-        raw_mode = getattr(vmss, "orchestration_mode", None) or "Flexible"
+        raw_mode = vmss.orchestration_mode or "Flexible"
         return AzureVMSSOrchestrationMode(str(raw_mode))
 
     def _list_flexible_vmss_instances(
@@ -840,7 +847,7 @@ class VMSSHandler(AzureHandler):
 
         # Extract status
         status = "unknown"
-        instance_view = getattr(vm, "instance_view", None)
+        instance_view = vm.instance_view
         if instance_view and hasattr(instance_view, "statuses"):
             status = _resolve_power_state(instance_view.statuses)
             fleet_errors = self._extract_vm_errors(
@@ -869,24 +876,24 @@ class VMSSHandler(AzureHandler):
         vnet_id = network_identity["vnet_id"]
 
         # Hardware profile → instance type
-        hw = getattr(vm, "hardware_profile", None)
-        instance_type = getattr(hw, "vm_size", None) if hw else None
+        hw = vm.hardware_profile
+        instance_type = hw.vm_size if hw else None
         # Ensure instance_type is a valid non-empty string
         if not instance_type:
             instance_type = "unknown"
 
         # Location
-        location = getattr(vm, "location", None)
+        location = vm.location
 
         # Zones
-        zones = getattr(vm, "zones", None)
+        zones = vm.zones
         availability_zone = zones[0] if zones else None
 
         # Launch time approximation
         launch_time = None
         if instance_view and hasattr(instance_view, "statuses"):
             for s in instance_view.statuses:
-                t = getattr(s, "time", None)
+                t = s.time
                 if t is not None:
                     launch_time = str(t)
                     break

@@ -22,7 +22,7 @@ class AzureMachineConversionService:
     @staticmethod
     def _resolve_power_state(vm: Any) -> str:
         status = MachineStatus.UNKNOWN.value
-        instance_view = getattr(vm, "instance_view", None)
+        instance_view = vm.instance_view
         if not instance_view or not hasattr(instance_view, "statuses"):
             return status
 
@@ -35,7 +35,7 @@ class AzureMachineConversionService:
             "PowerState/deallocated": MachineStatus.STOPPED,
         }
         for vm_status in instance_view.statuses:
-            code = getattr(vm_status, "code", "")
+            code = vm_status.code or ""
             if code.startswith("PowerState/"):
                 return state_map.get(code, MachineStatus.UNKNOWN).value
         return status
@@ -43,25 +43,23 @@ class AzureMachineConversionService:
     def convert_sdk_vm(self, vm: Any, azure_client: AzureClient) -> dict[str, Any]:
         network_identity = azure_client.resolve_network_identity_from_vm(vm)
         vm_name = cast(_AzureVmWithName, vm).name
-        hardware_profile = getattr(vm, "hardware_profile", None)
+        hardware_profile = vm.hardware_profile
 
         return {
-            "instance_id": getattr(vm, "vm_id", vm_name or ""),
+            "instance_id": vm.vm_id,
             "status": self._resolve_power_state(vm),
             "private_ip": network_identity["private_ip"],
             "public_ip": network_identity["public_ip"],
             "launch_time": None,
-            "instance_type": getattr(hardware_profile, "vm_size", None)
-            if hardware_profile
-            else None,
+            "instance_type": hardware_profile.vm_size if hardware_profile else None,
             "subnet_id": network_identity["subnet_id"],
             "vpc_id": network_identity["vnet_id"],
-            "availability_zone": (getattr(vm, "zones", None) or [None])[0],
+            "availability_zone": (vm.zones or [None])[0],
             "provider_type": "azure",
             "provider_data": {
                 "vm_name": vm_name,
-                "location": getattr(vm, "location", None),
-                "provisioning_state": getattr(vm, "provisioning_state", None),
+                "location": vm.location,
+                "provisioning_state": vm.provisioning_state,
                 "nic_id": network_identity["nic_id"],
                 "nic_name": network_identity["nic_name"],
                 "vnet_id": network_identity["vnet_id"],

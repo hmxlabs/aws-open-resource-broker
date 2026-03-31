@@ -6,7 +6,13 @@ from typing import Any
 
 
 def extract_azure_error_details(exc: Exception) -> dict[str, Any]:
-    """Extract Azure SDK error details from common exception shapes."""
+    """Extract Azure SDK error details from common exception shapes.
+
+    Uses getattr throughout because this normalises errors from the full
+    azure-core hierarchy (HttpResponseError, ServiceRequestError, ODataV4Error,
+    etc.) plus non-Azure exceptions.  No single base class exposes all of
+    error / response / error_code / status_code / message uniformly.
+    """
     error = getattr(exc, "error", None)
     response = getattr(exc, "response", None)
 

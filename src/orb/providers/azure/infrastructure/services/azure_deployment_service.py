@@ -97,7 +97,7 @@ class AzureDeploymentService:
             resource_name=deployment_name,
             api_version=self._DEPLOYMENT_API_VERSION,
         )
-        properties = getattr(deployment, "properties", None)
+        properties = deployment.properties
         if not isinstance(properties, dict):
             properties = {}
 

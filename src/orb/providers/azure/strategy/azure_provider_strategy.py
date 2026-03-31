@@ -373,6 +373,7 @@ class AzureProviderStrategy(ProviderStrategy):
         metadata: Optional[dict[str, Any]] = None,
     ) -> ProviderResult:
         """Build an error result, preserving Azure-specific error codes and details."""
+        # getattr: exc may be any Exception subclass, not just AzureError.
         error_code = getattr(exc, "error_code", None) or default_code
         merged = dict(metadata or {})
         merged["error_class"] = type(exc).__name__

@@ -301,7 +301,7 @@ class SingleVMHandler(AzureHandler):
 
     def check_hosts_status(self, request: Request) -> list[dict[str, Any]]:
         """Return status for individual VM IDs."""
-        resource_ids: list[str] = getattr(request, "resource_ids", []) or []
+        resource_ids: list[str] = request.resource_ids or []
         resource_group = (
             (request.metadata or {}).get("resource_group")
             or self.azure_client.resource_group
@@ -322,11 +322,11 @@ class SingleVMHandler(AzureHandler):
                     expand="instanceView",
                 )
                 status = "unknown"
-                instance_view = getattr(vm, "instance_view", None)
+                instance_view = vm.instance_view
                 if instance_view and hasattr(instance_view, "statuses"):
                     status = _resolve_power_state(instance_view.statuses)
 
-                hw = getattr(vm, "hardware_profile", None)
+                hw = vm.hardware_profile
                 network_identity = empty_network_identity()
                 try:
                     network_identity = self.azure_client.resolve_network_identity_from_vm(vm)
@@ -338,22 +338,22 @@ class SingleVMHandler(AzureHandler):
                         exc,
                     )
                 results.append({
-                    "instance_id": getattr(vm, "name", original_id),
+                    "instance_id": vm.name,
                     "status": status,
                     "private_ip": network_identity["private_ip"],
                     "public_ip": network_identity["public_ip"],
                     "launch_time": None,
-                    "instance_type": getattr(hw, "vm_size", None) if hw else None,
+                    "instance_type": hw.vm_size if hw else None,
                     "subnet_id": network_identity["subnet_id"],
                     "vpc_id": network_identity["vnet_id"],
-                    "availability_zone": (getattr(vm, "zones", None) or [None])[0],
+                    "availability_zone": (vm.zones or [None])[0],
                     "provider_type": "azure",
                     "provider_data": {
-                        "resource_id": getattr(vm, "name", vm_name),
-                        "vm_name": getattr(vm, "name", vm_name),
-                        "vm_id": getattr(vm, "vm_id", None),
+                        "resource_id": vm.name,
+                        "vm_name": vm.name,
+                        "vm_id": vm.vm_id,
                         "resource_group": resource_group,
-                        "location": getattr(vm, "location", None),
+                        "location": vm.location,
                         "nic_id": network_identity["nic_id"],
                         "nic_name": network_identity["nic_name"],
                         "vnet_id": network_identity["vnet_id"],
@@ -464,7 +464,7 @@ class SingleVMHandler(AzureHandler):
                         resource_group_name=resource_group,
                         vm_name=machine_id_str,
                     )
-                    resolved[index] = str(getattr(vm, "name", None) or machine_id_str)
+                    resolved[index] = str(vm.name or machine_id_str)
                 except AzureResourceNotFoundError:
                     unresolved_indices.append(index)
 
@@ -473,12 +473,12 @@ class SingleVMHandler(AzureHandler):
 
                 lookup: dict[str, str] = {}
                 for vm in vms:
-                    vm_name = getattr(vm, "name", None)
+                    vm_name = vm.name
                     if not vm_name:
                         continue
                     lookup[str(vm_name)] = str(vm_name)
 
-                    vm_id = getattr(vm, "vm_id", None)
+                    vm_id = vm.vm_id
                     if vm_id:
                         lookup[str(vm_id)] = str(vm_name)
 

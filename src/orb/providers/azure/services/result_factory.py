@@ -20,6 +20,7 @@ class AzureStrategyResultFactory:
         *,
         default: str,
     ) -> str:
+        # getattr: PydanticValidationError and DomainValidationError lack error_code.
         error_code = getattr(exc, "error_code", None)
         if isinstance(error_code, str) and error_code:
             return error_code

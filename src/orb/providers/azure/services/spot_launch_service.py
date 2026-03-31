@@ -46,7 +46,7 @@ class AzureSpotLaunchService:
 
     @staticmethod
     def should_use_spot_placement(template: AzureTemplate) -> bool:
-        return getattr(template, "allocation_strategy", None) == "spotPlacementScore"
+        return template.allocation_strategy == "spotPlacementScore"
 
     def build_spot_placement_plan(
         self,

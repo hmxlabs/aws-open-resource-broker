@@ -72,8 +72,8 @@ class AzureResourceManager:
                 resource_group_name=resource_group,
                 vm_scale_set_name=vmss_name,
             )
-            sku = getattr(vmss, "sku", None)
-            orchestration_mode = getattr(vmss, "orchestration_mode", None) or "Flexible"
+            sku = vmss.sku
+            orchestration_mode = vmss.orchestration_mode or "Flexible"
             provisioned_instance_count = self.get_vmss_member_count(
                 resource_group=resource_group,
                 vmss_name=vmss_name,
@@ -82,9 +82,9 @@ class AzureResourceManager:
             return {
                 "vmss_name": vmss_name,
                 "resource_group": resource_group,
-                "capacity": getattr(sku, "capacity", 0) if sku else 0,
-                "vm_size": getattr(sku, "name", None) if sku else None,
-                "provisioning_state": getattr(vmss, "provisioning_state", None),
+                "capacity": sku.capacity if sku else 0,
+                "vm_size": sku.name if sku else None,
+                "provisioning_state": vmss.provisioning_state,
                 "provisioned_instance_count": provisioned_instance_count,
             }
         except Exception as exc:
@@ -108,7 +108,7 @@ class AzureResourceManager:
                 resource_group_name=resource_group,
                 vm_scale_set_name=vmss_name,
             )
-            resolved_orchestration_mode = getattr(vmss, "orchestration_mode", None) or "Flexible"
+            resolved_orchestration_mode = vmss.orchestration_mode or "Flexible"
 
         return self._get_vmss_instance_count(
             resource_group=resource_group,
@@ -126,8 +126,8 @@ class AzureResourceManager:
             if str(orchestration_mode).lower() == "flexible":
                 count = 0
                 for vm in compute.virtual_machines.list(resource_group_name=resource_group):
-                    vmss_ref = getattr(vm, "virtual_machine_scale_set", None)
-                    vmss_id = getattr(vmss_ref, "id", "") if vmss_ref else ""
+                    vmss_ref = vm.virtual_machine_scale_set
+                    vmss_id = vmss_ref.id if vmss_ref else ""
                     if vmss_id and vmss_id.rstrip("/").endswith(f"/virtualMachineScaleSets/{vmss_name}"):
                         count += 1
                 return count
@@ -154,6 +154,7 @@ class AzureResourceManager:
             )
             return True
         except Exception as exc:
+            # getattr: Exception subclasses vary — not all have error_code/status_code.
             error_code = getattr(exc, "error_code", None)
             if error_code in {"ResourceNotFound", "NotFound", "VMSSNotFoundError"}:
                 return False
@@ -216,7 +217,7 @@ class AzureResourceManager:
             result: list[dict[str, Any]] = []
             for u in usages:
                 result.append({
-                    "name": getattr(u.name, "value", str(u.name)),
+                    "name": u.name.value,
                     "current_value": u.current_value,
                     "limit": u.limit,
                     "unit": u.unit,

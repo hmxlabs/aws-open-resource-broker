@@ -36,18 +36,20 @@ _RETRYABLE_ERROR_CODES: frozenset[str] = frozenset({
 
 
 def is_retryable_azure_error(exception: Exception) -> bool:
-    """Return ``True`` if the exception is a retryable Azure SDK error."""
-    # azure-core raises HttpResponseError with a status_code attribute
+    """Return ``True`` if the exception is a retryable Azure SDK error.
+
+    Uses getattr because the function accepts any Exception and probes for
+    attributes that only some azure-core subclasses carry (status_code,
+    error_code, error, error.code).
+    """
     status_code = getattr(exception, "status_code", None)
     if status_code is not None and str(status_code) in _RETRYABLE_ERROR_CODES:
         return True
 
-    # Check the error_code attribute (azure.core.exceptions.HttpResponseError)
     error_code = getattr(exception, "error_code", None) or ""
     if error_code in _RETRYABLE_ERROR_CODES:
         return True
 
-    # Check inside nested error object
     error = getattr(exception, "error", None)
     if error:
         code = getattr(error, "code", None) or ""

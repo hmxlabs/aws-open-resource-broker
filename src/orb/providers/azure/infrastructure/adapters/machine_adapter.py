@@ -153,7 +153,7 @@ class AzureMachineAdapter:
         except Exception as exc:
             self._raise_azure_lookup_error(machine, exc)
 
-        statuses = getattr(getattr(vm, "instance_view", None), "statuses", []) or []
+        statuses = (vm.instance_view.statuses if vm.instance_view else []) or []
         system_status = self._find_status_code(statuses, "ProvisioningState/")
         power_status = self._find_status_code(statuses, "PowerState/")
 
@@ -171,7 +171,7 @@ class AzureMachineAdapter:
     @staticmethod
     def _find_status_code(statuses: list[Any], prefix: str) -> Optional[str]:
         for status in statuses:
-            code = getattr(status, "code", None)
+            code = status.code
             if code and str(code).startswith(prefix):
                 return str(code)
         return None
@@ -215,7 +215,7 @@ class AzureMachineAdapter:
             ) from exc
 
         if isinstance(exc, AzureHttpResponseError):
-            status_code = getattr(exc, "status_code", None)
+            status_code = exc.status_code
             if status_code == 429:
                 raise RateLimitError(
                     f"Azure rate limit exceeded looking up VM {machine_id}: {exc}"
