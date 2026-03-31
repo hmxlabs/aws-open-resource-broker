@@ -22,6 +22,8 @@ from orb.application.services.spot_placement_planner import (
 from orb.domain.base.dependency_injection import injectable
 from orb.domain.base.exceptions import ValidationError as DomainValidationError
 from orb.domain.base.ports import LoggingPort
+from orb.domain.request.aggregate import Request
+from orb.domain.request.value_objects import RequestType
 from orb.providers.azure.configuration.config import AzureProviderConfig
 from orb.providers.azure.configuration.template_extension import AzureTemplateExtensionConfig
 from orb.providers.azure.configuration.validator import validate_azure_template
@@ -600,8 +602,8 @@ class AzureProviderStrategy(ProviderStrategy):
             provider_instance_name=self.provider_instance_name,
         )
 
-    @staticmethod
     def _normalize_handler_create_result(
+        self,
         handler_result: Any,
         template_config: dict[str, Any],
         provider_api: AzureProviderApiRef,
@@ -817,33 +819,157 @@ class AzureProviderStrategy(ProviderStrategy):
             provider_api=self._resolve_operation_provider_api(operation),
         )
 
+    def _build_handler_request(
+        self,
+        operation: ProviderOperation,
+        resource_group: Optional[str],
+        resource_ids: list[str],
+        additional_metadata: Optional[dict[str, Any]] = None,
+    ) -> Request:
+
+        metadata = self._inventory_service.build_cyclecloud_request_metadata(
+            operation=operation,
+            resource_group=resource_group,
+        )
+        if additional_metadata:
+            metadata.update(additional_metadata)
+
+        request_id = operation.parameters.get("request_id") or (
+            operation.context.get("request_id") if operation.context else None
+        )
+        request = Request.create_new_request(
+            request_type=RequestType.ACQUIRE,
+            template_id=operation.parameters.get("template_id", "unknown"),
+            machine_count=1,
+            provider_type="azure",
+            provider_name=self.provider_instance_name,
+            request_id=request_id,
+            metadata=metadata,
+        )
+        request.resource_ids = resource_ids
+        return request
+
+    def _get_instance_status_via_handlers(
+        self,
+        *,
+        operation: ProviderOperation,
+        instance_ids: list[str],
+        resource_group: str,
+    ) -> Optional[list[dict[str, Any]]]:
+        provider_api = self._resolve_operation_provider_api(operation)
+        raw_resource_mapping = operation.parameters.get("resource_mapping", {}) or {}
+        grouped_resource_mapping = self._inventory_service.group_instance_ids_by_resource(
+            instance_ids, raw_resource_mapping
+        )
+
+        if not provider_api:
+            return None
+
+        handler = self.handlers.get(self._provider_api_key(provider_api))
+        if not handler and provider_api == AzureProviderApi.VMSS_UNIFORM:
+            handler = self.handlers.get(AzureProviderApi.VMSS.value)
+        if not handler and not grouped_resource_mapping:
+            return None
+
+        if provider_api == AzureProviderApi.SINGLE_VM and handler:
+            return handler.check_hosts_status(
+                self._build_handler_request(operation, resource_group, instance_ids)
+            )
+
+        if grouped_resource_mapping:
+            all_results: list[dict[str, Any]] = []
+            seen_instance_ids: set[str] = set()
+            for resource_id, mapped_ids in grouped_resource_mapping.items():
+                group_handler = handler
+                if not group_handler and provider_api:
+                    group_handler = self.handlers.get(self._provider_api_key(provider_api))
+                if not group_handler:
+                    continue
+
+                extra_metadata: dict[str, Any] = {}
+                if provider_api == AzureProviderApi.CYCLECLOUD:
+                    extra_metadata["node_ids"] = mapped_ids
+                request = self._build_handler_request(
+                    operation, resource_group, [resource_id], extra_metadata
+                )
+                for machine in self._inventory_service.filter_status_results(
+                    group_handler.check_hosts_status(request), mapped_ids
+                ):
+                    machine_id = str(machine.get("instance_id"))
+                    if machine_id not in seen_instance_ids:
+                        all_results.append(machine)
+                        seen_instance_ids.add(machine_id)
+
+            if all_results:
+                return all_results
+
+        resource_id = operation.parameters.get("resource_id")
+        if not handler or not resource_id:
+            return None
+
+        extra_metadata = {}
+        if provider_api == AzureProviderApi.CYCLECLOUD:
+            extra_metadata = {"node_ids": instance_ids}
+        request = self._build_handler_request(
+            operation,
+            resource_group,
+            instance_ids if provider_api == AzureProviderApi.SINGLE_VM else [resource_id],
+            extra_metadata,
+        )
+        if provider_api == AzureProviderApi.SINGLE_VM:
+            return handler.check_hosts_status(request)
+        return self._inventory_service.filter_status_results(
+            handler.check_hosts_status(request), instance_ids
+        )
+
     def _handle_get_instance_status(self, operation: ProviderOperation) -> ProviderResult:
         try:
             status_context = self._build_status_operation_context(operation)
 
             if bool(operation.context and operation.context.get("dry_run", False)):
-                return self._inventory_service.status_dry_run_result(status_context.instance_ids)
+                return ProviderResult.success_result(
+                    {
+                        "instances": [
+                            {
+                                "instance_id": iid,
+                                "status": "unknown",
+                                "provider_type": "azure",
+                                "provider_data": {"dry_run": True},
+                            }
+                            for iid in status_context.instance_ids
+                        ],
+                        "queried_count": len(status_context.instance_ids),
+                    },
+                    {
+                        "operation": "get_instance_status",
+                        "instance_ids": status_context.instance_ids,
+                        "method": "dry_run",
+                        "provider_data": {"dry_run": True},
+                    },
+                )
 
             self._restore_pending_resource_cleanups(operation)
 
-            handler_machines = self._inventory_service.get_instance_status_via_handlers(
+            handler_machines = self._get_instance_status_via_handlers(
                 operation=operation,
                 instance_ids=status_context.instance_ids,
                 resource_group=status_context.resource_group,
-                provider_instance_name=self.provider_instance_name,
-                resolve_operation_provider_api=self._resolve_operation_provider_api,
-                provider_api_key=self._provider_api_key,
-                handlers=self.handlers,
             )
             if handler_machines is not None:
                 is_vmss = status_context.provider_api in (
                     AzureProviderApi.VMSS,
                     AzureProviderApi.VMSS_UNIFORM,
                 )
-                result = self._inventory_service.status_handler_result(
-                    operation=operation,
-                    status_context=status_context,
-                    handler_machines=handler_machines,
+                result = ProviderResult.success_result(
+                    {
+                        "instances": handler_machines,
+                        "queried_count": len(status_context.instance_ids),
+                    },
+                    {
+                        "operation": "get_instance_status",
+                        "instance_ids": status_context.instance_ids,
+                        "method": "handler",
+                    },
                 )
                 if is_vmss:
                     resource_ids = self._inventory_service.status_resource_ids(
@@ -944,6 +1070,106 @@ class AzureProviderStrategy(ProviderStrategy):
     # DESCRIBE_RESOURCE_INSTANCES
     # ------------------------------------------------------------------
 
+    def _describe_resource_instances(
+        self,
+        *,
+        operation: ProviderOperation,
+        provider_api: AzureProviderApi | str,
+        provider_api_key: str,
+        resource_group: Optional[str],
+        fail_on_partial_status_error: bool = False,
+    ) -> ProviderResult:
+        resource_ids = operation.parameters.get("resource_ids", [])
+        handler = self.handlers.get(provider_api_key)
+        if not handler:
+            return ProviderResult.error_result(
+                f"No handler available for provider_api: {provider_api_key}",
+                "HANDLER_NOT_FOUND",
+            )
+
+        extra_metadata: dict[str, Any] = {}
+        if provider_api == AzureProviderApi.SINGLE_VM:
+            deployment_name = self._inventory_service.request_metadata(operation).get(
+                "deployment_name"
+            )
+            if deployment_name not in (None, ""):
+                extra_metadata["deployment_name"] = str(deployment_name)
+        if fail_on_partial_status_error:
+            extra_metadata["fail_on_partial_status_error"] = True
+
+        request = self._build_handler_request(
+            operation, resource_group, resource_ids, extra_metadata or None
+        )
+
+        instance_details = handler.check_hosts_status(request)
+
+        if not instance_details:
+            metadata: dict[str, Any] = {
+                "operation": "describe_resource_instances",
+                "resource_ids": resource_ids,
+                "provider_api": provider_api_key,
+                "handler_used": provider_api_key,
+                "instance_count": 0,
+            }
+            if provider_api in (AzureProviderApi.VMSS, AzureProviderApi.VMSS_UNIFORM):
+                vmss_errors: list[dict[str, Any]] = []
+                if resource_group and hasattr(handler, "get_vmss_resource_errors"):
+                    for resource_id in resource_ids:
+                        for error in handler.get_vmss_resource_errors(
+                            resource_group, resource_id
+                        ):
+                            if error not in vmss_errors:
+                                vmss_errors.append(error)
+                if vmss_errors:
+                    metadata["fleet_errors"] = vmss_errors
+                self._resource_metadata_service.augment_vmss_capacity_metadata(
+                    metadata,
+                    resource_ids,
+                    resource_manager=self.resource_manager,
+                    resource_group=resource_group,
+                )
+            elif provider_api == AzureProviderApi.SINGLE_VM:
+                self._resource_metadata_service.augment_single_vm_deployment_metadata(
+                    metadata,
+                    extra_metadata,
+                    resource_group=resource_group,
+                    deployment_service=self.deployment_service,
+                )
+            return ProviderResult.success_result({"instances": []}, metadata)
+
+        fleet_errors: list[dict[str, Any]] = []
+        for inst in instance_details:
+            provider_data = inst.get("provider_data") or {}
+            if isinstance(provider_data, dict):
+                for error in provider_data.get("fleet_errors") or []:
+                    if error not in fleet_errors:
+                        fleet_errors.append(error)
+
+        metadata = {
+            "operation": "describe_resource_instances",
+            "resource_ids": resource_ids,
+            "provider_api": provider_api_key,
+            "handler_used": provider_api_key,
+            "instance_count": len(instance_details),
+        }
+        if fleet_errors:
+            metadata["fleet_errors"] = fleet_errors
+
+        if provider_api in (AzureProviderApi.VMSS, AzureProviderApi.VMSS_UNIFORM):
+            self._resource_metadata_service.augment_vmss_capacity_metadata(
+                metadata,
+                resource_ids,
+                resource_manager=self.resource_manager,
+                resource_group=resource_group,
+            )
+
+        self._resource_metadata_service.augment_shortfall_metadata(metadata)
+
+        return ProviderResult.success_result(
+            data={"instances": instance_details},
+            metadata=metadata,
+        )
+
     async def _handle_describe_resource_instances(
         self, operation: ProviderOperation
     ) -> ProviderResult:
@@ -975,7 +1201,6 @@ class AzureProviderStrategy(ProviderStrategy):
                     },
                 )
 
-            resource_ids = operation.parameters.get("resource_ids", [])
             provider_api_key = self._provider_api_key(provider_api)
             resource_group = self._inventory_service.resolve_operation_resource_group(
                 operation,
@@ -989,16 +1214,11 @@ class AzureProviderStrategy(ProviderStrategy):
                 resource_ids=resource_ids,
             )
 
-            result = self._inventory_service.describe_resource_instances(
+            result = self._describe_resource_instances(
                 operation=operation,
-                handlers=self.handlers,
-                provider_instance_name=self.provider_instance_name,
                 provider_api=provider_api,
                 provider_api_key=provider_api_key,
                 resource_group=resource_group,
-                resource_manager=self.resource_manager,
-                deployment_service=self.deployment_service,
-                resource_metadata_service=self._resource_metadata_service,
                 fail_on_partial_status_error=fail_on_partial,
             )
 
