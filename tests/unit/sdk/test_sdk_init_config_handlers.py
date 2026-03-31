@@ -87,13 +87,7 @@ class TestEnsureRawConfigMergesStrategyDefaults:
         FAILS against current code because the dict branch never merges them.
         """
         fake_defaults = {
-            "provider_defaults": {
-                "aws": {
-                    "handlers": {
-                        "RunInstances": {"enabled": True}
-                    }
-                }
-            }
+            "provider_defaults": {"aws": {"handlers": {"RunInstances": {"enabled": True}}}}
         }
 
         with patch.object(
