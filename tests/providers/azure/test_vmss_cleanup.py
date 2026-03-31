@@ -80,7 +80,7 @@ def test_vmss_cleanup_coordinator_reconciles_delete_retry_state():
     coordinator.record(
         {
             "provider_data": {
-                "pending_vmss_cleanup": {
+                "pending_resource_cleanup": {
                     "resource_group": "test-rg",
                     "vmss_name": "vmss-demo",
                     "machine_ids": ["vm-a"],
@@ -130,7 +130,7 @@ def test_vmss_cleanup_coordinator_restores_pending_state_from_request_metadata()
         {
             "termination_requests": [
                 {
-                    "pending_vmss_cleanup": {
+                    "pending_resource_cleanup": {
                         "resource_group": "test-rg",
                         "vmss_name": "vmss-demo",
                         "machine_ids": ["vm-a"],
@@ -168,7 +168,7 @@ def test_vmss_cleanup_coordinator_clears_pending_state():
     coordinator.record(
         {
             "provider_data": {
-                "pending_vmss_cleanup": {
+                "pending_resource_cleanup": {
                     "resource_group": "test-rg",
                     "vmss_name": "vmss-demo",
                     "machine_ids": ["vm-a"],
@@ -194,7 +194,7 @@ def test_vmss_cleanup_coordinator_submits_delete_when_vmss_is_empty():
     coordinator.record(
         {
             "provider_data": {
-                "pending_vmss_cleanup": {
+                "pending_resource_cleanup": {
                     "resource_group": "test-rg",
                     "vmss_name": "vmss-demo",
                     "machine_ids": ["vm-a"],

@@ -203,7 +203,7 @@ class TestCapacityMetadata:
                     "resource_group": "test-rg",
                     "termination_requests": [
                         {
-                            "pending_vmss_cleanup": {
+                            "pending_resource_cleanup": {
                                 "resource_group": "test-rg",
                                 "vmss_name": "vmss-demo",
                                 "machine_ids": ["vmss-demo_000001"],

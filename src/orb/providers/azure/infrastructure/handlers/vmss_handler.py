@@ -509,7 +509,7 @@ class VMSSHandler(AzureHandler):
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _build_pending_vmss_cleanup(
+    def _build_pending_resource_cleanup(
         *,
         resource_group: str,
         vmss_name: str,
@@ -543,7 +543,7 @@ class VMSSHandler(AzureHandler):
             return {}
 
         return {
-            "pending_resource_cleanup": self._build_pending_vmss_cleanup(
+            "pending_resource_cleanup": self._build_pending_resource_cleanup(
                 resource_group=resource_group,
                 vmss_name=vmss_name,
                 machine_ids=machine_ids,

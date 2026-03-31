@@ -32,9 +32,11 @@ class PendingVmssCleanup:
     @classmethod
     def from_metadata(cls, metadata: Mapping[str, object]) -> Optional[PendingVmssCleanup]:
         resource_group = metadata.get("resource_group")
-        resource_id = metadata.get("resource_id")
+        vmss_name = metadata.get("vmss_name")
+        if vmss_name in (None, ""):
+            vmss_name = metadata.get("resource_id")
         raw_machine_ids = metadata.get("machine_ids", [])
-        if resource_group in (None, "") or resource_id in (None, ""):
+        if resource_group in (None, "") or vmss_name in (None, ""):
             return None
         if not isinstance(raw_machine_ids, list):
             return None
@@ -47,7 +49,7 @@ class PendingVmssCleanup:
 
         return cls(
             resource_group=str(resource_group),
-            vmss_name=str(resource_id),
+            vmss_name=str(vmss_name),
             machine_ids=machine_ids,
             delete_vmss_when_empty=bool(metadata.get("delete_vmss_when_empty", False)),
             delete_submitted=bool(metadata.get("delete_submitted", False)),
@@ -117,7 +119,7 @@ class PendingVmssCleanup:
     def to_metadata(self) -> dict[str, Any]:
         metadata: dict[str, object] = {
             "resource_group": self.resource_group,
-            "resource_id": self.vmss_name,
+            "vmss_name": self.vmss_name,
             "machine_ids": list(self.machine_ids),
             "delete_vmss_when_empty": self.delete_vmss_when_empty,
             "delete_submission_semantics": self.delete_submission_semantics,

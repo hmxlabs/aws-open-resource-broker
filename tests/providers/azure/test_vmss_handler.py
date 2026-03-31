@@ -430,7 +430,7 @@ def test_vmss_release_deletes_flexible_members_without_cleanup_metadata_when_vms
     )
 
     assert result["provider_data"]["operation_status"] == "submitted"
-    assert "pending_vmss_cleanup" not in result["provider_data"]
+    assert "pending_resource_cleanup" not in result["provider_data"]
     assert _deleted_vm_names(azure_client) == ["vm-a", "vm-b"]
     azure_client.compute_client.virtual_machine_scale_sets.begin_delete.assert_not_called()
 
@@ -455,7 +455,7 @@ def test_vmss_release_marks_flexible_vmss_for_cleanup_when_last_instance_is_retu
     )
 
     assert result["provider_data"]["operation_status"] == "submitted"
-    assert result["provider_data"]["pending_vmss_cleanup"] == {
+    assert result["provider_data"]["pending_resource_cleanup"] == {
         "resource_group": "test-rg",
         "vmss_name": "vmss-azure-test",
         "machine_ids": ["vm-a"],
@@ -494,7 +494,7 @@ def test_vmss_release_does_not_mark_flexible_vmss_for_cleanup_when_requested_ids
         context={"resource_group": "test-rg"},
     )
 
-    assert "pending_vmss_cleanup" not in result["provider_data"]
+    assert "pending_resource_cleanup" not in result["provider_data"]
     assert _deleted_vm_names(azure_client) == ["guid-a", "guid-b", "guid-c"]
     azure_client.compute_client.virtual_machine_scale_sets.begin_delete.assert_not_called()
 
@@ -530,7 +530,7 @@ def test_vmss_release_marks_uniform_vmss_for_cleanup_when_last_instance_is_retur
         assert delete_ids.instance_ids == ["3"]
     else:
         assert delete_ids["instance_ids"] == ["3"]
-    assert result["provider_data"]["pending_vmss_cleanup"] == {
+    assert result["provider_data"]["pending_resource_cleanup"] == {
         "resource_group": "test-rg",
         "vmss_name": "vmss-azure-test",
         "machine_ids": ["3"],
@@ -567,7 +567,7 @@ def test_vmss_release_surfaces_retry_pending_when_immediate_empty_vmss_delete_fa
         context={"resource_group": "test-rg"},
     )
 
-    assert result["provider_data"]["pending_vmss_cleanup"] == {
+    assert result["provider_data"]["pending_resource_cleanup"] == {
         "resource_group": "test-rg",
         "vmss_name": "vmss-azure-test",
         "machine_ids": ["vm-a"],

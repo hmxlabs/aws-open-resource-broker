@@ -151,7 +151,7 @@ class AzureProviderStrategy(ProviderStrategy):
         )
         self._termination_dispatch_service = AzureTerminationDispatchService(
             logger=logger,
-            record_pending_cleanup=self._record_pending_vmss_cleanup,
+            record_pending_cleanup=self._record_pending_resource_cleanup,
         )
 
     # ------------------------------------------------------------------
@@ -824,7 +824,7 @@ class AzureProviderStrategy(ProviderStrategy):
             if bool(operation.context and operation.context.get("dry_run", False)):
                 return self._inventory_service.status_dry_run_result(status_context.instance_ids)
 
-            self._restore_pending_vmss_cleanups(operation)
+            self._restore_pending_resource_cleanups(operation)
 
             handler_machines = self._inventory_service.get_instance_status_via_handlers(
                 operation=operation,
@@ -840,8 +840,8 @@ class AzureProviderStrategy(ProviderStrategy):
                     operation=operation,
                     status_context=status_context,
                     handler_machines=handler_machines,
-                    maybe_cleanup_pending_vmss=self._maybe_cleanup_pending_vmss,
-                    vmss_cleanup_status_metadata=self._vmss_cleanup_status_metadata,
+                    maybe_reconcile_pending_resource_cleanup=self._maybe_reconcile_pending_resource_cleanup,
+                    pending_resource_cleanup_status_metadata=self._pending_resource_cleanup_status_metadata,
                 )
 
             return self._inventory_service.sdk_status_result(
@@ -883,16 +883,16 @@ class AzureProviderStrategy(ProviderStrategy):
             resource_group=resource_group,
         )
 
-    def _record_pending_vmss_cleanup(self, handler_result: Any) -> None:
+    def _record_pending_resource_cleanup(self, handler_result: Any) -> None:
         self._vmss_cleanup_coordinator.record(handler_result)
 
-    def _restore_pending_vmss_cleanups(self, operation: ProviderOperation) -> None:
-        """Rebuild pending VMSS cleanup state from durable request metadata."""
+    def _restore_pending_resource_cleanups(self, operation: ProviderOperation) -> None:
+        """Rebuild pending resource cleanup state from durable request metadata."""
         self._vmss_cleanup_coordinator.restore_from_request_metadata(
             self._inventory_service.request_metadata(operation)
         )
 
-    def _has_pending_vmss_cleanup(
+    def _has_pending_resource_cleanup(
         self,
         *,
         resource_group: Optional[str],
@@ -903,7 +903,7 @@ class AzureProviderStrategy(ProviderStrategy):
             resource_ids=resource_ids,
         )
 
-    def _vmss_cleanup_status_metadata(
+    def _pending_resource_cleanup_status_metadata(
         self,
         *,
         resource_group: Optional[str],
@@ -941,7 +941,7 @@ class AzureProviderStrategy(ProviderStrategy):
             vm_scale_set_name=vmss_name,
         )
 
-    def _maybe_cleanup_pending_vmss(
+    def _maybe_reconcile_pending_resource_cleanup(
         self,
         *,
         resource_group: Optional[str],
@@ -1002,10 +1002,10 @@ class AzureProviderStrategy(ProviderStrategy):
                 resource_manager=self.resource_manager,
                 deployment_service=self.deployment_service,
                 resource_metadata_service=self._resource_metadata_service,
-                restore_pending_vmss_cleanups=self._restore_pending_vmss_cleanups,
-                has_pending_vmss_cleanup=self._has_pending_vmss_cleanup,
-                maybe_cleanup_pending_vmss=self._maybe_cleanup_pending_vmss,
-                vmss_cleanup_status_metadata=self._vmss_cleanup_status_metadata,
+                restore_pending_resource_cleanups=self._restore_pending_resource_cleanups,
+                has_pending_resource_cleanup=self._has_pending_resource_cleanup,
+                maybe_reconcile_pending_resource_cleanup=self._maybe_reconcile_pending_resource_cleanup,
+                pending_resource_cleanup_status_metadata=self._pending_resource_cleanup_status_metadata,
             )
 
         except asyncio.CancelledError:

@@ -408,7 +408,7 @@ class TestDescribeResourceInstances:
                     "resource_group": "test-rg",
                     "termination_requests": [
                         {
-                            "pending_vmss_cleanup": {
+                            "pending_resource_cleanup": {
                                 "resource_group": "test-rg",
                                 "vmss_name": "vmss-demo",
                                 "machine_ids": ["vm-a"],
@@ -461,7 +461,7 @@ class TestDescribeResourceInstances:
                     "resource_group": "test-rg",
                     "termination_requests": [
                         {
-                            "pending_vmss_cleanup": {
+                            "pending_resource_cleanup": {
                                 "resource_group": "test-rg",
                                 "vmss_name": "vmss-demo",
                                 "machine_ids": ["vm-a"],
@@ -504,7 +504,7 @@ class TestDescribeResourceInstances:
                     "resource_group": "test-rg",
                     "termination_requests": [
                         {
-                            "pending_vmss_cleanup": {
+                            "pending_resource_cleanup": {
                                 "resource_group": "test-rg",
                                 "vmss_name": "vmss-demo",
                                 "machine_ids": ["vm-a"],
@@ -545,7 +545,7 @@ class TestDescribeResourceInstances:
                     "resource_group": "test-rg",
                     "termination_requests": [
                         {
-                            "pending_vmss_cleanup": {
+                            "pending_resource_cleanup": {
                                 "resource_group": "test-rg",
                                 "vmss_name": "vmss-b",
                                 "machine_ids": ["vm-b"],
@@ -602,7 +602,7 @@ class TestDescribeResourceInstances:
                     "resource_group": "test-rg",
                     "termination_requests": [
                         {
-                            "pending_vmss_cleanup": {
+                            "pending_resource_cleanup": {
                                 "resource_group": "test-rg",
                                 "vmss_name": "vmss-demo",
                                 "machine_ids": ["vm-a"],
@@ -651,7 +651,7 @@ class TestDescribeResourceInstances:
                     "resource_group": "test-rg",
                     "termination_requests": [
                         {
-                            "pending_vmss_cleanup": {
+                            "pending_resource_cleanup": {
                                 "resource_group": "test-rg",
                                 "vmss_name": "vmss-demo",
                                 "machine_ids": ["vm-a"],

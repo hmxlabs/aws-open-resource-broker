@@ -420,7 +420,7 @@ class TestTerminateInstances:
         handler = MagicMock()
         handler.release_hosts.return_value = {
             "provider_data": {
-                "pending_vmss_cleanup": {
+                "pending_resource_cleanup": {
                     "resource_group": "test-rg",
                     "vmss_name": "vmss-prod-b",
                     "machine_ids": ["orb-1"],
@@ -449,7 +449,7 @@ class TestTerminateInstances:
         assert result.success
         assert result.metadata["provider_data"]["termination_requests"] == [
             {
-                "pending_vmss_cleanup": {
+                "pending_resource_cleanup": {
                     "resource_group": "test-rg",
                     "vmss_name": "vmss-prod-b",
                     "machine_ids": ["orb-1"],
@@ -471,7 +471,7 @@ class TestTerminateInstances:
         handler.release_hosts.side_effect = [
             {
                 "provider_data": {
-                    "pending_vmss_cleanup": {
+                    "pending_resource_cleanup": {
                         "resource_group": "test-rg",
                         "vmss_name": "vmss-prod-b",
                         "machine_ids": ["orb-1"],
@@ -484,7 +484,7 @@ class TestTerminateInstances:
             },
             {
                 "provider_data": {
-                    "pending_vmss_cleanup": {
+                    "pending_resource_cleanup": {
                         "resource_group": "test-rg",
                         "vmss_name": "vmss-prod-b",
                         "machine_ids": ["orb-2"],
@@ -526,7 +526,7 @@ class TestTerminateInstances:
         assert second_result.success
         assert first_result.metadata["provider_data"]["termination_requests"] == [
             {
-                "pending_vmss_cleanup": {
+                "pending_resource_cleanup": {
                     "resource_group": "test-rg",
                     "vmss_name": "vmss-prod-b",
                     "machine_ids": ["orb-1"],
@@ -539,7 +539,7 @@ class TestTerminateInstances:
         ]
         assert second_result.metadata["provider_data"]["termination_requests"] == [
             {
-                "pending_vmss_cleanup": {
+                "pending_resource_cleanup": {
                     "resource_group": "test-rg",
                     "vmss_name": "vmss-prod-b",
                     "machine_ids": ["orb-2"],
@@ -607,7 +607,7 @@ class TestTerminateInstances:
                     "resource_group": "test-rg",
                     "termination_requests": [
                         {
-                            "pending_vmss_cleanup": {
+                            "pending_resource_cleanup": {
                                 "resource_group": "test-rg",
                                 "vmss_name": "vmss-prod-b",
                                 "machine_ids": ["orb-1"],

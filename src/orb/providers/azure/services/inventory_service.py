@@ -231,8 +231,8 @@ class AzureInventoryService:
         operation: ProviderOperation,
         status_context: AzureStatusQueryContext,
         handler_machines: list[dict[str, Any]],
-        maybe_cleanup_pending_vmss: Callable[..., None],
-        vmss_cleanup_status_metadata: Callable[..., dict[str, Any]],
+        maybe_reconcile_pending_resource_cleanup: Callable[..., None],
+        pending_resource_cleanup_status_metadata: Callable[..., dict[str, Any]],
     ) -> ProviderResult:
         resource_ids: list[str] = []
         metadata = {
@@ -243,13 +243,13 @@ class AzureInventoryService:
         if status_context.provider_api in (AzureProviderApi.VMSS, AzureProviderApi.VMSS_UNIFORM):
             resource_ids = self.status_resource_ids(operation, status_context.instance_ids)
             if resource_ids:
-                maybe_cleanup_pending_vmss(
+                maybe_reconcile_pending_resource_cleanup(
                     resource_group=status_context.resource_group,
                     resource_ids=resource_ids,
                     instance_details=handler_machines,
                 )
             metadata.update(
-                vmss_cleanup_status_metadata(
+                pending_resource_cleanup_status_metadata(
                     resource_group=status_context.resource_group,
                     resource_ids=resource_ids,
                 )
@@ -397,10 +397,10 @@ class AzureInventoryService:
         resource_manager: Any,
         deployment_service: Any,
         resource_metadata_service: Any,
-        restore_pending_vmss_cleanups: Callable[[ProviderOperation], None],
-        has_pending_vmss_cleanup: Callable[..., bool],
-        maybe_cleanup_pending_vmss: Callable[..., None],
-        vmss_cleanup_status_metadata: Callable[..., dict[str, Any]],
+        restore_pending_resource_cleanups: Callable[[ProviderOperation], None],
+        has_pending_resource_cleanup: Callable[..., bool],
+        maybe_reconcile_pending_resource_cleanup: Callable[..., None],
+        pending_resource_cleanup_status_metadata: Callable[..., dict[str, Any]],
     ) -> ProviderResult:
         resource_ids = operation.parameters.get("resource_ids", [])
         handler = handlers.get(provider_api_key)
@@ -420,13 +420,13 @@ class AzureInventoryService:
             operation=operation,
             resource_group=resource_group,
         )
-        restore_pending_vmss_cleanups(operation)
+        restore_pending_resource_cleanups(operation)
         if provider_api == AzureProviderApi.SINGLE_VM:
             deployment_name = self.request_metadata(operation).get("deployment_name")
             if deployment_name not in (None, ""):
                 request_metadata["deployment_name"] = str(deployment_name)
         if provider_api in (AzureProviderApi.VMSS, AzureProviderApi.VMSS_UNIFORM) and (
-            has_pending_vmss_cleanup(resource_group=resource_group, resource_ids=resource_ids)
+            has_pending_resource_cleanup(resource_group=resource_group, resource_ids=resource_ids)
         ):
             request_metadata["fail_on_partial_status_error"] = True
 
@@ -442,7 +442,7 @@ class AzureInventoryService:
         request.resource_ids = resource_ids
 
         instance_details = handler.check_hosts_status(request)
-        maybe_cleanup_pending_vmss(
+        maybe_reconcile_pending_resource_cleanup(
             resource_group=resource_group,
             resource_ids=resource_ids,
             instance_details=instance_details,
@@ -450,7 +450,7 @@ class AzureInventoryService:
 
         cleanup_metadata: dict[str, Any] = {}
         if provider_api in (AzureProviderApi.VMSS, AzureProviderApi.VMSS_UNIFORM):
-            cleanup_metadata = vmss_cleanup_status_metadata(
+            cleanup_metadata = pending_resource_cleanup_status_metadata(
                 resource_group=resource_group,
                 resource_ids=resource_ids,
             )
