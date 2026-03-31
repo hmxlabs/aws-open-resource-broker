@@ -11,8 +11,6 @@ import time
 from threading import RLock
 from typing import Any, Callable, Optional, cast
 
-from pydantic import ValidationError as PydanticValidationError
-
 from orb.application.services.spot_placement_execution import (
     SpotPlacementExecutionService,
 )
@@ -20,7 +18,6 @@ from orb.application.services.spot_placement_planner import (
     SpotPlacementPlanner,
 )
 from orb.domain.base.dependency_injection import injectable
-from orb.domain.base.exceptions import ValidationError as DomainValidationError
 from orb.domain.base.ports import LoggingPort
 from orb.domain.request.aggregate import Request
 from orb.domain.request.value_objects import RequestType
@@ -29,7 +26,6 @@ from orb.providers.azure.configuration.template_extension import AzureTemplateEx
 from orb.providers.azure.configuration.validator import validate_azure_template
 from orb.providers.azure.domain.template.azure_template_aggregate import AzureTemplate
 from orb.providers.azure.domain.template.value_objects import AzureProviderApi
-from orb.providers.azure.exceptions.azure_exceptions import AzureError, AzureValidationError
 from orb.providers.azure.infrastructure.adapters.machine_adapter import AzureMachineAdapter
 from orb.providers.azure.infrastructure.azure_client import AzureClient
 from orb.providers.azure.infrastructure.error_utils import (
@@ -40,10 +36,7 @@ from orb.providers.azure.infrastructure.handlers.azure_handler import AzureHandl
 from orb.providers.azure.infrastructure.handlers.cyclecloud_handler import CycleCloudHandler
 from orb.providers.azure.infrastructure.handlers.single_vm_handler import SingleVMHandler
 from orb.providers.azure.infrastructure.handlers.vmss_handler import VMSSHandler
-from orb.providers.azure.infrastructure.vmss_cleanup import (
-    VmssCleanupCoordinator,
-    VmssCleanupCoordinatorFactory,
-)
+from orb.providers.azure.infrastructure.vmss_cleanup import VmssCleanupCoordinatorFactory
 from orb.providers.azure.managers.azure_resource_manager import AzureResourceManager
 from orb.providers.azure.services.capability_service import AzureCapabilityService
 from orb.providers.azure.services.health_check_service import AzureHealthCheckService
@@ -58,15 +51,11 @@ from orb.providers.azure.services.provisioning_service import (
     AzureProvisioningService,
     CreateOperationContext,
 )
-from orb.providers.azure.services.result_factory import AzureStrategyResultFactory
 from orb.providers.azure.services.resource_metadata_service import (
     AzureResourceMetadataService,
 )
 from orb.providers.azure.services.template_catalog_service import AzureTemplateCatalogService
-from orb.providers.azure.services.termination_service import (
-    AzureTerminationService,
-    TerminationOperationContext,
-)
+from orb.providers.azure.services.termination_service import AzureTerminationService
 from orb.providers.azure.services.termination_dispatch_service import (
     AzureTerminationDispatchService,
 )
@@ -81,14 +70,6 @@ from orb.providers.base.strategy import (
 )
 
 AzureProviderApiRef = AzureProviderApi | str
-
-
-class _OperationPreparationFailure(Exception):
-    """Internal strategy control flow for returning a prepared ProviderResult."""
-
-    def __init__(self, result: ProviderResult) -> None:
-        super().__init__(result.error_message or "Operation preparation failed")
-        self.result = result
 
 
 @injectable
@@ -128,7 +109,6 @@ class AzureProviderStrategy(ProviderStrategy):
         self._inventory_service = AzureInventoryService(logger=logger)
         self._machine_conversion_service = AzureMachineConversionService(logger=logger)
         self._provisioning_service = AzureProvisioningService()
-        self._result_factory = AzureStrategyResultFactory()
         self._resource_metadata_service = AzureResourceMetadataService(
             default_resource_group=config.resource_group,
             logger=logger,
@@ -153,7 +133,7 @@ class AzureProviderStrategy(ProviderStrategy):
         )
         self._termination_dispatch_service = AzureTerminationDispatchService(
             logger=logger,
-            record_pending_cleanup=self._record_pending_resource_cleanup,
+            record_pending_cleanup=self._vmss_cleanup_coordinator.record,
         )
 
     # ------------------------------------------------------------------
@@ -272,9 +252,6 @@ class AzureProviderStrategy(ProviderStrategy):
         enhanced_config.setdefault("provider_name", self.provider_instance_name)
         return enhanced_config
 
-    def _should_use_spot_placement(self, template: AzureTemplate) -> bool:
-        return self._spot_launch_service.should_use_spot_placement(template)
-
     def _build_spot_placement_plan(
         self,
         azure_template: AzureTemplate,
@@ -291,78 +268,17 @@ class AzureProviderStrategy(ProviderStrategy):
         """Compatibility wrapper for tests and callers that patch this seam."""
         return self._spot_launch_service.is_capacity_like_failure(child_result)
 
-    def _execute_planned_spot_launches(
-        self,
-        azure_template: AzureTemplate,
-        provider_api: AzureProviderApiRef,
-        count: int,
-        template_config: dict[str, Any],
-        operation: ProviderOperation,
-    ) -> ProviderResult:
-        provider_api_key = self._provider_api_key(provider_api)
-        return self._spot_launch_service.execute_planned_spot_launches(
-            azure_template=azure_template,
-            provider_api=provider_api,
-            provider_api_key=provider_api_key,
-            count=count,
-            template_config=template_config,
-            operation=operation,
-            provider_instance_name=self.provider_instance_name,
-            handler=self.handlers.get(provider_api_key),
-            azure_client=self.azure_client,
-            plan_override=self._build_spot_placement_plan(azure_template, count),
-            capacity_like_failure_checker=self._is_capacity_like_failure,
-        )
-
     # ------------------------------------------------------------------
     # ProviderStrategy contract
     # ------------------------------------------------------------------
 
     def initialize(self) -> bool:
-        try:
-            self._logger.info(
-                "Azure provider strategy ready for region: %s",
-                self._azure_config.region,
-            )
-            self._initialized = True
-            self._logger.debug("Azure provider strategy initialized successfully (lazy mode)")
-            return True
-        except AzureError as exc:
-            self._logger.error("Failed to initialize Azure provider strategy: %s", exc)
-            return False
-        except Exception as exc:
-            self._logger.error("Failed to initialize Azure provider strategy: %s", exc)
-            return False
-
-    def _validation_error_result(
-        self,
-        *,
-        message: str,
-        exc: AzureValidationError | DomainValidationError | PydanticValidationError,
-        default_error_code: str,
-        metadata: Optional[dict[str, Any]] = None,
-    ) -> ProviderResult:
-        return self._result_factory.validation_error_result(
-            message=message,
-            exc=exc,
-            default_error_code=default_error_code,
-            metadata=metadata,
+        self._logger.info(
+            "Azure provider strategy ready for region: %s",
+            self._azure_config.region,
         )
-
-    def _azure_error_result(
-        self,
-        *,
-        message: str,
-        exc: AzureError,
-        default_error_code: str,
-        metadata: Optional[dict[str, Any]] = None,
-    ) -> ProviderResult:
-        return self._result_factory.azure_error_result(
-            message=message,
-            exc=exc,
-            default_error_code=default_error_code,
-            metadata=metadata,
-        )
+        self._initialized = True
+        return True
 
     async def execute_operation(self, operation: ProviderOperation) -> ProviderResult:
         self._logger.debug(
@@ -402,35 +318,7 @@ class AzureProviderStrategy(ProviderStrategy):
             })
             return result
         except asyncio.CancelledError:
-            self._logger.info(
-                "Azure operation cancelled: %s",
-                operation.operation_type,
-            )
             raise
-        except (AzureValidationError, DomainValidationError, PydanticValidationError) as exc:
-            execution_time_ms = int((time.time() - start_time) * 1000)
-            return self._validation_error_result(
-                message=f"Azure operation validation failed: {exc!s}",
-                exc=exc,
-                default_error_code="AZURE_VALIDATION_ERROR",
-                metadata={
-                    "execution_time_ms": execution_time_ms,
-                    "provider": "azure",
-                    "dry_run": is_dry_run,
-                },
-            )
-        except AzureError as exc:
-            execution_time_ms = int((time.time() - start_time) * 1000)
-            return self._azure_error_result(
-                message=f"Azure operation failed: {exc!s}",
-                exc=exc,
-                default_error_code="OPERATION_FAILED",
-                metadata={
-                    "execution_time_ms": execution_time_ms,
-                    "provider": "azure",
-                    "dry_run": is_dry_run,
-                },
-            )
         except Exception as exc:
             execution_time_ms = int((time.time() - start_time) * 1000)
             self._logger.error("Azure operation failed: %s", exc)
@@ -478,6 +366,21 @@ class AzureProviderStrategy(ProviderStrategy):
         self._logger.debug("Azure provider cleaned up")
 
     @staticmethod
+    def _error_result(
+        message: str,
+        default_code: str,
+        exc: Exception,
+        metadata: Optional[dict[str, Any]] = None,
+    ) -> ProviderResult:
+        """Build an error result, preserving Azure-specific error codes and details."""
+        error_code = getattr(exc, "error_code", None) or default_code
+        merged = dict(metadata or {})
+        merged["error_class"] = type(exc).__name__
+        if hasattr(exc, "to_dict"):
+            merged["provider_error"] = exc.to_dict()
+        return ProviderResult.error_result(message, error_code, merged)
+
+    @staticmethod
     def _normalize_provider_api_value(provider_api: Any) -> Any:
         """Prefer the Azure enum internally and keep unknown values unchanged."""
         if isinstance(provider_api, AzureProviderApi):
@@ -521,31 +424,8 @@ class AzureProviderStrategy(ProviderStrategy):
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _get_create_template_config(operation: ProviderOperation) -> dict[str, Any]:
-        return AzureProvisioningService.get_create_template_config(operation)
-
-    @staticmethod
-    def _get_create_count(operation: ProviderOperation) -> int:
-        return AzureProvisioningService.get_create_count(operation)
-
-    @staticmethod
-    def _validate_create_template_config(
-            template_config: dict[str, Any],
-    ) -> Optional[ProviderResult]:
-        return AzureProvisioningService.validate_create_template_config(template_config)
-
-    @staticmethod
     def _provider_api_key(provider_api: AzureProviderApiRef) -> str:
         return AzureProvisioningService.provider_api_key(provider_api)
-
-    @staticmethod
-    def _resolve_create_provider_api(
-        template_config: dict[str, Any],
-    ) -> AzureProviderApiRef:
-        return AzureProvisioningService.resolve_create_provider_api(
-            template_config,
-            AzureProviderStrategy._normalize_provider_api_value,
-        )
 
     @staticmethod
     def _resolve_operation_provider_api(
@@ -559,161 +439,77 @@ class AzureProviderStrategy(ProviderStrategy):
             AzureProviderStrategy._normalize_provider_api_value(provider_api),
         )
 
-    def _resolve_create_handler(
-        self, provider_api: AzureProviderApiRef
-    ) -> Optional[AzureHandler]:
-        """Resolve the concrete create handler for the requested provider API."""
-        return self.handlers.get(self._provider_api_key(provider_api))
-
-    def _build_create_template(
-        self,
-        template_config: dict[str, Any],
-    ) -> AzureTemplate:
-        """Build and validate the Azure template aggregate for create."""
-        enhanced_config = self._build_azure_template_config(template_config)
-        self._logger.debug("Creating AzureTemplate from config: %s", enhanced_config)
-        return AzureTemplate.model_validate(enhanced_config)
-
-    def _build_create_operation_context(
-        self, operation: ProviderOperation
-    ) -> CreateOperationContext:
-        create_context = self._provisioning_service.build_create_operation_context(
-            operation=operation,
-            normalize_provider_api=self._normalize_provider_api_value,
-            resolve_handler=self._resolve_create_handler,
-            build_template=self._build_create_template,
-        )
-        if isinstance(create_context, ProviderResult):
-            raise _OperationPreparationFailure(create_context)
-        return create_context
-
-    def _build_create_request(
-        self,
-        operation: ProviderOperation,
-        azure_template: AzureTemplate,
-        count: int,
-        provider_api: AzureProviderApiRef,
-    ) -> Any:
-        return self._provisioning_service.build_create_request(
-            operation=operation,
-            azure_template=azure_template,
-            count=count,
-            provider_api=provider_api,
-            provider_instance_name=self.provider_instance_name,
-        )
-
-    def _normalize_handler_create_result(
-        self,
-        handler_result: Any,
-        template_config: dict[str, Any],
-        provider_api: AzureProviderApiRef,
-        count: int,
-        template_id: str,
-    ) -> ProviderResult:
-        return self._provisioning_service.normalize_handler_create_result(
-            handler_result,
-            template_config=template_config,
-            provider_api=provider_api,
-            count=count,
-            template_id=template_id,
-        )
-
-    @staticmethod
-    def _create_instances_dry_run_result(
-        create_context: CreateOperationContext,
-    ) -> ProviderResult:
-        return AzureProvisioningService.create_instances_dry_run_result(create_context)
-
-    def _execute_create_handler(
-        self,
-        *,
-        create_context: CreateOperationContext,
-        request: Any,
-    ) -> ProviderResult:
-        return self._provisioning_service.execute_create_handler(
-            create_context=create_context,
-            request=request,
-        )
-
     async def _handle_create_instances(
         self, operation: ProviderOperation
     ) -> ProviderResult:
         template_config: dict[str, Any] = {}
         provider_api_key: Optional[str] = None
         try:
-            create_context = self._build_create_operation_context(operation)
+            create_context = self._provisioning_service.build_create_operation_context(
+                operation=operation,
+                normalize_provider_api=self._normalize_provider_api_value,
+                resolve_handler=lambda api: self.handlers.get(self._provider_api_key(api)),
+                build_template=lambda tc: AzureTemplate.model_validate(
+                    self._build_azure_template_config(tc)
+                ),
+            )
+            if isinstance(create_context, ProviderResult):
+                return create_context
+
             template_config = create_context.template_config
             provider_api_key = create_context.provider_api_key
 
-            request = self._build_create_request(
+            if bool(operation.context and operation.context.get("dry_run", False)):
+                return AzureProvisioningService.create_instances_dry_run_result(create_context)
+
+            if self._spot_launch_service.should_use_spot_placement(create_context.azure_template):
+                api_key = self._provider_api_key(create_context.provider_api)
+                return self._spot_launch_service.execute_planned_spot_launches(
+                    azure_template=create_context.azure_template,
+                    provider_api=create_context.provider_api,
+                    provider_api_key=api_key,
+                    count=create_context.count,
+                    template_config=template_config,
+                    operation=operation,
+                    provider_instance_name=self.provider_instance_name,
+                    handler=self.handlers.get(api_key),
+                    azure_client=self.azure_client,
+                    plan_override=self._build_spot_placement_plan(
+                        create_context.azure_template, create_context.count
+                    ),
+                    capacity_like_failure_checker=self._is_capacity_like_failure,
+                )
+
+            request = self._provisioning_service.build_create_request(
                 operation=operation,
                 azure_template=create_context.azure_template,
                 count=create_context.count,
                 provider_api=create_context.provider_api,
+                provider_instance_name=self.provider_instance_name,
             )
-
-            if bool(operation.context and operation.context.get("dry_run", False)):
-                return self._create_instances_dry_run_result(create_context)
-
-            if self._should_use_spot_placement(create_context.azure_template):
-                return self._execute_planned_spot_launches(
-                    azure_template=create_context.azure_template,
-                    provider_api=create_context.provider_api,
-                    count=create_context.count,
-                    template_config=template_config,
-                    operation=operation,
-                )
-
-            return self._execute_create_handler(
+            return self._provisioning_service.execute_create_handler(
                 create_context=create_context,
                 request=request,
             )
 
         except asyncio.CancelledError:
             raise
-        except _OperationPreparationFailure as exc:
-            return exc.result
-        except (AzureValidationError, DomainValidationError, PydanticValidationError) as exc:
-            return self._validation_error_result(
-                message=f"Failed to create instances: {exc!s}",
-                exc=exc,
-                default_error_code="INVALID_TEMPLATE_CONFIG",
-                metadata={
-                    "operation": "create_instances",
-                    "template_config": template_config,
-                    "handler_used": provider_api_key,
-                    "method": "handler",
-                },
-            )
-        except AzureError as exc:
-            provider_error = self._build_provisioning_error_payload(exc)
-            return self._azure_error_result(
-                message=f"Failed to create instances: {exc!s}",
-                exc=exc,
-                default_error_code="CREATE_INSTANCES_ERROR",
-                metadata={
-                    "operation": "create_instances",
-                    "template_config": template_config,
-                    "handler_used": provider_api_key,
-                    "method": "handler",
-                    "provider_data": {
-                        "fleet_errors": [provider_error],
-                    },
-                },
-            )
         except Exception as exc:
-            provider_error = self._build_provisioning_error_payload(exc)
-            return ProviderResult.error_result(
+            error_details = extract_azure_error_details(exc)
+            fleet_error = {
+                "error_code": canonical_azure_error_code(exc),
+                "error_message": error_details["message"],
+                "status_code": error_details["status_code"],
+                "raw_error_code": error_details["raw_error_code"],
+            }
+            return self._error_result(
                 f"Failed to create instances: {exc!s}",
-                "CREATE_INSTANCES_ERROR",
-                {
+                "CREATE_INSTANCES_ERROR", exc,
+                metadata={
                     "operation": "create_instances",
                     "template_config": template_config,
                     "handler_used": provider_api_key,
-                    "method": "handler",
-                    "provider_data": {
-                        "fleet_errors": [provider_error],
-                    },
+                    "provider_data": {"fleet_errors": [fleet_error]},
                 },
             )
 
@@ -721,29 +517,22 @@ class AzureProviderStrategy(ProviderStrategy):
     # TERMINATE_INSTANCES
     # ------------------------------------------------------------------
 
-    def _build_termination_operation_context(
-        self, operation: ProviderOperation
-    ) -> TerminationOperationContext:
-        termination_context = self._termination_service.build_termination_operation_context(
-            operation=operation,
-            resolve_operation_provider_api=self._resolve_operation_provider_api,
-            provider_api_key=self._provider_api_key,
-            handlers=self.handlers,
-            group_instance_ids_by_resource=self._inventory_service.group_instance_ids_by_resource,
-            build_cyclecloud_request_metadata=self._build_cyclecloud_request_metadata,
-            resolve_operation_resource_group=lambda op: self._inventory_service.resolve_operation_resource_group(
-                op,
-                self._azure_config.resource_group,
-            ),
-        )
-        if isinstance(termination_context, ProviderResult):
-            raise _OperationPreparationFailure(termination_context)
-        return termination_context
-
     def _handle_terminate_instances(self, operation: ProviderOperation) -> ProviderResult:
         self._logger.debug("_handle_terminate_instances")
         try:
-            termination_context = self._build_termination_operation_context(operation)
+            termination_context = self._termination_service.build_termination_operation_context(
+                operation=operation,
+                resolve_operation_provider_api=self._resolve_operation_provider_api,
+                provider_api_key=self._provider_api_key,
+                handlers=self.handlers,
+                group_instance_ids_by_resource=self._inventory_service.group_instance_ids_by_resource,
+                build_cyclecloud_request_metadata=self._inventory_service.build_cyclecloud_request_metadata,
+                resolve_operation_resource_group=lambda op: self._inventory_service.resolve_operation_resource_group(
+                    op, self._azure_config.resource_group,
+                ),
+            )
+            if isinstance(termination_context, ProviderResult):
+                return termination_context
 
             if bool(operation.context and operation.context.get("dry_run", False)):
                 return self._termination_service.terminate_instances_dry_run_result(
@@ -765,59 +554,15 @@ class AzureProviderStrategy(ProviderStrategy):
 
         except asyncio.CancelledError:
             raise
-        except _OperationPreparationFailure as exc:
-            return exc.result
-        except (AzureValidationError, DomainValidationError, PydanticValidationError) as exc:
-            return self._validation_error_result(
-                message=f"Failed to terminate instances: {exc!s}",
-                exc=exc,
-                default_error_code="TERMINATE_INSTANCES_ERROR",
-            )
-        except AzureError as exc:
-            return self._azure_error_result(
-                message=f"Failed to terminate instances: {exc!s}",
-                exc=exc,
-                default_error_code="TERMINATE_INSTANCES_ERROR",
-            )
         except Exception as exc:
-            return ProviderResult.error_result(
+            return self._error_result(
                 f"Failed to terminate instances: {exc!s}",
-                "TERMINATE_INSTANCES_ERROR",
+                "TERMINATE_INSTANCES_ERROR", exc,
             )
 
     # ------------------------------------------------------------------
     # GET_INSTANCE_STATUS
     # ------------------------------------------------------------------
-
-    def _build_status_operation_context(
-        self, operation: ProviderOperation
-    ) -> AzureStatusQueryContext:
-        instance_ids = operation.parameters.get("instance_ids", [])
-        if not instance_ids:
-            raise _OperationPreparationFailure(
-                ProviderResult.error_result(
-                    "Instance IDs are required for status query",
-                    "MISSING_INSTANCE_IDS",
-                )
-            )
-
-        resource_group = self._inventory_service.resolve_operation_resource_group(
-            operation,
-            self._azure_config.resource_group,
-        )
-        if not resource_group:
-            raise _OperationPreparationFailure(
-                ProviderResult.error_result(
-                    "resource_group is required for status query",
-                    "MISSING_RESOURCE_GROUP",
-                )
-            )
-
-        return AzureStatusQueryContext(
-            instance_ids=instance_ids,
-            resource_group=resource_group,
-            provider_api=self._resolve_operation_provider_api(operation),
-        )
 
     def _build_handler_request(
         self,
@@ -924,7 +669,23 @@ class AzureProviderStrategy(ProviderStrategy):
 
     def _handle_get_instance_status(self, operation: ProviderOperation) -> ProviderResult:
         try:
-            status_context = self._build_status_operation_context(operation)
+            instance_ids = operation.parameters.get("instance_ids", [])
+            if not instance_ids:
+                return ProviderResult.error_result(
+                    "Instance IDs are required for status query",
+                    "MISSING_INSTANCE_IDS",
+                )
+
+            resource_group = self._inventory_service.resolve_operation_resource_group(
+                operation, self._azure_config.resource_group,
+            )
+            if not resource_group:
+                return ProviderResult.error_result(
+                    "resource_group is required for status query",
+                    "MISSING_RESOURCE_GROUP",
+                )
+
+            provider_api = self._resolve_operation_provider_api(operation)
 
             if bool(operation.context and operation.context.get("dry_run", False)):
                 return ProviderResult.success_result(
@@ -936,13 +697,13 @@ class AzureProviderStrategy(ProviderStrategy):
                                 "provider_type": "azure",
                                 "provider_data": {"dry_run": True},
                             }
-                            for iid in status_context.instance_ids
+                            for iid in instance_ids
                         ],
-                        "queried_count": len(status_context.instance_ids),
+                        "queried_count": len(instance_ids),
                     },
                     {
                         "operation": "get_instance_status",
-                        "instance_ids": status_context.instance_ids,
+                        "instance_ids": instance_ids,
                         "method": "dry_run",
                         "provider_data": {"dry_run": True},
                     },
@@ -952,45 +713,50 @@ class AzureProviderStrategy(ProviderStrategy):
 
             handler_machines = self._get_instance_status_via_handlers(
                 operation=operation,
-                instance_ids=status_context.instance_ids,
-                resource_group=status_context.resource_group,
+                instance_ids=instance_ids,
+                resource_group=resource_group,
             )
             if handler_machines is not None:
-                is_vmss = status_context.provider_api in (
+                is_vmss = provider_api in (
                     AzureProviderApi.VMSS,
                     AzureProviderApi.VMSS_UNIFORM,
                 )
                 result = ProviderResult.success_result(
                     {
                         "instances": handler_machines,
-                        "queried_count": len(status_context.instance_ids),
+                        "queried_count": len(instance_ids),
                     },
                     {
                         "operation": "get_instance_status",
-                        "instance_ids": status_context.instance_ids,
+                        "instance_ids": instance_ids,
                         "method": "handler",
                     },
                 )
                 if is_vmss:
-                    resource_ids = self._inventory_service.status_resource_ids(
-                        operation, status_context.instance_ids
+                    status_resource_ids = self._inventory_service.status_resource_ids(
+                        operation, instance_ids
                     )
-                    if resource_ids:
+                    if status_resource_ids:
                         self._vmss_cleanup_coordinator.reconcile(
-                            resource_group=status_context.resource_group,
-                            resource_ids=resource_ids,
+                            resource_group=resource_group,
+                            resource_ids=status_resource_ids,
                             observed_ids=self._inventory_service.observed_status_ids(
                                 handler_machines
                             ),
                         )
                     result.metadata.update(
                         self._vmss_cleanup_coordinator.status_metadata(
-                            resource_group=status_context.resource_group,
-                            resource_ids=resource_ids,
+                            resource_group=resource_group,
+                            resource_ids=status_resource_ids,
                         )
                     )
                 return result
 
+            status_context = AzureStatusQueryContext(
+                instance_ids=instance_ids,
+                resource_group=resource_group,
+                provider_api=provider_api,
+            )
             return self._inventory_service.sdk_status_result(
                 status_context=status_context,
                 azure_client=self.azure_client,
@@ -999,39 +765,11 @@ class AzureProviderStrategy(ProviderStrategy):
 
         except asyncio.CancelledError:
             raise
-        except _OperationPreparationFailure as exc:
-            return exc.result
-        except (AzureValidationError, DomainValidationError, PydanticValidationError) as exc:
-            return self._validation_error_result(
-                message=f"Failed to get instance status: {exc!s}",
-                exc=exc,
-                default_error_code="GET_INSTANCE_STATUS_ERROR",
-            )
-        except AzureError as exc:
-            return self._azure_error_result(
-                message=f"Failed to get instance status: {exc!s}",
-                exc=exc,
-                default_error_code="GET_INSTANCE_STATUS_ERROR",
-            )
         except Exception as exc:
-            return ProviderResult.error_result(
+            return self._error_result(
                 f"Failed to get instance status: {exc!s}",
-                "GET_INSTANCE_STATUS_ERROR",
+                "GET_INSTANCE_STATUS_ERROR", exc,
             )
-
-    def _build_cyclecloud_request_metadata(
-        self,
-        *,
-        operation: ProviderOperation,
-        resource_group: Optional[str],
-    ) -> dict[str, Any]:
-        return self._inventory_service.build_cyclecloud_request_metadata(
-            operation=operation,
-            resource_group=resource_group,
-        )
-
-    def _record_pending_resource_cleanup(self, handler_result: Any) -> None:
-        self._vmss_cleanup_coordinator.record(handler_result)
 
     def _restore_pending_resource_cleanups(self, operation: ProviderOperation) -> None:
         """Rebuild pending resource cleanup state from durable request metadata."""
@@ -1241,22 +979,10 @@ class AzureProviderStrategy(ProviderStrategy):
 
         except asyncio.CancelledError:
             raise
-        except (AzureValidationError, DomainValidationError, PydanticValidationError) as exc:
-            return self._validation_error_result(
-                message=f"Failed to describe resource instances: {exc!s}",
-                exc=exc,
-                default_error_code="DESCRIBE_RESOURCE_INSTANCES_ERROR",
-            )
-        except AzureError as exc:
-            return self._azure_error_result(
-                message=f"Failed to describe resource instances: {exc!s}",
-                exc=exc,
-                default_error_code="DESCRIBE_RESOURCE_INSTANCES_ERROR",
-            )
         except Exception as exc:
-            return ProviderResult.error_result(
+            return self._error_result(
                 f"Failed to describe resource instances: {exc!s}",
-                "DESCRIBE_RESOURCE_INSTANCES_ERROR",
+                "DESCRIBE_RESOURCE_INSTANCES_ERROR", exc,
             )
 
     # ------------------------------------------------------------------
@@ -1278,24 +1004,10 @@ class AzureProviderStrategy(ProviderStrategy):
                 validation_result,
                 {"operation": "validate_template", "template_config": template_config},
             )
-        except (AzureValidationError, DomainValidationError, PydanticValidationError) as exc:
-            return self._validation_error_result(
-                message=f"Failed to validate template: {exc!s}",
-                exc=exc,
-                default_error_code="VALIDATE_TEMPLATE_ERROR",
-                metadata={"operation": "validate_template"},
-            )
-        except AzureError as exc:
-            return self._azure_error_result(
-                message=f"Failed to validate template: {exc!s}",
-                exc=exc,
-                default_error_code="VALIDATE_TEMPLATE_ERROR",
-                metadata={"operation": "validate_template"},
-            )
         except Exception as exc:
-            return ProviderResult.error_result(
+            return self._error_result(
                 f"Failed to validate template: {exc!s}",
-                "VALIDATE_TEMPLATE_ERROR",
+                "VALIDATE_TEMPLATE_ERROR", exc,
             )
 
     # ------------------------------------------------------------------
@@ -1330,18 +1042,6 @@ class AzureProviderStrategy(ProviderStrategy):
             {"operation": "health_check"},
         )
 
-    @staticmethod
-    def _build_provisioning_error_payload(exc: Exception) -> dict[str, Any]:
-        """Normalize Azure provisioning errors for request metadata/status handling."""
-        error_details = extract_azure_error_details(exc)
-
-        return {
-            "error_code": canonical_azure_error_code(exc),
-            "error_message": error_details["message"],
-            "status_code": error_details["status_code"],
-            "raw_error_code": error_details["raw_error_code"],
-        }
-
     # ------------------------------------------------------------------
     # String representations
     # ------------------------------------------------------------------
@@ -1350,13 +1050,4 @@ class AzureProviderStrategy(ProviderStrategy):
         return (
             f"AzureProviderStrategy(region={self._azure_config.region}, "
             f"initialized={self._initialized})"
-        )
-
-    def __repr__(self) -> str:
-        return (
-            f"AzureProviderStrategy("
-            f"region={self._azure_config.region}, "
-            f"subscription_id={self._azure_config.subscription_id}, "
-            f"initialized={self._initialized}"
-            f")"
         )
