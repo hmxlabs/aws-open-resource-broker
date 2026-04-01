@@ -12,7 +12,7 @@ from orb.providers.aws.storage.config import AWSStorageConfig
 @pytest.fixture
 def config_manager():
     config_path = os.path.join(
-        os.path.dirname(__file__), "../../../../..", "config", "default_config.json"
+        os.path.dirname(__file__), "../..", "config", "default_config.json"
     )
     return ConfigurationManager(config_file=os.path.abspath(config_path))
 

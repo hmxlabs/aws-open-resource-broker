@@ -647,11 +647,9 @@ class TestSDKDefaultSchedulerRequests:
 
                 return_result = await sdk.create_return_request(machine_ids=machine_ids)
                 assert return_result is not None
-                message = (
-                    return_result.get("message")
-                    if isinstance(return_result, dict)
-                    else getattr(return_result, "message", None)
+                assert isinstance(return_result, dict), (
+                    f"create_return_request response is not a dict: {return_result}"
                 )
-                assert message is not None, (
-                    f"create_return_request response missing 'message': {return_result}"
+                assert "created_request_ids" in return_result, (
+                    f"create_return_request response missing 'created_request_ids': {return_result}"
                 )
