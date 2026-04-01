@@ -816,10 +816,6 @@ class AzureClient:
         return ClientAuthenticationError
 
     @staticmethod
-    def _network_profile_from_vm(vm: Any) -> Optional[AzureNetworkProfileProtocol]:
-        return cast(AzureVmNetworkIdentityProtocol, vm).network_profile
-
-    @staticmethod
     def _network_interface_refs_from_profile(
         network_profile: Optional[AzureNetworkProfileProtocol],
     ) -> list[AzureNicReferenceProtocol]:
@@ -833,25 +829,6 @@ class AzureClient:
         if nic_properties is None:
             return False
         return bool(nic_properties.primary)
-
-    @staticmethod
-    def _resource_id(value: Optional[AzureResourceRefProtocol]) -> Optional[str]:
-        if value is None:
-            return None
-        return value.id
-
-    @staticmethod
-    def _ip_configurations_from_nic(nic: Any) -> list[AzureIpConfigurationProtocol]:
-        return list(cast(AzureNicProtocol, nic).ip_configurations or [])
-
-    @staticmethod
-    def _private_ip_from_ip_config(ip_config: AzureIpConfigurationProtocol) -> Optional[str]:
-        if ip_config.private_ip_address:
-            return ip_config.private_ip_address
-        ip_properties = ip_config.properties
-        if ip_properties is None:
-            return None
-        return ip_properties.private_ip_address
 
     @staticmethod
     def _subnet_from_ip_config(
@@ -949,7 +926,7 @@ class AzureClient:
 
     def resolve_network_identity_from_vm(self, vm: Any) -> dict[str, Any]:
         """Resolve network identity fields from a VM or VMSS VM object."""
-        net_profile = self._network_profile_from_vm(vm)
+        net_profile = cast(AzureVmNetworkIdentityProtocol, vm).network_profile
         nic_refs = self._network_interface_refs_from_profile(net_profile)
         return self.resolve_network_identity_from_nic_refs(nic_refs)
 
@@ -975,7 +952,7 @@ class AzureClient:
         )
 
         for nic_ref in ordered_refs:
-            nic_id = self._resource_id(nic_ref)
+            nic_id = nic_ref.id
             if not nic_id:
                 continue
 
@@ -993,15 +970,17 @@ class AzureClient:
                 self._logger.debug("Failed to resolve NIC %s: %s", nic_id, exc)
                 continue
 
-            ip_configs = self._ip_configurations_from_nic(nic)
+            ip_configs = list(cast(AzureNicProtocol, nic).ip_configurations or [])
             for ip_cfg in ip_configs:
-                private_ip = self._private_ip_from_ip_config(ip_cfg)
+                private_ip = ip_cfg.private_ip_address
+                if not private_ip and ip_cfg.properties is not None:
+                    private_ip = ip_cfg.properties.private_ip_address
                 subnet = self._subnet_from_ip_config(ip_cfg)
-                subnet_id = self._resource_id(subnet)
+                subnet_id = subnet.id if subnet is not None else None
                 public_ip_ref = self._public_ip_ref_from_ip_config(ip_cfg)
 
                 public_ip = None
-                public_ip_id = self._resource_id(public_ip_ref)
+                public_ip_id = public_ip_ref.id if public_ip_ref is not None else None
                 if public_ip_id:
                     public_ip_lookup = self.extract_resource_group_and_name_from_arm_id(
                         str(public_ip_id)
