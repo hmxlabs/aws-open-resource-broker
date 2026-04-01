@@ -21,7 +21,6 @@ class TestAuthenticationFlows:
         """Test API access with no authentication."""
         from unittest.mock import MagicMock
 
-
         # Create server config with no auth
         server_config = ServerConfig(  # type: ignore[call-arg]
             enabled=True,
