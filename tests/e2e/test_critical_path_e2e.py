@@ -947,10 +947,18 @@ class TestConfigurationManagement:
         assert data["total_count"] == 2
         assert data["success"] is True
 
-    def test_system_status_via_health_and_info(self, client: TestClient):
+    def test_system_status_via_health_and_info(self, app, client: TestClient):
         """System status is accessible via both /health and /info endpoints."""
-        health_resp = client.get("/health")
-        info_resp = client.get("/info")
+        from unittest.mock import MagicMock
+
+        mock_health_port = MagicMock()
+        mock_health_port.get_status.return_value = {"status": "healthy"}
+        app.dependency_overrides[get_health_check_port] = lambda: mock_health_port
+        try:
+            health_resp = client.get("/health")
+            info_resp = client.get("/info")
+        finally:
+            app.dependency_overrides.pop(get_health_check_port, None)
 
         assert health_resp.status_code == 200
         assert info_resp.status_code == 200
