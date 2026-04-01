@@ -324,7 +324,7 @@ class AzureProviderStrategy(ProviderStrategy):
             raise
         except Exception as exc:
             execution_time_ms = int((time.time() - start_time) * 1000)
-            self._logger.error("Azure operation failed: %s", exc)
+            self._logger.error("Azure operation failed: %s", exc, exc_info=True)
             return ProviderResult.error_result(
                 f"Azure operation failed: {exc!s}",
                 "OPERATION_FAILED",

@@ -213,7 +213,7 @@ def register_azure_provider(
             logger.info("Azure provider registered successfully")
     except Exception as exc:
         if logger:
-            logger.error("Failed to register Azure provider: %s", str(exc))
+            logger.error("Failed to register Azure provider: %s", str(exc), exc_info=True)
         raise
 
 
@@ -255,6 +255,7 @@ def register_azure_provider_instance(
                 "Failed to register Azure provider instance '%s': %s",
                 provider_instance.name,
                 str(exc),
+                exc_info=True,
             )
         return False
 
@@ -308,6 +309,7 @@ def register_azure_provider_with_di(provider_instance: Any, container: Any) -> b
             "Failed to register Azure provider instance '%s': %s",
             provider_instance.name,
             str(exc),
+            exc_info=True,
         )
         return False
 
@@ -391,7 +393,7 @@ def register_azure_template_factory(
             logger.debug("Azure template class not available, using core template")
     except Exception as exc:
         if logger:
-            logger.error("Failed to register Azure template factory: %s", exc)
+            logger.error("Failed to register Azure template factory: %s", exc, exc_info=True)
 
 
 def get_azure_extension_defaults() -> dict[str, Any]:
@@ -412,7 +414,7 @@ def initialize_azure_provider(
             logger.info("Azure provider initialization completed successfully")
     except Exception as exc:
         if logger:
-            logger.error("Azure provider initialization failed: %s", exc)
+            logger.error("Azure provider initialization failed: %s", exc, exc_info=True)
         raise
 
 
