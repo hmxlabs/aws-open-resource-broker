@@ -438,7 +438,7 @@ class OpenResourceBrokerMCPServer:
                 "count": {"type": "integer"},
                 "machine_count": {"type": "integer"},
             },
-            "required": ["template_id"],
+            "required": ["template_id", "machine_count"],
         },
         "list_return_requests": {"properties": {}, "required": []},
         "return_machines": {

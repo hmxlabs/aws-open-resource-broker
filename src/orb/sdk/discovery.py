@@ -480,7 +480,16 @@ class SDKMethodDiscovery:
         output = {
             f: getattr(command, f, None) for f in fields if getattr(command, f, None) is not None
         }
-        return output if output else None
+        if not output:
+            return None
+        # Synthesize a human-readable message for commands that don't produce one naturally.
+        if "message" not in output and type(command).__name__ == "CreateReturnRequestCommand":
+            created = output.get("created_request_ids") or []
+            if created:
+                output["message"] = f"Return request created: {', '.join(created)}"
+            else:
+                output["message"] = "No return requests created"
+        return output
 
     def _create_command_method_cqrs(
         self, command_bus, command_type: type, method_info: MethodInfo
