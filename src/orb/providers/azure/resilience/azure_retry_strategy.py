@@ -5,12 +5,13 @@ backoff delays with jitter.
 """
 
 import secrets
-from typing import Optional
+
+from azure.core.exceptions import HttpResponseError, ServiceRequestError, ServiceResponseError
 
 from orb.domain.base.dependency_injection import injectable
 from orb.domain.base.ports import LoggingPort
 from orb.infrastructure.resilience.strategy.base import RetryStrategy
-
+from orb.providers.azure.exceptions.azure_exceptions import AzureError, NetworkError, RateLimitError
 
 # Azure error codes that are generally safe to retry.
 # See: https://learn.microsoft.com/en-us/azure/azure-resource-manager/templates/common-deployment-errors
@@ -38,28 +39,27 @@ _RETRYABLE_ERROR_CODES: frozenset[str] = frozenset({
 def is_retryable_azure_error(exception: Exception) -> bool:
     """Return ``True`` if the exception is a retryable Azure SDK error.
 
-    Uses getattr because the function accepts any Exception and probes for
-    attributes that only some azure-core subclasses carry (status_code,
-    error_code, error, error.code).
+    Classifies retryability using documented azure-core exception types and
+    provider-owned Azure domain exceptions.
     """
-    status_code = getattr(exception, "status_code", None)
-    if status_code is not None and str(status_code) in _RETRYABLE_ERROR_CODES:
+    if isinstance(exception, (RateLimitError, NetworkError, ServiceRequestError, ServiceResponseError)):
         return True
 
-    error_code = getattr(exception, "error_code", None) or ""
-    if error_code in _RETRYABLE_ERROR_CODES:
+    if isinstance(exception, AzureError) and exception.error_code in _RETRYABLE_ERROR_CODES:
         return True
 
-    error = getattr(exception, "error", None)
-    if error:
-        code = getattr(error, "code", None) or ""
-        if code in _RETRYABLE_ERROR_CODES:
+    if isinstance(exception, HttpResponseError):
+        if str(exception.status_code) in _RETRYABLE_ERROR_CODES:
             return True
 
-    # Check string representation as last resort
-    exc_str = str(exception).lower()
-    if any(keyword in exc_str for keyword in ("throttl", "too many requests", "service unavailable")):
-        return True
+        if exception.error is None:
+            return False
+        try:
+            error_code = exception.error.code
+        except AttributeError:
+            return False
+        if error_code in _RETRYABLE_ERROR_CODES:
+            return True
 
     return False
 

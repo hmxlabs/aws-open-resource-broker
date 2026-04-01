@@ -3,6 +3,7 @@
 import types
 
 import pytest
+from azure.core.exceptions import HttpResponseError, ServiceRequestError
 from unittest.mock import MagicMock, Mock, patch
 
 from orb.bootstrap.infrastructure_services import register_infrastructure_services
@@ -16,7 +17,10 @@ from orb.providers.azure.configuration.validator import (
     validate_azure_template,
 )
 from orb.providers.azure.configuration.template_extension import AzureTemplateExtensionConfig
-from orb.providers.azure.exceptions.azure_exceptions import AzureConfigurationError
+from orb.providers.azure.exceptions.azure_exceptions import (
+    AzureConfigurationError,
+    RateLimitError,
+)
 from orb.providers.azure.domain.template.value_objects import AzureProviderApi
 from orb.providers.azure.infrastructure.azure_client import AzureClient
 from orb.providers.azure.infrastructure.azure_handler_factory import AzureHandlerFactory
@@ -480,32 +484,26 @@ class TestAzureRegistration:
 
 class TestRetryStrategy:
     def test_retryable_status_code(self):
-        exc = MagicMock()
-        exc.status_code = 429
+        exc = HttpResponseError(message="rate limited", response=Mock(status_code=429))
         assert is_retryable_azure_error(exc) is True
 
     def test_non_retryable_status_code(self):
-        exc = MagicMock()
-        exc.status_code = 404
-        exc.error_code = None
-        exc.error = None
+        exc = HttpResponseError(message="missing", response=Mock(status_code=404))
         assert is_retryable_azure_error(exc) is False
 
     def test_retryable_error_code(self):
-        exc = MagicMock()
-        exc.status_code = None
-        exc.error_code = "TooManyRequests"
+        exc = RateLimitError("rate limit exceeded")
         assert is_retryable_azure_error(exc) is True
 
-    def test_retryable_string_detection(self):
-        exc = Exception("Request was throttled")
+    def test_retryable_nested_error_code(self):
+        exc = HttpResponseError(message="service unavailable", response=Mock(status_code=400))
+        exc.error = Mock(code="ServiceUnavailable")
         assert is_retryable_azure_error(exc) is True
 
     def test_should_retry_within_limit(self):
         logger = MagicMock()
         rs = AzureRetryStrategy(logger=logger, max_attempts=3)
-        exc = MagicMock()
-        exc.status_code = 503
+        exc = ServiceRequestError("transient transport failure")
         assert rs.should_retry(0, exc) is True
         assert rs.should_retry(2, exc) is True
         assert rs.should_retry(3, exc) is False  # at limit
