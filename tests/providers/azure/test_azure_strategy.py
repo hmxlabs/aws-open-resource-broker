@@ -15,7 +15,11 @@ from orb.providers.azure.infrastructure.services.spot_placement_score_adapter im
 )
 import orb.providers.azure.strategy.azure_provider_strategy as azure_strategy_module
 from orb.providers.azure.strategy.azure_provider_strategy import AzureProviderStrategy
-from orb.providers.base.strategy import ProviderOperation, ProviderOperationType
+from orb.providers.base.strategy import (
+    ProviderOperation,
+    ProviderOperationType,
+    ProviderResult,
+)
 from tests.providers.azure.strategy_test_support import run_operation
 
 class TestInitialization:
@@ -563,3 +567,101 @@ class TestCleanup:
         strategy.cleanup()
 
         client.close.assert_called_once_with()
+
+    def test_cleanup_waits_for_in_flight_operation(self, azure_config, logger, monkeypatch):
+        client = MagicMock()
+        strategy = AzureProviderStrategy(
+            config=azure_config,
+            logger=logger,
+            provider_instance_name="azure-default",
+            azure_client_resolver=lambda: client,
+        )
+        strategy.initialize()
+        strategy._client = client
+
+        operation_started = threading.Event()
+        release_operation = threading.Event()
+        cleanup_finished = threading.Event()
+        result_holder: list[ProviderResult] = []
+
+        async def block_operation(_operation):
+            operation_started.set()
+            while not release_operation.is_set():
+                await asyncio.sleep(0.01)
+            return ProviderResult.success_result({"ok": True})
+
+        monkeypatch.setattr(strategy, "_execute_operation_internal", block_operation)
+
+        op = ProviderOperation(
+            operation_type=ProviderOperationType.HEALTH_CHECK,
+            parameters={},
+        )
+
+        operation_thread = threading.Thread(
+            target=lambda: result_holder.append(run_operation(strategy.execute_operation(op)))
+        )
+        operation_thread.start()
+        assert operation_started.wait(timeout=1)
+
+        cleanup_thread = threading.Thread(
+            target=lambda: (strategy.cleanup(), cleanup_finished.set())
+        )
+        cleanup_thread.start()
+
+        time.sleep(0.05)
+        assert not cleanup_finished.is_set()
+        client.close.assert_not_called()
+
+        release_operation.set()
+        operation_thread.join(timeout=1)
+        cleanup_thread.join(timeout=1)
+
+        assert cleanup_finished.is_set()
+        assert result_holder[0].success is True
+        client.close.assert_called_once_with()
+
+    def test_execute_operation_rejects_new_work_after_cleanup_starts(
+        self, azure_config, logger, monkeypatch
+    ):
+        client = MagicMock()
+        strategy = AzureProviderStrategy(
+            config=azure_config,
+            logger=logger,
+            provider_instance_name="azure-default",
+            azure_client_resolver=lambda: client,
+        )
+        strategy.initialize()
+        strategy._client = client
+
+        operation_started = threading.Event()
+        release_operation = threading.Event()
+
+        async def block_operation(_operation):
+            operation_started.set()
+            while not release_operation.is_set():
+                await asyncio.sleep(0.01)
+            return ProviderResult.success_result({"ok": True})
+
+        monkeypatch.setattr(strategy, "_execute_operation_internal", block_operation)
+
+        op = ProviderOperation(
+            operation_type=ProviderOperationType.HEALTH_CHECK,
+            parameters={},
+        )
+
+        operation_thread = threading.Thread(target=lambda: run_operation(strategy.execute_operation(op)))
+        operation_thread.start()
+        assert operation_started.wait(timeout=1)
+
+        cleanup_thread = threading.Thread(target=strategy.cleanup)
+        cleanup_thread.start()
+        time.sleep(0.05)
+
+        rejected = run_operation(strategy.execute_operation(op))
+
+        release_operation.set()
+        operation_thread.join(timeout=1)
+        cleanup_thread.join(timeout=1)
+
+        assert not rejected.success
+        assert rejected.error_code == "STRATEGY_SHUTTING_DOWN"

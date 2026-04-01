@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from threading import RLock
+from threading import Condition, RLock
 from typing import Any, Callable, Optional, cast
 
 from orb.application.services.spot_placement_execution import (
@@ -132,6 +132,10 @@ class AzureProviderStrategy(ProviderStrategy):
         self._template_catalog_service = AzureTemplateCatalogService(logger=logger)
         self._termination_service = AzureTerminationService()
         self._lazy_init_lock = RLock()
+        self._lifecycle_lock = RLock()
+        self._lifecycle_condition = Condition(self._lifecycle_lock)
+        self._active_operations = 0
+        self._cleanup_requested = False
         self._vmss_cleanup_coordinator = vmss_cleanup_coordinator or VmssCleanupCoordinator(
             logger=self._logger,
             get_vmss_member_count=self._current_vmss_member_count,
@@ -285,12 +289,29 @@ class AzureProviderStrategy(ProviderStrategy):
 
     def initialize(self) -> bool:
         """Mark the strategy as initialised and ready to execute operations."""
+        with self._lifecycle_condition:
+            self._cleanup_requested = False
+            self._initialized = True
         self._logger.info(
             "Azure provider strategy ready for region: %s",
             self._azure_config.region,
         )
-        self._initialized = True
         return True
+
+    def _begin_operation(self) -> bool:
+        """Reserve an execution slot unless cleanup has already started."""
+        with self._lifecycle_condition:
+            if self._cleanup_requested:
+                return False
+            self._active_operations += 1
+            return True
+
+    def _end_operation(self) -> None:
+        """Release an execution slot and wake any waiting cleanup path."""
+        with self._lifecycle_condition:
+            self._active_operations -= 1
+            if self._active_operations == 0:
+                self._lifecycle_condition.notify_all()
 
     async def execute_operation(self, operation: ProviderOperation) -> ProviderResult:
         self._logger.debug(
@@ -302,6 +323,11 @@ class AzureProviderStrategy(ProviderStrategy):
         if not self._initialized:
             return ProviderResult.error_result(
                 "Azure provider strategy not initialized", "NOT_INITIALIZED"
+            )
+        if not self._begin_operation():
+            return ProviderResult.error_result(
+                "Azure provider strategy is shutting down",
+                "STRATEGY_SHUTTING_DOWN",
             )
 
         start_time = time.time()
@@ -343,6 +369,8 @@ class AzureProviderStrategy(ProviderStrategy):
                     "dry_run": is_dry_run,
                 },
             )
+        finally:
+            self._end_operation()
 
     def get_capabilities(self) -> ProviderCapabilities:
         """Get Azure provider capabilities."""
@@ -429,14 +457,21 @@ class AzureProviderStrategy(ProviderStrategy):
 
     def cleanup(self) -> None:
         """Release Azure client resources and reset all lazily initialised state."""
-        if self._client is not None:
-            self._client.close()
-        self._client = None
-        self._resource_manager = None
-        self._deployment_service = None
-        self._handlers = {}
-        self._vmss_cleanup_coordinator.clear()
-        self._initialized = False
+        with self._lifecycle_condition:
+            self._cleanup_requested = True
+            while self._active_operations > 0:
+                self._lifecycle_condition.wait()
+
+            client = self._client
+            self._client = None
+            self._resource_manager = None
+            self._deployment_service = None
+            self._handlers = {}
+            self._vmss_cleanup_coordinator.clear()
+            self._initialized = False
+
+        if client is not None:
+            client.close()
         self._logger.debug("Azure provider cleaned up")
 
     @staticmethod
