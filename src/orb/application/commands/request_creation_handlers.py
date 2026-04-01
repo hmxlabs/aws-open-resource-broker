@@ -212,20 +212,12 @@ class CreateReturnRequestHandler(BaseCommandHandler[CreateReturnRequestCommand, 
                 if not machine:
                     raise EntityNotFoundError("Machine", machine_id)
 
-                if self._is_machine_already_terminating(machine):
-                    from orb.domain.request.exceptions import RequestValidationError
-
-                    raise RequestValidationError(
-                        f"Machine {machine_id} is already terminating or terminated"
-                    )
-
-                active_return_request_id = self._get_active_return_request_id(uow, machine)
-                if active_return_request_id:
+                if machine.return_request_id:
                     if not command.force_return:
                         from orb.domain.request.exceptions import RequestValidationError
 
                         raise RequestValidationError(
-                            f"Machine {machine_id} already has pending return request: {active_return_request_id}"
+                            f"Machine {machine_id} already has pending return request: {machine.return_request_id}"
                         )
                     # force_return=True — fall through, cancel handled in execute_command
         # For multiple machines, we'll do filtering in execute_command
@@ -339,25 +331,12 @@ class CreateReturnRequestHandler(BaseCommandHandler[CreateReturnRequestCommand, 
                     )
                     continue
 
-                if self._is_machine_already_terminating(machine):
-                    skipped_machines.append(
-                        {
-                            "machine_id": machine_id,
-                            "reason": "Machine is already terminating or terminated",
-                        }
-                    )
-                    continue
-
-                active_return_request_id = self._get_active_return_request_id(uow, machine)
-                if active_return_request_id:
+                if machine.return_request_id:
                     if not force_return:
                         skipped_machines.append(
                             {
                                 "machine_id": machine_id,
-                                "reason": (
-                                    "Machine already has pending return request: "
-                                    f"{active_return_request_id}"
-                                ),
+                                "reason": f"Machine already has pending return request: {machine.return_request_id}",
                             }
                         )
                         continue
@@ -488,7 +467,6 @@ class CreateReturnRequestHandler(BaseCommandHandler[CreateReturnRequestCommand, 
                     updated_machine = machine.update_status(
                         MachineStatus.SHUTTING_DOWN, "Termination in progress"
                     )
-                    updated_machine = updated_machine.model_copy(update={"return_request_id": None})
                     uow.machines.save(updated_machine)
 
     def _persist_return_follow_up_context(self, request: Any, provisioning_result: dict[str, Any]) -> None:
@@ -503,52 +481,6 @@ class CreateReturnRequestHandler(BaseCommandHandler[CreateReturnRequestCommand, 
             events = uow.requests.save(updated_request)
             for event in events or []:
                 self.event_publisher.publish(event)  # type: ignore[union-attr]
-
-    def _get_active_return_request_id(self, uow: Any, machine: Any) -> str | None:
-        """Return an active return request ID, clearing stale terminal links on the way."""
-        return_request_id = getattr(machine, "return_request_id", None)
-        if not return_request_id:
-            return None
-
-        from orb.domain.request.value_objects import RequestId
-
-        try:
-            request_id = RequestId(value=str(return_request_id))
-        except Exception:
-            linked_request = None
-        else:
-            linked_request = uow.requests.get_by_id(request_id)
-        if linked_request and getattr(linked_request.status, "is_active", lambda: False)():
-            return str(return_request_id)
-
-        cleared_machine = machine.model_copy(update={"return_request_id": None})
-        uow.machines.save(cleared_machine)
-        self.logger.info(
-            "Cleared stale return_request_id %s for machine %s",
-            return_request_id,
-            getattr(getattr(machine, "machine_id", None), "value", getattr(machine, "machine_id", "")),
-        )
-        return None
-
-    def _is_machine_already_terminating(self, machine: Any) -> bool:
-        """Treat termination-in-flight or terminated machines as unavailable for return."""
-        is_terminated = getattr(machine, "is_terminated", None)
-        if callable(is_terminated):
-            try:
-                if bool(is_terminated()):
-                    return True
-            except Exception as exc:
-                # Machine aggregate may not support is_terminated for all
-                # provider types; treat lookup failures as "not terminated".
-                self.logger.debug(
-                    "is_terminated check failed for machine %s: %s",
-                    getattr(machine, "machine_id", "?"),
-                    exc,
-                )
-
-        status = getattr(machine, "status", None)
-        status_value = getattr(status, "value", status)
-        return str(status_value or "").lower() in {"shutting-down", "terminated", "returned"}
 
     async def _update_request_to_failed(self, request: Any, errors: list[str]) -> None:
         """Update request status to failed."""

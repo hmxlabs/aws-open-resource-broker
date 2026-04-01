@@ -48,20 +48,14 @@ class TestReturnValidationFix:
         machine1 = Mock()
         machine1.machine_id = "machine-001"
         machine1.return_request_id = None  # Valid
-        machine1.status = "running"
-        machine1.is_terminated.return_value = False
 
         machine2 = Mock()
         machine2.machine_id = "machine-002"
         machine2.return_request_id = "ret-00000000-0000-0000-0000-000000000123"
-        machine2.status = "running"
-        machine2.is_terminated.return_value = False
 
         machine3 = Mock()
         machine3.machine_id = "machine-003"
         machine3.return_request_id = None  # Valid
-        machine3.status = "running"
-        machine3.is_terminated.return_value = False
 
         # Mock repository responses
         def mock_get_by_id(machine_id):
@@ -72,14 +66,9 @@ class TestReturnValidationFix:
                 return machine2
             elif key == "machine-003":
                 return machine3
-            elif key == "ret-00000000-0000-0000-0000-000000000123":
-                active_request = Mock()
-                active_request.status = RequestStatus.IN_PROGRESS
-                return active_request
             return None
 
         self.mock_uow.machines.get_by_id.side_effect = mock_get_by_id
-        self.mock_uow.requests.get_by_id.side_effect = mock_get_by_id
 
         # Create command with all machines (multiple machines)
         command = CreateReturnRequestCommand(
@@ -105,14 +94,8 @@ class TestReturnValidationFix:
         machine = Mock()
         machine.machine_id = "machine-001"
         machine.return_request_id = "ret-00000000-0000-0000-0000-000000000123"
-        machine.status = "running"
-        machine.is_terminated.return_value = False
-
-        active_request = Mock()
-        active_request.status = RequestStatus.IN_PROGRESS
 
         self.mock_uow.machines.get_by_id.return_value = machine
-        self.mock_uow.requests.get_by_id.return_value = active_request
 
         command = CreateReturnRequestCommand(machine_ids=["machine-001"])
 
@@ -129,14 +112,10 @@ class TestReturnValidationFix:
         machine1 = Mock()
         machine1.machine_id = "machine-001"
         machine1.return_request_id = "ret-00000000-0000-0000-0000-000000000123"
-        machine1.status = "running"
-        machine1.is_terminated.return_value = False
 
         machine2 = Mock()
         machine2.machine_id = "machine-002"
         machine2.return_request_id = "ret-00000000-0000-0000-0000-000000000456"
-        machine2.status = "running"
-        machine2.is_terminated.return_value = False
 
         def mock_get_by_id(machine_id):
             key = getattr(machine_id, "value", machine_id)
@@ -144,17 +123,9 @@ class TestReturnValidationFix:
                 return machine1
             elif key == "machine-002":
                 return machine2
-            elif key in {
-                "ret-00000000-0000-0000-0000-000000000123",
-                "ret-00000000-0000-0000-0000-000000000456",
-            }:
-                active_request = Mock()
-                active_request.status = RequestStatus.IN_PROGRESS
-                return active_request
             return None
 
         self.mock_uow.machines.get_by_id.side_effect = mock_get_by_id
-        self.mock_uow.requests.get_by_id.side_effect = mock_get_by_id
 
         command = CreateReturnRequestCommand(machine_ids=["machine-001", "machine-002"])
 
@@ -167,42 +138,11 @@ class TestReturnValidationFix:
         assert result["valid_machines"] == []
         assert len(result["skipped_machines"]) == 2
 
-    @pytest.mark.asyncio
-    async def test_terminal_return_request_is_cleared_and_not_treated_as_pending(self):
+    def test_update_machines_to_pending_sets_shutting_down(self):
         machine = Mock()
         machine.machine_id = "machine-001"
-        machine.return_request_id = "ret-00000000-0000-0000-0000-000000000999"
-        machine.status = "running"
-        machine.is_terminated.return_value = False
-        machine.model_copy.return_value = Mock()
-
-        completed_request = Mock()
-        completed_request.status = RequestStatus.COMPLETED
-
-        def mock_get_by_id(machine_id):
-            key = getattr(machine_id, "value", machine_id)
-            if key == "machine-001":
-                return machine
-            if key == "ret-00000000-0000-0000-0000-000000000999":
-                return completed_request
-            return None
-
-        self.mock_uow.machines.get_by_id.side_effect = mock_get_by_id
-        self.mock_uow.requests.get_by_id.side_effect = mock_get_by_id
-
-        command = CreateReturnRequestCommand(machine_ids=["machine-001"])
-
-        await self.handler.validate_command(command)
-        self.mock_uow.machines.save.assert_called_once()
-
-    def test_update_machines_to_pending_clears_return_request_id(self):
-        machine = Mock()
-        machine.machine_id = "machine-001"
-        machine.return_request_id = "ret-123"
 
         shutting_down_machine = Mock()
-        cleared_machine = Mock()
-        shutting_down_machine.model_copy.return_value = cleared_machine
         machine.update_status.return_value = shutting_down_machine
 
         self.mock_uow.machines.get_by_id.return_value = machine
@@ -210,8 +150,7 @@ class TestReturnValidationFix:
         self.handler._update_machines_to_pending(["machine-001"])
 
         machine.update_status.assert_called_once()
-        shutting_down_machine.model_copy.assert_called_once_with(update={"return_request_id": None})
-        self.mock_uow.machines.save.assert_called_once_with(cleared_machine)
+        self.mock_uow.machines.save.assert_called_once_with(shutting_down_machine)
 
     @pytest.mark.asyncio
     async def test_successful_deprovisioning_persists_followup_context_and_stays_in_progress(self):
