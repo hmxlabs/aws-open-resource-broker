@@ -153,7 +153,18 @@ class TestAPIEndpoints:
 
     def test_request_id_header(self, client):
         """Test that request ID header is added to responses."""
-        response = client.get("/health")
+        from unittest.mock import MagicMock
+
+        import orb.api.dependencies as deps
+
+        mock_health_port = MagicMock()
+        mock_health_port.get_status.return_value = {"status": "healthy"}
+        client.app.dependency_overrides[deps.get_health_check_port] = lambda: mock_health_port
+
+        try:
+            response = client.get("/health")
+        finally:
+            client.app.dependency_overrides.pop(deps.get_health_check_port, None)
 
         assert response.status_code == 200
         assert "X-Request-ID" in response.headers
@@ -220,7 +231,18 @@ class TestAPIEndpoints:
 
     def test_security_headers(self, client):
         """Test security headers are present."""
-        response = client.get("/health")
+        from unittest.mock import MagicMock
+
+        import orb.api.dependencies as deps
+
+        mock_health_port = MagicMock()
+        mock_health_port.get_status.return_value = {"status": "healthy"}
+        client.app.dependency_overrides[deps.get_health_check_port] = lambda: mock_health_port
+
+        try:
+            response = client.get("/health")
+        finally:
+            client.app.dependency_overrides.pop(deps.get_health_check_port, None)
 
         assert response.status_code == 200
 
