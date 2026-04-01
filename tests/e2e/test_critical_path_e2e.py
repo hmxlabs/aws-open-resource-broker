@@ -413,7 +413,12 @@ class TestTemplateManagement:
         """GET /api/v1/templates/{id} returns the template."""
         mock_template = Mock()
         mock_template.to_dict = Mock(
-            return_value={"template_id": "tpl-001", "name": "test-template", "max_capacity": 1, "instance_type": "t3.micro"}
+            return_value={
+                "template_id": "tpl-001",
+                "name": "test-template",
+                "max_capacity": 1,
+                "instance_type": "t3.micro",
+            }
         )
         mock_result = Mock()
         mock_result.template = mock_template
@@ -577,7 +582,12 @@ class TestTemplateManagement:
         # Step 2: retrieve
         mock_template = Mock()
         mock_template.to_dict = Mock(
-            return_value={"template_id": "tpl-flow-001", "provider_api": "ec2_fleet", "max_capacity": 1, "instance_type": "t3.micro"}
+            return_value={
+                "template_id": "tpl-flow-001",
+                "provider_api": "ec2_fleet",
+                "max_capacity": 1,
+                "instance_type": "t3.micro",
+            }
         )
         mock_get_result = Mock()
         mock_get_result.template = mock_template
@@ -619,7 +629,12 @@ class TestTemplateManagement:
         """GET /api/v1/templates/?provider_api=ec2_fleet passes filter to query bus."""
         mock_template = Mock()
         mock_template.to_dict = Mock(
-            return_value={"template_id": "tpl-ec2", "provider_api": "ec2_fleet", "max_capacity": 1, "instance_type": "t3.micro"}
+            return_value={
+                "template_id": "tpl-ec2",
+                "provider_api": "ec2_fleet",
+                "max_capacity": 1,
+                "instance_type": "t3.micro",
+            }
         )
         mock_result = Mock()
         mock_result.templates = [mock_template]
