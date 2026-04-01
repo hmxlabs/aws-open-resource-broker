@@ -16,8 +16,8 @@ Key CycleCloud concepts:
 
 from __future__ import annotations
 
-from contextlib import AbstractContextManager
-from typing import Any, Callable, Optional
+from contextlib import contextmanager
+from typing import Any, Iterator, Optional
 
 import requests
 from orb.domain.base.dependency_injection import injectable
@@ -68,27 +68,6 @@ _CC_STATE_MAP: dict[str, str] = {
 def resolve_cc_state(state: str) -> str:
     """Map a CycleCloud node state to a domain status string."""
     return _CC_STATE_MAP.get(state, "unknown")
-
-
-class _CycleCloudSessionScope(AbstractContextManager[CycleCloudSessionContext]):
-    """Own a CycleCloud requests session for the duration of a handler flow."""
-
-    def __init__(
-        self,
-        build_session: Callable[[], CycleCloudSessionContext],
-    ):
-        """Initialize with a factory that builds CycleCloud session contexts."""
-        self._build_session = build_session
-        self._session_context: Optional[CycleCloudSessionContext] = None
-
-    def __enter__(self) -> CycleCloudSessionContext:
-        self._session_context = self._build_session()
-        return self._session_context
-
-    def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
-        if self._session_context is not None:
-            self._session_context.session.close()
-        return None
 
 
 @injectable
@@ -171,6 +150,7 @@ class CycleCloudHandler(AzureHandler):
             credential_path=settings.credential_path,
         )
 
+    @contextmanager
     def _cc_session_scope(
         self,
         *,
@@ -178,23 +158,27 @@ class CycleCloudHandler(AzureHandler):
         verify_ssl: Optional[bool],
         template: Optional[AzureTemplate] = None,
         request_context: Optional[CycleCloudRequestContext] = None,
-    ) -> AbstractContextManager[CycleCloudSessionContext]:
-        return _CycleCloudSessionScope(
-            lambda: self._build_cc_session(
-                cc_url=cc_url,
-                verify_ssl=verify_ssl,
-                template=template,
-                request_context=request_context,
-            )
+    ) -> Iterator[CycleCloudSessionContext]:
+        session_context = self._build_cc_session(
+            cc_url=cc_url,
+            verify_ssl=verify_ssl,
+            template=template,
+            request_context=request_context,
         )
+        try:
+            yield session_context
+        finally:
+            session_context.session.close()
 
-    def _cc_request_raw(
+    def _cc_request(
         self,
         session: requests.Session,
         method: str,
         url: str,
+        *,
+        include_metadata: bool = False,
         **kwargs: Any,
-    ) -> dict[str, Any]:
+    ) -> Any:
         try:
             response = session.request(
                 method,
@@ -212,6 +196,8 @@ class CycleCloudHandler(AzureHandler):
                         f"CycleCloud API returned invalid JSON from {url}: {exc}",
                         url=url,
                     ) from exc
+            if not include_metadata:
+                return body
             return {
                 "body": body,
                 "headers": dict(response.headers),
@@ -257,24 +243,6 @@ class CycleCloudHandler(AzureHandler):
                 f"CycleCloud API request failed: {exc}",
                 url=url,
             ) from exc
-
-    def _cc_request(
-        self,
-        session: requests.Session,
-        method: str,
-        url: str,
-        **kwargs: Any,
-    ) -> Any:
-        return self._cc_request_raw(session, method, url, **kwargs)["body"]
-
-    def _cc_request_with_metadata(
-        self,
-        session: requests.Session,
-        method: str,
-        url: str,
-        **kwargs: Any,
-    ) -> dict[str, Any]:
-        return self._cc_request_raw(session, method, url, **kwargs)
 
     def _resolve_release_node_names(
         self,
@@ -452,10 +420,11 @@ class CycleCloudHandler(AzureHandler):
                 )
 
             try:
-                create_response = self._cc_request_with_metadata(
+                create_response = self._cc_request(
                     session,
                     "POST",
                     f"{base_url}/clusters/{cluster_name}/nodes/create",
+                    include_metadata=True,
                     json=node_params,
                 )
                 result = create_response.get("body") or {}
@@ -708,10 +677,11 @@ class CycleCloudHandler(AzureHandler):
                     deallocate_payload: dict[str, Any] = {
                         "names": node_names,
                     }
-                    deallocate_response = self._cc_request_with_metadata(
+                    deallocate_response = self._cc_request(
                         session,
                         "POST",
                         f"{base_url}/clusters/{cluster_name}/nodes/deallocate",
+                        include_metadata=True,
                         json=deallocate_payload,
                     )
                     self._logger.debug(
@@ -721,10 +691,11 @@ class CycleCloudHandler(AzureHandler):
                     remove_payload: dict[str, Any] = {
                         "names": node_names,
                     }
-                    remove_response = self._cc_request_with_metadata(
+                    remove_response = self._cc_request(
                         session,
                         "POST",
                         f"{base_url}/clusters/{cluster_name}/nodes/remove",
+                        include_metadata=True,
                         json=remove_payload,
                     )
                     self._logger.info(
