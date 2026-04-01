@@ -171,7 +171,7 @@ class SingleVMHandler(AzureHandler):
 
         selected_vm_size: Optional[str] = None
         submitted_deployment_name: Optional[str] = None
-        last_error_details: Optional[dict[str, Any]] = None
+        last_error_details: dict[str, Any] = {}
 
         for candidate_vm_size in candidate_vm_sizes:
             try:
@@ -253,14 +253,11 @@ class SingleVMHandler(AzureHandler):
         if submitted_deployment_name is None or selected_vm_size is None:
             raise LaunchError(
                 message=(
-                    last_error_details["error_message"]
-                    if last_error_details
-                    else "Failed to submit SingleVM deployment"
+                    last_error_details.get("error_message")
+                    or "Failed to submit SingleVM deployment"
                 ),
                 template_id=template.template_id,
-                error_code=(
-                    last_error_details["error_code"] if last_error_details else None
-                ),
+                error_code=last_error_details.get("error_code"),
             )
 
         created_ids = [vm_definition["vm_name"] for vm_definition in vm_definitions]
