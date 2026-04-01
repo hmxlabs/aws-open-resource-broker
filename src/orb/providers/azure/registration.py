@@ -225,6 +225,7 @@ def register_azure_provider_with_di(provider_instance: Any, container: Any) -> b
         registry = get_provider_registry()
 
         def azure_strategy_factory(_config: Any) -> Any:
+            """Factory to create Azure strategy using DI container."""
             return _create_azure_strategy_with_di(container, azure_config, provider_instance.name)
 
         if not registry.is_provider_registered("azure"):
@@ -259,6 +260,7 @@ def _register_azure_components_with_di(
     )
 
     def azure_client_factory(container_instance: Any) -> Any:
+        """Factory to create an Azure client with the correct config and logger."""
         logger_port = container_instance.get(LoggingPort)
         client = _create_azure_client(azure_config, logger_port)
         logger_port.info(
@@ -375,6 +377,7 @@ def register_azure_services_with_di(container) -> None:
         if not container.is_registered(AzureNativeSpecService):
 
             def create_azure_native_spec_service(c):
+                """Factory to create AzureNativeSpecService with dependencies from DI container."""
                 from orb.application.services.native_spec_service import NativeSpecService
                 from orb.domain.base.ports.configuration_port import ConfigurationPort
 

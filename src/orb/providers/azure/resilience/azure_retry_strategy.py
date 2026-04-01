@@ -85,11 +85,13 @@ class AzureRetryStrategy(RetryStrategy):
         self.jitter = jitter
 
     def should_retry(self, attempt: int, exception: Exception) -> bool:
+        """Determine if the given exception is retryable based on Azure SDK error patterns and number of retries."""
         if attempt >= self.max_attempts:
             return False
         return is_retryable_azure_error(exception)
 
     def get_delay(self, attempt: int) -> float:
+        """Gets the delay before the next retry attempt, using exponential backoff with optional jitter."""
         delay = min(self.base_delay * (2 ** attempt), self.max_delay)
         if self.jitter:
             rng = secrets.SystemRandom()
@@ -98,6 +100,7 @@ class AzureRetryStrategy(RetryStrategy):
         return delay
 
     def on_retry(self, attempt: int, exception: Exception) -> None:
+        """Log a warning about the retry attempt and the exception that caused it."""
         self._logger.warning(
             "Retrying Azure %s operation (attempt %d/%d) after error: %s",
             self.service,

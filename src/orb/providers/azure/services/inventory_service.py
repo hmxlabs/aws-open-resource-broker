@@ -13,6 +13,8 @@ from orb.providers.base.strategy import ProviderOperation, ProviderResult
 
 @dataclass
 class AzureStatusQueryContext:
+    """Parameters for an Azure instance status query."""
+
     instance_ids: list[str]
     resource_group: str
     provider_api: Optional[AzureProviderApi | str]
@@ -26,6 +28,7 @@ class AzureInventoryService:
 
     @staticmethod
     def request_metadata(operation: ProviderOperation) -> dict[str, Any]:
+        """Extract the request_metadata dict from a provider operation."""
         return dict(operation.parameters.get("request_metadata") or {})
 
     @staticmethod
@@ -33,6 +36,7 @@ class AzureInventoryService:
         operation: ProviderOperation,
         default_resource_group: Optional[str],
     ) -> Optional[str]:
+        """Return the resource group from request metadata, falling back to the default."""
         request_metadata = AzureInventoryService.request_metadata(operation)
         request_resource_group = request_metadata.get("resource_group")
         if request_resource_group not in (None, ""):
@@ -44,6 +48,7 @@ class AzureInventoryService:
         instance_ids: list[str],
         resource_mapping: dict[str, Any],
     ) -> dict[str, list[str]]:
+        """Group the requested instance IDs by their owning Azure resource ID."""
         grouped: dict[str, list[str]] = {}
         if not resource_mapping:
             return grouped
@@ -76,6 +81,7 @@ class AzureInventoryService:
 
     @staticmethod
     def cyclecloud_metadata_keys() -> tuple[str, ...]:
+        """Return the metadata keys forwarded for CycleCloud operations."""
         return (
             "cluster_name",
             "node_array",
@@ -95,6 +101,7 @@ class AzureInventoryService:
         operation: ProviderOperation,
         resource_group: Optional[str],
     ) -> dict[str, Any]:
+        """Build the metadata dict required for CycleCloud handler calls."""
         metadata: dict[str, Any] = {"resource_group": resource_group}
         request_metadata = self.request_metadata(operation)
         for key in self.cyclecloud_metadata_keys():
@@ -105,6 +112,7 @@ class AzureInventoryService:
 
     @staticmethod
     def status_candidate_ids(result: dict[str, Any]) -> set[str]:
+        """Return all plausible instance identifiers from a single status result."""
         provider_data = result.get("provider_data") or {}
         candidate_ids = {
             str(result.get("instance_id")),
@@ -118,6 +126,7 @@ class AzureInventoryService:
         return candidate_ids
 
     def observed_status_ids(self, instance_details: list[dict[str, Any]]) -> set[str]:
+        """Collect all candidate identifiers across a list of instance detail dicts."""
         observed_ids: set[str] = set()
         for instance in instance_details:
             observed_ids.update(self.status_candidate_ids(instance))
@@ -128,6 +137,7 @@ class AzureInventoryService:
         results: list[dict[str, Any]],
         requested_ids: list[str],
     ) -> list[dict[str, Any]]:
+        """Return only the results whose candidate IDs overlap with the requested set."""
         requested = {str(item) for item in requested_ids}
         filtered: list[dict[str, Any]] = []
         for result in results:
@@ -149,6 +159,7 @@ class AzureInventoryService:
         operation: ProviderOperation,
         instance_ids: list[str],
     ) -> list[str]:
+        """Resolve the Azure resource IDs relevant to the given instance IDs."""
         resource_ids: list[str] = []
         raw_resource_mapping = operation.parameters.get("resource_mapping", {}) or {}
         for resource_id, mapped_ids in self.group_instance_ids_by_resource(
@@ -170,6 +181,7 @@ class AzureInventoryService:
         azure_client: Optional[AzureClient],
         machine_conversion_service: Any,
     ) -> ProviderResult:
+        """Query VM status directly via the Azure SDK as a fallback."""
         if not azure_client:
             return ProviderResult.error_result(
                 "Azure client not available", "AZURE_CLIENT_NOT_AVAILABLE"

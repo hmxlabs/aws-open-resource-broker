@@ -24,6 +24,7 @@ class AzureHandlerFactory:
         logger: LoggingPort,
         machine_adapter: Optional[object] = None,
     ) -> None:
+        """Initialize the factory with an Azure client and register handler classes."""
         self._azure_client = azure_client
         self._logger = logger
         self._machine_adapter = machine_adapter
@@ -33,6 +34,7 @@ class AzureHandlerFactory:
 
     @property
     def azure_client(self) -> AzureClient:
+        """Return the underlying Azure client instance."""
         return self._azure_client
 
     @staticmethod

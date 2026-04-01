@@ -25,6 +25,7 @@ class AzureDeploymentService:
     _NETWORK_API_VERSION = "2023-09-01"
 
     def __init__(self, azure_client: AzureClient, logger: LoggingPort) -> None:
+        """Initialize with an Azure client and logger."""
         self.azure_client = azure_client
         self._logger = logger
 

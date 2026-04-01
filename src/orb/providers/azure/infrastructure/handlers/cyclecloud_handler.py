@@ -77,6 +77,7 @@ class _CycleCloudSessionScope(AbstractContextManager[CycleCloudSessionContext]):
         self,
         build_session: Callable[[], CycleCloudSessionContext],
     ):
+        """Initialize with a factory that builds CycleCloud session contexts."""
         self._build_session = build_session
         self._session_context: Optional[CycleCloudSessionContext] = None
 
@@ -763,6 +764,7 @@ class CycleCloudHandler(AzureHandler):
 
     @classmethod
     def get_example_templates(cls) -> list[dict[str, Any]]:
+        """Return example CycleCloud template configurations."""
         return [
             {
                 "template_id": "azure-cyclecloud-hpc",

@@ -53,6 +53,7 @@ class AzureSpotPlacementScoreAdapter(SpotPlacementScoreAdapter):
     def score_candidates(
         self, requested_count: int, template: AzureSpotPlacementTemplate
     ) -> list[PlacementScore]:
+        """Fetch and return spot placement scores for all candidate region/zone/VM-size combinations."""
         vm_sizes = [template.vm_size, *(template.vm_sizes or [])]
         regions = template.placement_regions or [template.location.value or self._base_location]
         zones = template.placement_zones or template.zones or []

@@ -16,6 +16,7 @@ AzureProviderApiRef = AzureProviderApi | str
 
 @dataclass
 class CreateOperationContext:
+    """Context object encapsulating all necessary information for handling a create operation."""
     template_config: dict[str, Any]
     count: int
     provider_api: AzureProviderApiRef
@@ -29,16 +30,37 @@ class AzureProvisioningService:
 
     @staticmethod
     def get_create_template_config(operation: ProviderOperation) -> dict[str, Any]:
+        """Extract the template configuration from the provider operation.
+
+        Args:
+            operation (ProviderOperation): The provider operation containing parameters.
+        Returns:
+            dict[str, Any]: The template configuration dictionary (may be empty).
+        """
         return dict(operation.parameters.get("template_config") or {})
 
     @staticmethod
     def get_create_count(operation: ProviderOperation) -> int:
+        """Extract the instance count from the provider operation.
+
+        Args:
+            operation (ProviderOperation): The provider operation containing parameters.
+        Returns:
+            int: The number of instances to create (default 1).
+        """
         return operation.parameters.get("count", 1)
 
     @staticmethod
     def validate_create_template_config(
         template_config: dict[str, Any],
     ) -> Optional[ProviderResult]:
+        """Validate that the template configuration is present.
+
+        Args:
+            template_config (dict[str, Any]): The template configuration to validate.
+        Returns:
+            Optional[ProviderResult]: None if valid, or an error result if missing.
+        """
         if template_config:
             return None
         return ProviderResult.error_result(
@@ -48,6 +70,13 @@ class AzureProvisioningService:
 
     @staticmethod
     def provider_api_key(provider_api: AzureProviderApiRef) -> str:
+        """Get the string key for the provider API value.
+
+        Args:
+            provider_api (AzureProviderApiRef): The provider API enum or string.
+        Returns:
+            str: The string key for the provider API.
+        """
         if isinstance(provider_api, AzureProviderApi):
             return provider_api.value
         return provider_api
@@ -57,6 +86,14 @@ class AzureProvisioningService:
         template_config: dict[str, Any],
         normalize_provider_api: Callable[[Any], Any],
     ) -> AzureProviderApiRef:
+        """Resolve the provider API from the template config, normalizing as needed.
+
+        Args:
+            template_config (dict[str, Any]): The template configuration.
+            normalize_provider_api (Callable): Function to normalize the API value.
+        Returns:
+            AzureProviderApiRef: The resolved provider API value.
+        """
         provider_api = template_config.get("provider_api", AzureProviderApi.VMSS)
         return cast(AzureProviderApiRef, normalize_provider_api(provider_api))
 
@@ -68,6 +105,16 @@ class AzureProvisioningService:
         resolve_handler: Callable[[AzureProviderApiRef], Optional[AzureHandler]],
         build_template: Callable[[dict[str, Any]], AzureTemplate],
     ) -> CreateOperationContext | ProviderResult:
+        """Build and validate the context required for a create operation.
+
+        Args:
+            operation (ProviderOperation): The provider operation.
+            normalize_provider_api (Callable): Function to normalize the API value.
+            resolve_handler (Callable): Function to resolve the handler for the API.
+            build_template (Callable): Function to build the AzureTemplate.
+        Returns:
+            CreateOperationContext | ProviderResult: The context or an error result.
+        """
         template_config = self.get_create_template_config(operation)
         count = self.get_create_count(operation)
         validation_error = self.validate_create_template_config(template_config)
@@ -101,6 +148,17 @@ class AzureProvisioningService:
         provider_api: AzureProviderApiRef,
         provider_instance_name: str,
     ) -> Any:
+        """Build a request object for the create operation handler.
+
+        Args:
+            operation (ProviderOperation): The provider operation.
+            azure_template (AzureTemplate): The Azure template object.
+            count (int): Number of instances to create.
+            provider_api (AzureProviderApiRef): The provider API value.
+            provider_instance_name (str): The provider instance name.
+        Returns:
+            Any: The constructed request object.
+        """
         from orb.domain.request.aggregate import Request
         from orb.domain.request.value_objects import RequestType
 
@@ -129,6 +187,17 @@ class AzureProvisioningService:
         count: int,
         template_id: str,
     ) -> ProviderResult:
+        """Normalize the result from the handler into a ProviderResult.
+
+        Args:
+            handler_result (Any): The result from the handler.
+            template_config (dict[str, Any]): The template configuration.
+            provider_api (AzureProviderApiRef): The provider API value.
+            count (int): Number of instances requested.
+            template_id (str): The template ID.
+        Returns:
+            ProviderResult: The normalized result object.
+        """
         if isinstance(handler_result, dict):
             resource_ids = handler_result.get("resource_ids", [])
             instances = handler_result.get("instances", [])
@@ -174,6 +243,13 @@ class AzureProvisioningService:
     def create_instances_dry_run_result(
         create_context: CreateOperationContext,
     ) -> ProviderResult:
+        """Return a dry-run result for create instances operation.
+
+        Args:
+            create_context (CreateOperationContext): The context for the create operation.
+        Returns:
+            ProviderResult: The dry-run result object.
+        """
         return ProviderResult.success_result(
             {
                 "resource_ids": ["dry-run-resource-id"],
@@ -197,6 +273,14 @@ class AzureProvisioningService:
         create_context: CreateOperationContext,
         request: Any,
     ) -> ProviderResult:
+        """Execute the handler's acquire_hosts method and normalize the result.
+
+        Args:
+            create_context (CreateOperationContext): The context for the create operation.
+            request (Any): The request object for the handler.
+        Returns:
+            ProviderResult: The normalized result object.
+        """
         handler_result = create_context.handler.acquire_hosts(
             request, create_context.azure_template
         )

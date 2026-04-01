@@ -10,6 +10,8 @@ from orb.providers.azure.infrastructure.azure_client import AzureClient
 
 
 class _AzureVmWithName(Protocol):
+    """Structural type for Azure VM objects that expose a name attribute."""
+
     name: str | None
 
 
@@ -41,6 +43,7 @@ class AzureMachineConversionService:
         return status
 
     def convert_sdk_vm(self, vm: Any, azure_client: AzureClient) -> dict[str, Any]:
+        """Convert an Azure SDK VirtualMachine into a normalized machine dict."""
         network_identity = azure_client.resolve_network_identity_from_vm(vm)
         vm_name = cast(_AzureVmWithName, vm).name
         hardware_profile = vm.hardware_profile

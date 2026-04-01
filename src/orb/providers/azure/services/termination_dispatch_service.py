@@ -28,6 +28,7 @@ class AzureTerminationDispatchService:
         default_resource_id: str,
         context: dict[str, Any],
     ) -> list[dict[str, Any]]:
+        """Fan out release_hosts calls per resource group and collect provider data."""
         termination_provider_data: list[dict[str, Any]] = []
 
         dispatch_groups = grouped_resource_mapping or {default_resource_id: instance_ids}

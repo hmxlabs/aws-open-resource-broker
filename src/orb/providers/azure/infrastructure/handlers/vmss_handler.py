@@ -88,6 +88,8 @@ def _status_attr(status: Any, attr: str, default: Any = None) -> Any:
 
 
 class _AzureVmWithIdentity(Protocol):
+    """Protocol for Azure VM objects that expose name and vm_id fields."""
+
     name: Optional[str]
     vm_id: Optional[str]
 
@@ -137,6 +139,7 @@ class VMSSHandler(AzureHandler):
     """
 
     def __init__(self, *args, **kwargs) -> None:
+        """Initialize handler with native-spec and resource-manager services."""
         super().__init__(*args, **kwargs)
         container = get_container()
         try:
@@ -963,6 +966,7 @@ class VMSSHandler(AzureHandler):
 
     @classmethod
     def get_example_templates(cls) -> list[dict[str, Any]]:
+        """Return example VMSS template configurations."""
         return [
             {
                 "template_id": "azure-vmss-linux-basic",

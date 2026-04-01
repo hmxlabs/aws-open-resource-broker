@@ -37,6 +37,7 @@ class CycleCloudConfig(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def reject_inline_basic_auth(cls, data: object) -> object:
+        """Reject inline credentials that must be supplied via secret-path."""
         if not isinstance(data, dict):
             return data
 

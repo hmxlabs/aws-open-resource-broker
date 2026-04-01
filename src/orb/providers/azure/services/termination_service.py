@@ -11,6 +11,8 @@ from orb.providers.base.strategy import ProviderOperation, ProviderResult
 
 @dataclass
 class TerminationOperationContext:
+    """Resolved parameters needed to execute a termination dispatch."""
+
     instance_ids: list[str]
     grouped_resource_mapping: dict[str, list[str]]
     release_context: dict[str, Any]
@@ -32,6 +34,7 @@ class AzureTerminationService:
         build_cyclecloud_request_metadata: Callable[..., dict[str, Any]],
         resolve_operation_resource_group: Callable[[ProviderOperation], Optional[str]],
     ) -> TerminationOperationContext | ProviderResult:
+        """Validate and resolve a termination operation into a dispatch context or an error."""
         instance_ids = operation.parameters.get("instance_ids", [])
         if not instance_ids:
             return ProviderResult.error_result(
@@ -78,6 +81,7 @@ class AzureTerminationService:
     def terminate_instances_dry_run_result(
         termination_context: TerminationOperationContext,
     ) -> ProviderResult:
+        """Return a success result describing what a real termination would do."""
         return ProviderResult.success_result(
             {
                 "success": True,
@@ -97,6 +101,7 @@ class AzureTerminationService:
         instance_ids: list[str],
         termination_provider_data: list[dict[str, Any]],
     ) -> ProviderResult:
+        """Build the final termination result from handler responses."""
         return ProviderResult.success_result(
             {
                 "success": True,

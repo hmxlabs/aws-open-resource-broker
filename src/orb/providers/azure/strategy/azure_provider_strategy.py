@@ -90,6 +90,7 @@ class AzureProviderStrategy(ProviderStrategy):
         azure_client_resolver: Optional[Callable[[], AzureClient]] = None,
         vmss_cleanup_coordinator_factory: Optional[VmssCleanupCoordinatorFactory] = None,
     ) -> None:
+        """Initialise the Azure strategy with config, logger, and optional client resolver."""
         if not isinstance(config, AzureProviderConfig):
             raise ValueError("AzureProviderStrategy requires AzureProviderConfig")
 
@@ -142,10 +143,12 @@ class AzureProviderStrategy(ProviderStrategy):
 
     @property
     def provider_type(self) -> str:
+        """Return the provider type identifier."""
         return "azure"
 
     @property
     def provider_instance_name(self) -> str:
+        """Return the configured name for this provider instance."""
         return self._provider_instance_name
 
     @property
@@ -166,6 +169,7 @@ class AzureProviderStrategy(ProviderStrategy):
 
     @property
     def resource_manager(self) -> Optional[AzureResourceManager]:
+        """Get the Azure resource manager with lazy initialisation."""
         with self._lazy_init_lock:
             azure_client = self.azure_client
             if self._resource_manager is None and azure_client:
@@ -179,6 +183,7 @@ class AzureProviderStrategy(ProviderStrategy):
 
     @property
     def deployment_service(self) -> Optional[Any]:
+        """Get the ARM deployment service with lazy initialisation."""
         with self._lazy_init_lock:
             azure_client = self.azure_client
             if self._deployment_service is None and azure_client:
@@ -273,6 +278,7 @@ class AzureProviderStrategy(ProviderStrategy):
     # ------------------------------------------------------------------
 
     def initialize(self) -> bool:
+        """Mark the strategy as initialised and ready to execute operations."""
         self._logger.info(
             "Azure provider strategy ready for region: %s",
             self._azure_config.region,
@@ -337,6 +343,7 @@ class AzureProviderStrategy(ProviderStrategy):
         return self._capability_service.get_capabilities()
 
     def check_health(self) -> ProviderHealthStatus:
+        """Check Azure connectivity and return the current health status."""
         return self._health_check_service.check_health(self.azure_client)
 
     def generate_provider_name(self, config: dict[str, Any]) -> str:
@@ -348,6 +355,7 @@ class AzureProviderStrategy(ProviderStrategy):
         return self._capability_service.parse_provider_name(provider_name)
 
     def get_provider_name_pattern(self) -> str:
+        """Return the regex pattern used to validate Azure provider names."""
         return self._capability_service.get_provider_name_pattern()
 
     def get_supported_apis(self) -> list[str]:
@@ -355,6 +363,7 @@ class AzureProviderStrategy(ProviderStrategy):
         return self._capability_service.get_supported_apis()
 
     def cleanup(self) -> None:
+        """Release Azure client resources and reset all lazily initialised state."""
         if self._client is not None:
             self._client.close()
         self._client = None

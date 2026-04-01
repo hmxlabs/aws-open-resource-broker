@@ -18,6 +18,7 @@ class VmssCapacitySnapshot:
     state: Optional[str]
 
     def as_metadata(self) -> dict[str, Any]:
+        """Return the snapshot as a plain dict suitable for metadata output."""
         return {
             "target_capacity_units": self.target_capacity_units,
             "fulfilled_capacity_units": self.fulfilled_capacity_units,
@@ -50,6 +51,7 @@ class AzureResourceMetadataService:
         resource_manager: Any,
         resource_group: Optional[str] = None,
     ) -> None:
+        """Enrich metadata with aggregate VMSS capacity fulfilment from live scale sets."""
         if not resource_ids or resource_manager is None:
             return
 
@@ -146,6 +148,7 @@ class AzureResourceMetadataService:
         resource_group: Optional[str],
         deployment_service: Any,
     ) -> None:
+        """Enrich metadata with ARM deployment status for single-VM resources."""
         deployment_name = request_metadata.get("deployment_name")
         if deployment_name in (None, "") or not resource_group or deployment_service is None:
             return
@@ -188,6 +191,7 @@ class AzureResourceMetadataService:
 
     @staticmethod
     def augment_shortfall_metadata(metadata: dict[str, Any]) -> None:
+        """Add a capacity_shortfall summary when fulfilled capacity is below the target."""
         capacity = metadata.get("fleet_capacity_fulfilment") or {}
         target = capacity.get("target_capacity_units")
         fulfilled = capacity.get("fulfilled_capacity_units")

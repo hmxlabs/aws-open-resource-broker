@@ -188,6 +188,7 @@ class CycleCloudSessionBuilder:
         return self._get_azure_bearer_token(scopes)
 
     def build_settings(self) -> CycleCloudSessionSettings:
+        """Resolve credential, transport, and auth settings into a session config."""
         credential_path = self._resolve_credential_path()
         credential_data = (
             self._load_credential_file(credential_path)

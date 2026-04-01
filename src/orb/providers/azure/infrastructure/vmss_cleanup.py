@@ -8,8 +8,10 @@ from typing import Callable, Mapping, Optional, Protocol, TypeAlias, Any
 
 
 class _VmssCleanupLogger(Protocol):
-    def warning(self, msg: str, *args: object) -> None: ...
-
+    """Protocol for logging warnings in the VMSS cleanup coordinator."""
+    def warning(self, msg: str, *args: object) -> None:
+        """A minimal logger protocol for the VMSS cleanup coordinator, focused on warning messages."""
+        ...
 
 GetVmssMemberCount: TypeAlias = Callable[..., Optional[int]]
 VmssExists: TypeAlias = Callable[..., Optional[bool]]
@@ -31,6 +33,13 @@ class PendingVmssCleanup:
 
     @classmethod
     def from_metadata(cls, metadata: Mapping[str, object]) -> Optional[PendingVmssCleanup]:
+        """Create a PendingVmssCleanup instance from a metadata mapping.
+
+        Args:
+            metadata (Mapping[str, object]): Metadata containing cleanup info.
+        Returns:
+            Optional[PendingVmssCleanup]: The constructed instance, or None if invalid.
+        """
         resource_group = metadata.get("resource_group")
         vmss_name = metadata.get("vmss_name")
         if vmss_name in (None, ""):
@@ -76,6 +85,19 @@ class PendingVmssCleanup:
         delete_retry_pending: bool = False,
         last_delete_error: Optional[str] = None,
     ) -> PendingVmssCleanup:
+        """Create a new PendingVmssCleanup instance with the given parameters.
+
+        Args:
+            resource_group (str): The Azure resource group name.
+            vmss_name (str): The VMSS name.
+            machine_ids (list[str]): List of machine IDs.
+            delete_vmss_when_empty (bool): Whether to delete VMSS when empty.
+            delete_submitted (bool): Whether delete has been submitted.
+            delete_retry_pending (bool): Whether a retry is pending.
+            last_delete_error (Optional[str]): Last error message, if any.
+        Returns:
+            PendingVmssCleanup: The constructed instance.
+        """
         return cls(
             resource_group=str(resource_group),
             vmss_name=str(vmss_name),
@@ -89,6 +111,13 @@ class PendingVmssCleanup:
         )
 
     def combine_for_same_vmss(self, other: PendingVmssCleanup) -> PendingVmssCleanup:
+        """Merge this cleanup with another for the same VMSS, combining machine IDs and state.
+
+        Args:
+            other (PendingVmssCleanup): Another cleanup for the same VMSS.
+        Returns:
+            PendingVmssCleanup: The merged cleanup instance.
+        """
         merged_machine_ids = list(self.machine_ids)
         for machine_id in other.machine_ids:
             if machine_id not in merged_machine_ids:
@@ -107,16 +136,27 @@ class PendingVmssCleanup:
         )
 
     def mark_delete_submitted(self) -> None:
+        """Mark this cleanup as having had its delete submitted."""
         self.delete_submitted = True
         self.delete_retry_pending = False
         self.last_delete_error = None
 
     def mark_delete_retry_pending(self, exc: Exception) -> None:
+        """Mark this cleanup as needing a retry, recording the exception message.
+
+        Args:
+            exc (Exception): The exception that caused the retry.
+        """
         self.delete_submitted = False
         self.delete_retry_pending = True
         self.last_delete_error = str(exc)
 
     def to_metadata(self) -> dict[str, Any]:
+        """Convert this cleanup to a metadata dictionary for serialization.
+
+        Returns:
+            dict[str, Any]: Metadata representing this cleanup.
+        """
         metadata: dict[str, object] = {
             "resource_group": self.resource_group,
             "vmss_name": self.vmss_name,
@@ -131,6 +171,11 @@ class PendingVmssCleanup:
         return metadata
 
     def to_status_detail(self) -> dict[str, Any]:
+        """Get a status detail dictionary for reporting purposes.
+
+        Returns:
+            dict[str, Any]: Status detail for this cleanup.
+        """
         return self.to_metadata()
 
 
@@ -145,6 +190,7 @@ class VmssCleanupCoordinator:
         vmss_exists: VmssExists,
         begin_delete_vmss: BeginDeleteVmss,
     ) -> None:
+        """Initialize the coordinator with necessary dependencies."""
         self._logger = logger
         self._get_vmss_member_count = get_vmss_member_count
         self._vmss_exists = vmss_exists
@@ -153,10 +199,16 @@ class VmssCleanupCoordinator:
         self._lock = RLock()
 
     def clear(self) -> None:
+        """Clear all pending VMSS cleanups."""
         with self._lock:
             self._pending_cleanups.clear()
 
     def record(self, handler_result: Mapping[str, object] | object) -> None:
+        """Record a pending cleanup from a handler result, if present.
+
+        Args:
+            handler_result (Mapping[str, object] | object): Handler result possibly containing cleanup info.
+        """
         if not isinstance(handler_result, Mapping):
             return
 
@@ -180,6 +232,11 @@ class VmssCleanupCoordinator:
             )
 
     def restore_from_request_metadata(self, request_metadata: Mapping[str, object]) -> None:
+        """Restore pending cleanups from request metadata.
+
+        Args:
+            request_metadata (Mapping[str, object]): Metadata possibly containing cleanup info.
+        """
         direct_pending = request_metadata.get("pending_resource_cleanup")
         if isinstance(direct_pending, Mapping):
             self.record({"provider_data": request_metadata})
@@ -193,6 +250,14 @@ class VmssCleanupCoordinator:
                 self.record({"provider_data": termination_request})
 
     def has_pending(self, *, resource_group: Optional[str], resource_ids: list[str]) -> bool:
+        """Check if there are pending cleanups for the given resource group and IDs.
+
+        Args:
+            resource_group (Optional[str]): The Azure resource group name.
+            resource_ids (list[str]): List of resource IDs.
+        Returns:
+            bool: True if any pending cleanup exists, False otherwise.
+        """
         if not resource_group:
             return False
 
@@ -208,6 +273,14 @@ class VmssCleanupCoordinator:
         resource_group: Optional[str],
         resource_ids: list[str],
     ) -> dict[str, Any]:
+        """Get metadata about pending cleanups for reporting.
+
+        Args:
+            resource_group (Optional[str]): The Azure resource group name.
+            resource_ids (list[str]): List of resource IDs.
+        Returns:
+            dict[str, Any]: Metadata about pending cleanups.
+        """
         follow_up_details: list[dict[str, Any]] = []
 
         if resource_group:
@@ -229,6 +302,13 @@ class VmssCleanupCoordinator:
         resource_ids: list[str],
         observed_ids: set[str],
     ) -> None:
+        """Reconcile pending cleanups with observed instance IDs, submitting deletes if needed.
+
+        Args:
+            resource_group (Optional[str]): The Azure resource group name.
+            resource_ids (list[str]): List of resource IDs.
+            observed_ids (set[str]): Set of observed instance IDs.
+        """
         if not resource_group or not resource_ids:
             return
 
@@ -241,6 +321,13 @@ class VmssCleanupCoordinator:
 
     @staticmethod
     def _dedupe_resource_ids(resource_ids: list[str]) -> list[str]:
+        """Remove duplicates from a list of resource IDs, preserving order.
+
+        Args:
+            resource_ids (list[str]): List of resource IDs.
+        Returns:
+            list[str]: Deduplicated list of resource IDs.
+        """
         deduped: list[str] = []
         for resource_id in resource_ids:
             vmss_name = str(resource_id)
@@ -255,6 +342,13 @@ class VmssCleanupCoordinator:
         vmss_name: str,
         observed_ids: set[str],
     ) -> None:
+        """Reconcile cleanup for a single VMSS, submitting delete if empty and not already submitted.
+
+        Args:
+            resource_group (str): The Azure resource group name.
+            vmss_name (str): The VMSS name.
+            observed_ids (set[str]): Set of observed instance IDs.
+        """
         key = (resource_group, vmss_name)
         with self._lock:
             pending = self._pending_cleanups.get(key)
@@ -292,6 +386,12 @@ class VmssCleanupCoordinator:
             )
 
     def _clear_if_vmss_is_gone(self, *, resource_group: str, vmss_name: str) -> None:
+        """Remove pending cleanup if the VMSS no longer exists in Azure.
+
+        Args:
+            resource_group (str): The Azure resource group name.
+            vmss_name (str): The VMSS name.
+        """
         if self._vmss_exists(resource_group=resource_group, vmss_name=vmss_name) is False:
             with self._lock:
                 self._pending_cleanups.pop((resource_group, vmss_name), None)
@@ -302,6 +402,14 @@ class VmssCleanupCoordinator:
         key: tuple[str, str],
         pending: PendingVmssCleanup,
     ) -> bool:
+        """Submit a VMSS delete if it is empty and deletion is required.
+
+        Args:
+            key (tuple[str, str]): The (resource_group, vmss_name) key.
+            pending (PendingVmssCleanup): The pending cleanup object.
+        Returns:
+            bool: True if delete was submitted or still pending, False if not needed.
+        """
         if not pending.delete_vmss_when_empty:
             return False
 
@@ -345,6 +453,16 @@ class VmssCleanupCoordinatorFactory:
         vmss_exists: VmssExists,
         begin_delete_vmss: BeginDeleteVmss,
     ) -> VmssCleanupCoordinator:
+        """Create a new VmssCleanupCoordinator instance.
+
+        Args:
+            logger (_VmssCleanupLogger): Logger for warnings.
+            get_vmss_member_count (GetVmssMemberCount): Function to get VMSS member count.
+            vmss_exists (VmssExists): Function to check if VMSS exists.
+            begin_delete_vmss (BeginDeleteVmss): Function to begin VMSS deletion.
+        Returns:
+            VmssCleanupCoordinator: The constructed coordinator instance.
+        """
         return VmssCleanupCoordinator(
             logger=logger,
             get_vmss_member_count=get_vmss_member_count,

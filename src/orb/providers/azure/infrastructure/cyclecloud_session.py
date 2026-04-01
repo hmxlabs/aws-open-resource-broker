@@ -46,6 +46,7 @@ class CycleCloudCredentialData:
 
     @classmethod
     def from_mapping(cls, data: dict[str, Any]) -> "CycleCloudCredentialData":
+        """Construct credential data from a flat config mapping."""
         return cls(
             url=_mapping_value(data, "cyclecloud_url", "url"),
             verify_ssl=_coerce_optional_bool(
@@ -87,6 +88,7 @@ class CycleCloudRequestContext:
 
     @classmethod
     def from_mapping(cls, data: Optional[dict[str, Any]]) -> "CycleCloudRequestContext":
+        """Construct a request context from an optional metadata mapping."""
         if not data:
             return cls()
 
@@ -114,6 +116,7 @@ class CycleCloudRequestContext:
         )
 
     def to_metadata(self) -> dict[str, Any]:
+        """Serialize non-empty fields to a metadata dict for transport."""
         metadata: dict[str, Any] = {}
         if self.cluster_name not in (None, ""):
             metadata["cluster_name"] = self.cluster_name

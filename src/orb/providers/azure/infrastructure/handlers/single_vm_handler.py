@@ -64,6 +64,7 @@ class SingleVMHandler(AzureHandler):
     """
 
     def __init__(self, *args, **kwargs) -> None:
+        """Initialize handler with deployment and native-spec services."""
         super().__init__(*args, **kwargs)
         from orb.providers.azure.infrastructure.services.azure_deployment_service import (
             AzureDeploymentService,
@@ -542,6 +543,7 @@ class SingleVMHandler(AzureHandler):
 
     @classmethod
     def get_example_templates(cls) -> list[dict[str, Any]]:
+        """Return example SingleVM template configurations."""
         return [
             {
                 "template_id": "azure-singlevm-linux",

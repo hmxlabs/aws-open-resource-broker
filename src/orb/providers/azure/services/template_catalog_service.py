@@ -15,6 +15,7 @@ class AzureTemplateCatalogService:
         self._logger = logger
 
     def get_available_templates(self) -> list[dict[str, Any]]:
+        """Load templates from the active scheduler, falling back to built-in defaults."""
         try:
             from orb.infrastructure.scheduler.registry import get_scheduler_registry
 
@@ -38,6 +39,7 @@ class AzureTemplateCatalogService:
 
     @staticmethod
     def get_fallback_templates() -> list[dict[str, Any]]:
+        """Return hard-coded sample templates used when no scheduler is available."""
         return [
             {
                 "template_id": "azure-vmss-linux-basic",

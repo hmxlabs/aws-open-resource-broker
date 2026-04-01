@@ -1,3 +1,5 @@
+"""Adapter bridging Azure template validation into the ORB validation port."""
+
 from typing import Any
 
 from orb.domain.base.dependency_injection import injectable

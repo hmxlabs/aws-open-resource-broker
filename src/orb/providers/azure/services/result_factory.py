@@ -20,6 +20,7 @@ class AzureStrategyResultFactory:
         *,
         default: str,
     ) -> str:
+        """Extract a string error code from a validation exception, or return the default."""
         # getattr: PydanticValidationError and DomainValidationError lack error_code.
         error_code = getattr(exc, "error_code", None)
         if isinstance(error_code, str) and error_code:
@@ -28,6 +29,7 @@ class AzureStrategyResultFactory:
 
     @staticmethod
     def azure_error_metadata(exc: AzureError) -> dict[str, Any]:
+        """Convert an AzureError into a provider_error metadata dict."""
         return {"provider_error": exc.to_dict()}
 
     def validation_error_result(
@@ -38,6 +40,7 @@ class AzureStrategyResultFactory:
         default_error_code: str,
         metadata: Optional[dict[str, Any]] = None,
     ) -> ProviderResult:
+        """Build an error ProviderResult from a validation exception."""
         merged_metadata = dict(metadata or {})
         merged_metadata.setdefault("error_class", exc.__class__.__name__)
         if isinstance(exc, AzureError):
@@ -56,6 +59,7 @@ class AzureStrategyResultFactory:
         default_error_code: str,
         metadata: Optional[dict[str, Any]] = None,
     ) -> ProviderResult:
+        """Build an error ProviderResult from an AzureError."""
         merged_metadata = dict(metadata or {})
         merged_metadata.setdefault("error_class", exc.__class__.__name__)
         merged_metadata.update(self.azure_error_metadata(exc))

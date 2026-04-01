@@ -19,6 +19,7 @@ class AzureHealthCheckService:
         self._logger = logger
 
     def check_health(self, azure_client: Optional[AzureClient]) -> ProviderHealthStatus:
+        """Perform a health check by attempting to acquire an Azure access token."""
         start_time = time.time()
 
         try:

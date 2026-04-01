@@ -97,7 +97,9 @@ class AzureAuthStrategy(AuthPort):
         return False
 
     def get_strategy_name(self) -> str:
+        """Return the identifier for the Azure default-credential strategy."""
         return "azure_default_credential"
 
     def is_enabled(self) -> bool:
+        """Return whether this auth strategy is currently enabled."""
         return self.enabled

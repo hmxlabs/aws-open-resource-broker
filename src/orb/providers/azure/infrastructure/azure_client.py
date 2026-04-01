@@ -1,6 +1,6 @@
 """Azure client wrapper with lazy service client initialization.
 
-This module provides a unified wrapper for Azure SDK interactions with:
+This module provides an integrated wrapper for Azure SDK interactions with:
 - Lazy initialization of Azure service clients
 - Explicit lifecycle cleanup for owned Azure SDK resources
 - Configuration resolution via ProviderSelectionService / fallback
@@ -53,7 +53,9 @@ class TypedConfigPort(Protocol):
     (per-instance shim) and ``ConfigurationManager`` (global).
     """
 
-    def get_typed(self, config_type: type) -> Any: ...
+    def get_typed(self, config_type: type) -> Any:
+        """Return a configuration object of the requested type."""
+        ...
 
 
 if TYPE_CHECKING:
@@ -135,10 +137,12 @@ class ParsedArmResourceId:
 
     @property
     def resource_name(self) -> str:
+        """Return the leaf resource name from the ARM resource path."""
         return self.resource_path_segments[-1]
 
     @property
     def resource_type(self) -> str:
+        """Return the ARM resource type segment (e.g. 'virtualMachines')."""
         return self.resource_path_segments[-2]
 
     def parent_resource_id(self) -> Optional[str]:
@@ -527,6 +531,7 @@ class AzureClient:
                 return
 
             def close_resource(close_fn: Any, *close_args: Any) -> None:
+                """Invoke a close function, logging and collecting any errors."""
                 resource_name = str(close_args[0])
                 resource = close_args[-1]
                 if resource is None:

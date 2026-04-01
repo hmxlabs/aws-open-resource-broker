@@ -21,6 +21,7 @@ class AzureError(InfrastructureError):
         self.error_code = error_code or self.__class__.__name__
 
     def to_dict(self) -> dict[str, Any]:
+        """Serialize the exception to a dict, including error_code if non-default."""
         result: dict[str, Any] = super().to_dict()
         if self.error_code and self.error_code != self.__class__.__name__:
             result["error_code"] = self.error_code

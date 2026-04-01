@@ -46,6 +46,7 @@ class AzureSpotLaunchService:
 
     @staticmethod
     def should_use_spot_placement(template: AzureTemplate) -> bool:
+        """Return whether the template opts into spot-placement-score allocation."""
         return template.allocation_strategy == "spotPlacementScore"
 
     def build_spot_placement_plan(
@@ -55,6 +56,7 @@ class AzureSpotLaunchService:
         count: int,
         azure_client: Any,
     ) -> list[PlacementPlanEntry]:
+        """Score candidate regions/zones and build a placement plan for spot launches."""
         adapter = AzureSpotPlacementScoreAdapter(
             azure_client=azure_client,
             logger=self._logger,
@@ -83,6 +85,7 @@ class AzureSpotLaunchService:
         scores: list[PlacementScore],
         requested_count: int,
     ) -> list[PlacementPlanEntry]:
+        """Build a single-candidate fallback plan when the planner returns no viable entries."""
         if requested_count <= 0 or not scores:
             return []
 
@@ -107,6 +110,7 @@ class AzureSpotLaunchService:
 
     @staticmethod
     def is_capacity_like_failure(child_result: dict[str, Any]) -> bool:
+        """Return whether the child result error codes indicate a capacity-related failure."""
         error_codes = set(child_result.get("error_codes", []))
         return bool(
             error_codes
@@ -123,6 +127,7 @@ class AzureSpotLaunchService:
         azure_template: AzureTemplate,
         plan_entry: PlacementPlanEntry,
     ) -> AzureTemplate:
+        """Clone a template with the VM size, location, and zone from a plan entry."""
         cloned_data = azure_template.model_dump(mode="json", exclude_none=True)
         selected_vm_size = plan_entry.score.candidate.instance_type
         cloned_data["vm_size"] = selected_vm_size
@@ -153,6 +158,7 @@ class AzureSpotLaunchService:
         plan_override: Optional[list[PlacementPlanEntry]] = None,
         capacity_like_failure_checker: Optional[Callable[[dict[str, Any]], bool]] = None,
     ) -> ProviderResult:
+        """Execute a spot placement plan, dispatching per-entry launches to the handler."""
         if not handler:
             return ProviderResult.error_result(
                 f"No handler available for provider_api: {provider_api_key}",

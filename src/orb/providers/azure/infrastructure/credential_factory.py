@@ -10,17 +10,25 @@ from orb.domain.base.ports import LoggingPort
 class AzureCredentialProtocol(Protocol):
     """Credential surface required by Azure provider code."""
 
-    def get_token(self, *scopes: str, **kwargs: Any) -> Any: ...
+    def get_token(self, *scopes: str, **kwargs: Any) -> Any:
+        """Request an access token for the given scopes."""
+        ...
 
-    def close(self) -> None: ...
+    def close(self) -> None:
+        """Release any resources held by this credential."""
+        ...
 
 
 class AzureAccessTokenProviderProtocol(Protocol):
     """Short-lived Azure token provider used by auth flows."""
 
-    def get_access_token(self, scope: str) -> str: ...
+    def get_access_token(self, scope: str) -> str:
+        """Return a raw access-token string for the given scope."""
+        ...
 
-    def get_auth_error_types(self) -> tuple[type[Exception], ...]: ...
+    def get_auth_error_types(self) -> tuple[type[Exception], ...]:
+        """Return exception types that signal authentication failures."""
+        ...
 
 
 class AzureCredentialAccessTokenProvider(AzureAccessTokenProviderProtocol):
@@ -30,10 +38,12 @@ class AzureCredentialAccessTokenProvider(AzureAccessTokenProviderProtocol):
         self._credential = credential
 
     def get_access_token(self, scope: str) -> str:
+        """Delegate token retrieval to the wrapped credential."""
         token = self._credential.get_token(scope)
         return token.token
 
     def get_auth_error_types(self) -> tuple[type[Exception], ...]:
+        """Return Azure SDK credential error types."""
         return get_default_azure_credential_error_types()
 
 
@@ -82,6 +92,7 @@ class DefaultAzureAccessTokenProvider(AzureAccessTokenProviderProtocol):
         self._logger = logger
 
     def get_access_token(self, scope: str) -> str:
+        """Create a short-lived credential, fetch a token, then close it."""
         credential = create_default_azure_credential(
             client_id=self._client_id,
             logger=self._logger,
@@ -93,4 +104,5 @@ class DefaultAzureAccessTokenProvider(AzureAccessTokenProviderProtocol):
             credential.close()
 
     def get_auth_error_types(self) -> tuple[type[Exception], ...]:
+        """Return Azure SDK and ImportError types for credential failures."""
         return ImportError, *get_default_azure_credential_error_types()
