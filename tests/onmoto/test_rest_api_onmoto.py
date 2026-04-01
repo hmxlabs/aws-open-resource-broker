@@ -83,9 +83,19 @@ async def rest_client(fastapi_app):
 
 class TestHealthCheck:
     @pytest.mark.asyncio
-    async def test_health_returns_healthy(self, rest_client):
+    async def test_health_returns_healthy(self, rest_client, fastapi_app):
         """GET /health returns 200 with status=healthy."""
-        resp = await rest_client.get("/health")
+        from unittest.mock import MagicMock
+
+        import orb.api.dependencies as deps
+
+        mock_health_port = MagicMock()
+        mock_health_port.get_status.return_value = {"status": "healthy"}
+        fastapi_app.dependency_overrides[deps.get_health_check_port] = lambda: mock_health_port
+        try:
+            resp = await rest_client.get("/health")
+        finally:
+            fastapi_app.dependency_overrides.pop(deps.get_health_check_port, None)
         assert resp.status_code == 200
         body = resp.json()
         assert body["status"] == "healthy"

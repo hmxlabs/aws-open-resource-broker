@@ -22,6 +22,7 @@ from orb.api.dependencies import (
     get_command_bus,
     get_create_template_orchestrator,
     get_get_template_orchestrator,
+    get_health_check_port,
     get_list_machines_orchestrator,
     get_list_templates_orchestrator,
     get_machine_orchestrator,
@@ -898,15 +899,13 @@ class TestConfigurationManagement:
         """GET /health returns healthy status."""
         from unittest.mock import MagicMock
 
-        import orb.api.dependencies as deps
-
         mock_health_port = MagicMock()
         mock_health_port.get_status.return_value = {"status": "healthy"}
-        app.dependency_overrides[deps.get_health_check_port] = lambda: mock_health_port
+        app.dependency_overrides[get_health_check_port] = lambda: mock_health_port
         try:
             response = client.get("/health")
         finally:
-            app.dependency_overrides.pop(deps.get_health_check_port, None)
+            app.dependency_overrides.pop(get_health_check_port, None)
 
         assert response.status_code == 200
         data = response.json()

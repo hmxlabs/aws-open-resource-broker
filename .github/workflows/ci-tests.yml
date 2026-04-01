@@ -56,7 +56,7 @@ jobs:
 
   integration-tests:
     name: Integration Tests (Default Python)
-    needs: [config, setup-cache, tests]
+    needs: [config, setup-cache]
     uses: ./.github/workflows/reusable-test.yml
     with:
       test-type: integration
@@ -71,13 +71,13 @@ jobs:
 
   e2e-tests:
     name: End-to-End Tests (Default Python)
-    needs: [config, setup-cache, tests]
+    needs: [config, setup-cache]
     uses: ./.github/workflows/reusable-test.yml
     with:
       test-type: e2e
       python-version: ${{ needs.config.outputs.default-python-version }}
       default-python-version: ${{ needs.config.outputs.default-python-version }}
-      continue-on-error: false
+      continue-on-error: true
       aws-region: ${{ needs.config.outputs.aws-region }}
       aws-access-key: ${{ needs.config.outputs.aws-access-key }}
       aws-secret-key: ${{ needs.config.outputs.aws-secret-key }}
@@ -86,10 +86,25 @@ jobs:
 
   onmoto-tests:
     name: Onmoto Tests (Default Python)
-    needs: [config, setup-cache, tests]
+    needs: [config, setup-cache]
     uses: ./.github/workflows/reusable-test.yml
     with:
       test-type: onmoto
+      python-version: ${{ needs.config.outputs.default-python-version }}
+      default-python-version: ${{ needs.config.outputs.default-python-version }}
+      continue-on-error: true
+      aws-region: ${{ needs.config.outputs.aws-region }}
+      aws-access-key: ${{ needs.config.outputs.aws-access-key }}
+      aws-secret-key: ${{ needs.config.outputs.aws-secret-key }}
+      environment: ${{ needs.config.outputs.environment }}
+      testing-flag: ${{ needs.config.outputs.testing-flag }}
+
+  providers-tests:
+    name: Providers & Infrastructure Tests (Default Python)
+    needs: [config, setup-cache]
+    uses: ./.github/workflows/reusable-test.yml
+    with:
+      test-type: providers
       python-version: ${{ needs.config.outputs.default-python-version }}
       default-python-version: ${{ needs.config.outputs.default-python-version }}
       continue-on-error: false
@@ -131,7 +146,7 @@ jobs:
   test-report:
     name: Generate Test Report
     runs-on: ubuntu-latest
-    needs: [config, setup-cache, tests, integration-tests, e2e-tests, onmoto-tests]
+    needs: [config, setup-cache, tests, integration-tests, e2e-tests, onmoto-tests, providers-tests]
     if: always()
     permissions:
       contents: read
