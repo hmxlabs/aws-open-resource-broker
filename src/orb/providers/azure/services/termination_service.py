@@ -62,19 +62,24 @@ class AzureTerminationService:
         default_resource_id = operation.parameters.get("resource_id")
         if not default_resource_id and grouped_resource_mapping:
             default_resource_id = next(iter(grouped_resource_mapping.keys()))
+        if not default_resource_id:
+            return ProviderResult.error_result(
+                "resource_id or resource_mapping is required for Azure termination",
+                "MISSING_RESOURCE_ID",
+            )
 
         release_context = build_cyclecloud_request_metadata(
             operation=operation,
             resource_group=resolve_operation_resource_group(operation),
         )
-        release_context["resource_id"] = default_resource_id or "unknown"
+        release_context["resource_id"] = default_resource_id
 
         return TerminationOperationContext(
             instance_ids=instance_ids,
             grouped_resource_mapping=grouped_resource_mapping,
             release_context=release_context,
             handler=handler,
-            default_resource_id=default_resource_id or "unknown",
+            default_resource_id=default_resource_id,
         )
 
     @staticmethod

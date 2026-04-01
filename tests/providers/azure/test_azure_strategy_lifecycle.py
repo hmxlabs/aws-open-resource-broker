@@ -352,6 +352,19 @@ class TestTerminateInstances:
         assert not result.success
         assert result.error_code == "MISSING_PROVIDER_API"
 
+    def test_missing_resource_id_returns_error(self, strategy):
+        strategy._handlers = {"VMSS": MagicMock()}
+
+        op = ProviderOperation(
+            operation_type=ProviderOperationType.TERMINATE_INSTANCES,
+            parameters={"instance_ids": ["orb-1"], "provider_api": "VMSS"},
+        )
+
+        result = run_operation(strategy.execute_operation(op))
+
+        assert not result.success
+        assert result.error_code == "MISSING_RESOURCE_ID"
+
     def test_missing_terminate_handler_returns_error(self, strategy):
         op = ProviderOperation(
             operation_type=ProviderOperationType.TERMINATE_INSTANCES,
