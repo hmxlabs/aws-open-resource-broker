@@ -161,7 +161,7 @@ class AzureProviderStrategy(ProviderStrategy):
                     try:
                         self._client = self._azure_client_resolver()
                     except Exception as exc:
-                        self._logger.warning("Failed to resolve AzureClient lazily: %s", exc)
+                        self._logger.warning("Failed to resolve AzureClient lazily: %s", exc, exc_info=True)
                         self._client = None
                 else:
                     self._logger.warning("AzureClient resolver not provided")

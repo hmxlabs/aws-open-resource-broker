@@ -140,7 +140,7 @@ class AzureSpotPlacementScoreAdapter(SpotPlacementScoreAdapter):
             with urllib_request.urlopen(req, timeout=30) as response:
                 response_payload = json.loads(response.read().decode("utf-8"))
         except Exception as exc:
-            self._logger.warning("Azure spot placement score lookup failed: %s", exc)
+            self._logger.warning("Azure spot placement score lookup failed: %s", exc, exc_info=True)
             return {}
 
         placement_scores = response_payload.get("placementScores", [])

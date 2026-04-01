@@ -431,7 +431,7 @@ def register_azure_services_with_di(container) -> None:
             container.register_factory(AzureNativeSpecService, create_azure_native_spec_service)
             logger.debug("Azure Native Spec Service registered with DI container")
     except Exception as exc:
-        logger.warning("Failed to register Azure services with DI container: %s", exc)
+        logger.warning("Failed to register Azure services with DI container: %s", exc, exc_info=True)
 
 
 # ------------------------------------------------------------------

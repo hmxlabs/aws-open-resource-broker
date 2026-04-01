@@ -28,7 +28,7 @@ class AzureTemplateCatalogService:
                     try:
                         templates.extend(scheduler_strategy.load_templates_from_path(path))
                     except Exception as exc:
-                        self._logger.warning("Failed to load templates from %s: %s", path, exc)
+                        self._logger.warning("Failed to load templates from %s: %s", path, exc, exc_info=True)
                 return templates
 
             self._logger.warning("No scheduler strategy available, using fallback templates")

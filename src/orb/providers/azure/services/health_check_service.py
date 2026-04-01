@@ -53,7 +53,7 @@ class AzureHealthCheckService:
                 response_time_ms,
             )
         except Exception as exc:
-            self._logger.warning("Azure health check failed: %s", exc)
+            self._logger.warning("Azure health check failed: %s", exc, exc_info=True)
             response_time_ms = (time.time() - start_time) * 1000
             return ProviderHealthStatus.unhealthy(
                 f"Health check error: {exc!s}",

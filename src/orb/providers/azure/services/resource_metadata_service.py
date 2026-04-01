@@ -103,7 +103,7 @@ class AzureResourceMetadataService:
         try:
             capacity_info = resource_manager.get_vmss_capacity(resource_group, vmss_name)
         except Exception as exc:
-            self._logger.warning("Could not fetch VMSS capacity for %s: %s", vmss_name, exc)
+            self._logger.warning("Could not fetch VMSS capacity for %s: %s", vmss_name, exc, exc_info=True)
             return None
 
         provisioned_instance_count = int(capacity_info.get("provisioned_instance_count", 0) or 0)
