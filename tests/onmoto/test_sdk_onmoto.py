@@ -294,7 +294,7 @@ class TestSDKRequestLifecycle:
             # get_request or get_request_status depending on what was discovered
             methods = sdk.list_available_methods()
             if "get_request_status" in methods:
-                status_result = await sdk.get_request_status(request_id=request_id)  # type: ignore[attr-defined]
+                status_result = await sdk.get_request_status(request_ids=[request_id])  # type: ignore[attr-defined]
             else:
                 status_result = await sdk.get_request(request_id=request_id)
 
@@ -365,7 +365,7 @@ class TestSDKRequestLifecycle:
             # 3. Query status — must echo back the same request_id
             methods = sdk.list_available_methods()
             if "get_request_status" in methods:
-                status_result = await sdk.get_request_status(request_id=request_id)  # type: ignore[attr-defined]
+                status_result = await sdk.get_request_status(request_ids=[request_id])  # type: ignore[attr-defined]
             else:
                 status_result = await sdk.get_request(request_id=request_id)
 
@@ -428,7 +428,7 @@ class TestSDKRequestLifecycle:
 
                 # 6. After return, status should not be 'running' (machines were released)
                 if "get_request_status" in methods:
-                    post_return_result = await sdk.get_request_status(request_id=request_id)  # type: ignore[attr-defined]
+                    post_return_result = await sdk.get_request_status(request_ids=[request_id])  # type: ignore[attr-defined]
                 else:
                     post_return_result = await sdk.get_request(request_id=request_id)
 

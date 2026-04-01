@@ -54,7 +54,7 @@ COVERAGE_HTML := htmlcov
 
 # Test settings
 PYTEST_ARGS := -v --tb=short --durations=10
-PYTEST_COV_ARGS := --cov=$(PACKAGE_ROOT) --cov-report=term-missing --cov-branch --no-cov-on-fail
+PYTEST_COV_ARGS := --cov=$(PACKAGE_ROOT) --cov-report=term-missing --cov-branch
 PYTEST_TIMEOUT := --timeout=300
 PYTEST_MAXFAIL := --maxfail=5
 
