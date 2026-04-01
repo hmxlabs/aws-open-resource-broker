@@ -71,7 +71,6 @@ class TestAPIEndpoints:
         """Test health check endpoint."""
         from unittest.mock import MagicMock
 
-
         mock_health_port = MagicMock()
         mock_health_port.get_status.return_value = {"status": "healthy"}
         client.app.dependency_overrides[deps.get_health_check_port] = lambda: mock_health_port
@@ -160,7 +159,6 @@ class TestAPIEndpoints:
         """Test that request ID header is added to responses."""
         from unittest.mock import MagicMock
 
-
         mock_health_port = MagicMock()
         mock_health_port.get_status.return_value = {"status": "healthy"}
         client.app.dependency_overrides[deps.get_health_check_port] = lambda: mock_health_port
@@ -236,7 +234,6 @@ class TestAPIEndpoints:
     def test_security_headers(self, client):
         """Test security headers are present."""
         from unittest.mock import MagicMock
-
 
         mock_health_port = MagicMock()
         mock_health_port.get_status.return_value = {"status": "healthy"}
