@@ -5,8 +5,8 @@ from __future__ import annotations
 from typing import Any, Protocol, cast
 
 from orb.domain.base.ports import LoggingPort
-from orb.domain.machine.machine_status import MachineStatus
 from orb.providers.azure.infrastructure.azure_client import AzureClient
+from orb.providers.azure.infrastructure.handlers.azure_status import resolve_power_state
 
 
 class _AzureVmWithName(Protocol):
@@ -23,24 +23,10 @@ class AzureMachineConversionService:
 
     @staticmethod
     def _resolve_power_state(vm: Any) -> str:
-        status = MachineStatus.UNKNOWN.value
         instance_view = vm.instance_view
         if not instance_view or not hasattr(instance_view, "statuses"):
-            return status
-
-        state_map = {
-            "PowerState/running": MachineStatus.RUNNING,
-            "PowerState/starting": MachineStatus.PENDING,
-            "PowerState/stopping": MachineStatus.STOPPING,
-            "PowerState/stopped": MachineStatus.STOPPED,
-            "PowerState/deallocating": MachineStatus.SHUTTING_DOWN,
-            "PowerState/deallocated": MachineStatus.STOPPED,
-        }
-        for vm_status in instance_view.statuses:
-            code = vm_status.code or ""
-            if code.startswith("PowerState/"):
-                return state_map.get(code, MachineStatus.UNKNOWN).value
-        return status
+            return "unknown"
+        return resolve_power_state(instance_view.statuses)
 
     def convert_sdk_vm(self, vm: Any, azure_client: AzureClient) -> dict[str, Any]:
         """Convert an Azure SDK VirtualMachine into a normalized machine dict."""

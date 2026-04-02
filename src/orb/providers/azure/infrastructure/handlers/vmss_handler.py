@@ -43,36 +43,9 @@ from orb.providers.azure.infrastructure.handlers._network_identity import (
 )
 from orb.providers.azure.infrastructure.vmss_cleanup import PendingVmssCleanup
 from orb.providers.infrastructure.error_codes import ProviderErrorEntry
+from orb.providers.azure.infrastructure.handlers.azure_status import resolve_power_state
 from orb.providers.azure.infrastructure.handlers.azure_handler import AzureHandler
 from orb.providers.azure.domain.template.value_objects import AzureVMSSOrchestrationMode
-
-
-# Azure VM power-state → domain status mapping
-_AZURE_STATE_MAP: dict[str, str] = {
-    "PowerState/starting": "pending",
-    "PowerState/running": "running",
-    "PowerState/stopping": "stopping",
-    "PowerState/stopped": "stopped",
-    "PowerState/deallocating": "shutting-down",
-    "PowerState/deallocated": "stopped",
-    "ProvisioningState/creating": "pending",
-    "ProvisioningState/succeeded": "running",
-    "ProvisioningState/failed": "failed",
-    "ProvisioningState/deleting": "shutting-down",
-}
-
-def _resolve_power_state(statuses: list[Any]) -> str:
-    """Extract the domain status from a list of Azure InstanceViewStatus objects."""
-    for status in statuses:
-        code = status.code if hasattr(status, "code") else str(status.get("code", ""))
-        if code.startswith("PowerState/"):
-            return _AZURE_STATE_MAP.get(code, "unknown")
-    # Fallback to provisioning state
-    for status in statuses:
-        code = status.code if hasattr(status, "code") else str(status.get("code", ""))
-        if code.startswith("ProvisioningState/"):
-            return _AZURE_STATE_MAP.get(code, "unknown")
-    return "unknown"
 
 
 def _status_attr(status: Any, attr: str, default: Any = None) -> Any:
@@ -858,7 +831,7 @@ class VMSSHandler(AzureHandler):
         status = "unknown"
         instance_view = vm.instance_view
         if instance_view and hasattr(instance_view, "statuses"):
-            status = _resolve_power_state(instance_view.statuses)
+            status = resolve_power_state(instance_view.statuses)
             fleet_errors = self._extract_vm_errors(
                 instance_view.statuses,
                 instance_id=vm_identity.instance_id,

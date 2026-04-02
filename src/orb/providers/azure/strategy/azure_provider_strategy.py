@@ -30,7 +30,6 @@ from orb.providers.azure.capabilities import (
 )
 from orb.providers.azure.domain.template.azure_template_aggregate import AzureTemplate
 from orb.providers.azure.domain.template.value_objects import AzureProviderApi
-from orb.providers.azure.infrastructure.adapters.machine_adapter import AzureMachineAdapter
 from orb.providers.azure.infrastructure.azure_client import AzureClient
 from orb.providers.azure.infrastructure.error_utils import (
     canonical_azure_error_code,
@@ -221,27 +220,22 @@ class AzureProviderStrategy(ProviderStrategy):
             azure_client = self.azure_client
             if not self._handlers and azure_client:
                 self._logger.debug("Creating Azure handlers on first access")
-                machine_adapter = AzureMachineAdapter(azure_client, self._logger)
                 self._handlers = {
                     AzureProviderApi.VMSS.value: VMSSHandler(
                         azure_client=azure_client,
                         logger=self._logger,
-                        machine_adapter=machine_adapter,
                     ),
                     AzureProviderApi.VMSS_UNIFORM.value: VMSSHandler(
                         azure_client=azure_client,
                         logger=self._logger,
-                        machine_adapter=machine_adapter,
                     ),
                     AzureProviderApi.SINGLE_VM.value: SingleVMHandler(
                         azure_client=azure_client,
                         logger=self._logger,
-                        machine_adapter=machine_adapter,
                     ),
                     AzureProviderApi.CYCLECLOUD.value: CycleCloudHandler(
                         azure_client=azure_client,
                         logger=self._logger,
-                        machine_adapter=machine_adapter,
                     ),
                 }
             return self._handlers

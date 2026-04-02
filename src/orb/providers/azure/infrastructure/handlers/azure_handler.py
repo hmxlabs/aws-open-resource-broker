@@ -27,11 +27,9 @@ class AzureHandler(ABC):
         self,
         azure_client: AzureClient,
         logger: LoggingPort,
-        machine_adapter: Optional[Any] = None,
     ) -> None:
         self.azure_client = azure_client
         self._logger = logger
-        self._machine_adapter = machine_adapter
 
     # ------------------------------------------------------------------
     # Core operations

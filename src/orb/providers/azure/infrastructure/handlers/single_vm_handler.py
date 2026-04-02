@@ -28,24 +28,8 @@ from orb.providers.azure.infrastructure.handlers._network_identity import (
     empty_network_identity,
     network_identity_soft_failure_types,
 )
+from orb.providers.azure.infrastructure.handlers.azure_status import resolve_power_state
 from orb.providers.azure.infrastructure.handlers.azure_handler import AzureHandler
-
-
-_AZURE_STATE_MAP: dict[str, str] = {
-    "PowerState/starting": "pending",
-    "PowerState/running": "running",
-    "PowerState/stopping": "stopping",
-    "PowerState/stopped": "stopped",
-    "PowerState/deallocating": "shutting-down",
-    "PowerState/deallocated": "stopped",
-}
-
-def _resolve_power_state(statuses: list[Any]) -> str:
-    for status in statuses:
-        code = status.code if hasattr(status, "code") else str(status.get("code", ""))
-        if code.startswith("PowerState/"):
-            return _AZURE_STATE_MAP.get(code, "unknown")
-    return "unknown"
 
 
 def _looks_like_uuid(value: str) -> bool:
@@ -322,7 +306,7 @@ class SingleVMHandler(AzureHandler):
                 status = "unknown"
                 instance_view = vm.instance_view
                 if instance_view and hasattr(instance_view, "statuses"):
-                    status = _resolve_power_state(instance_view.statuses)
+                    status = resolve_power_state(instance_view.statuses)
 
                 hw = vm.hardware_profile
                 network_identity = empty_network_identity()

@@ -3,8 +3,6 @@
 Creates and caches Azure handlers based on ``provider_api`` values
 """
 
-from typing import Optional
-
 from orb.domain.base.dependency_injection import injectable
 from orb.domain.base.ports import LoggingPort
 from orb.domain.template.template_aggregate import Template
@@ -22,12 +20,10 @@ class AzureHandlerFactory:
         self,
         azure_client: AzureClient,
         logger: LoggingPort,
-        machine_adapter: Optional[object] = None,
     ) -> None:
         """Initialize the factory with an Azure client and register handler classes."""
         self._azure_client = azure_client
         self._logger = logger
-        self._machine_adapter = machine_adapter
         self._handlers: dict[str, AzureHandler] = {}
         self._handler_classes: dict[str, type[AzureHandler]] = {}
         self._register_handler_classes()
@@ -68,7 +64,6 @@ class AzureHandlerFactory:
         handler = handler_class(
             azure_client=self._azure_client,
             logger=self._logger,
-            machine_adapter=self._machine_adapter,
         )
         self._handlers[handler_type_key] = handler
         self._logger.debug("Created Azure handler for type: %s", handler_type_key)

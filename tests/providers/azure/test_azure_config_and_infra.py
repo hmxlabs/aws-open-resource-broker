@@ -252,7 +252,6 @@ class TestAzureHandlerFactory:
         factory = AzureHandlerFactory(
             azure_client=MagicMock(),
             logger=MagicMock(),
-            machine_adapter=MagicMock(),
         )
         template = MagicMock()
         template.provider_api = AzureProviderApi.VMSS
