@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 import time
 from threading import Condition, RLock
-from typing import Any, Callable, Optional, cast
+from typing import Any, Callable, Optional
 
 from orb.application.services.spot_placement_execution import (
     SpotPlacementExecutionService,
@@ -43,11 +43,16 @@ from orb.providers.azure.infrastructure.handlers.vmss_handler import VMSSHandler
 from orb.providers.azure.infrastructure.vmss_cleanup import VmssCleanupCoordinator
 from orb.providers.azure.managers.azure_resource_manager import AzureResourceManager
 from orb.providers.azure.services.health_check_service import AzureHealthCheckService
+from orb.providers.azure.services.cyclecloud_request_context_service import (
+    resolve_cyclecloud_request_metadata,
+)
 from orb.providers.azure.services.inventory_service import (
+    AzureStatusResult,
     AzureStatusQueryContext,
     build_cyclecloud_request_metadata,
     filter_status_results,
     group_instance_ids_by_resource,
+    normalize_status_results,
     observed_status_ids,
     request_metadata,
     resolve_operation_resource_group,
@@ -100,6 +105,7 @@ class AzureProviderStrategy(ProviderStrategy):
         provider_instance_name: str,
         azure_client_resolver: Optional[Callable[[], AzureClient]] = None,
         vmss_cleanup_coordinator: Optional[VmssCleanupCoordinator] = None,
+        cyclecloud_request_lookup: Optional[Callable[[str], Any | None]] = None,
     ) -> None:
         """Initialise the Azure strategy with config, logger, and optional client resolver."""
         if not isinstance(config, AzureProviderConfig):
@@ -142,6 +148,7 @@ class AzureProviderStrategy(ProviderStrategy):
             vmss_exists=self._vmss_exists,
             begin_delete_vmss=self._begin_delete_vmss,
         )
+        self._cyclecloud_request_lookup = cyclecloud_request_lookup
         self._termination_dispatch_service = AzureTerminationDispatchService(
             logger=logger,
             record_pending_cleanup=self._vmss_cleanup_coordinator.record,
@@ -544,10 +551,10 @@ class AzureProviderStrategy(ProviderStrategy):
         provider_api = operation.parameters.get("provider_api")
         if provider_api in (None, ""):
             return None
-        return cast(
-            AzureProviderApiRef,
-            AzureProviderStrategy._normalize_provider_api_value(provider_api),
-        )
+        normalized_provider_api = AzureProviderStrategy._normalize_provider_api_value(provider_api)
+        if isinstance(normalized_provider_api, (AzureProviderApi, str)):
+            return normalized_provider_api
+        return None
 
     async def _handle_create_instances(
         self, operation: ProviderOperation
@@ -630,6 +637,7 @@ class AzureProviderStrategy(ProviderStrategy):
     def _handle_terminate_instances(self, operation: ProviderOperation) -> ProviderResult:
         self._logger.debug("_handle_terminate_instances")
         try:
+            operation = self._resolve_cyclecloud_operation(operation)
             is_dry_run = bool(operation.context and operation.context.get("dry_run", False))
             termination_context = self._termination_service.build_termination_operation_context(
                 operation=operation,
@@ -672,6 +680,22 @@ class AzureProviderStrategy(ProviderStrategy):
                 "TERMINATE_INSTANCES_ERROR", exc,
             )
 
+    def _resolve_cyclecloud_operation(self, operation: ProviderOperation) -> ProviderOperation:
+        """Merge durable CycleCloud follow-up context into an operation on demand."""
+        provider_api = self._resolve_operation_provider_api(operation)
+        if provider_api != AzureProviderApi.CYCLECLOUD:
+            return operation
+
+        resolved_request_metadata = resolve_cyclecloud_request_metadata(
+            operation=operation,
+            lookup_request_by_id=self._cyclecloud_request_lookup,
+        )
+        return ProviderOperation(
+            operation_type=operation.operation_type,
+            parameters={**operation.parameters, "request_metadata": resolved_request_metadata},
+            context=operation.context,
+        )
+
     # ------------------------------------------------------------------
     # GET_INSTANCE_STATUS
     # ------------------------------------------------------------------
@@ -712,7 +736,7 @@ class AzureProviderStrategy(ProviderStrategy):
         operation: ProviderOperation,
         instance_ids: list[str],
         resource_group: str,
-    ) -> Optional[list[dict[str, Any]]]:
+    ) -> Optional[list[AzureStatusResult]]:
         provider_api = self._resolve_operation_provider_api(operation)
         raw_resource_mapping = operation.parameters.get("resource_mapping", {}) or {}
         grouped_resource_mapping = group_instance_ids_by_resource(
@@ -729,12 +753,14 @@ class AzureProviderStrategy(ProviderStrategy):
             return None
 
         if provider_api == AzureProviderApi.SINGLE_VM and handler:
-            return handler.check_hosts_status(
-                self._build_handler_request(operation, resource_group, instance_ids)
+            return normalize_status_results(
+                handler.check_hosts_status(
+                    self._build_handler_request(operation, resource_group, instance_ids)
+                ),
             )
 
         if grouped_resource_mapping:
-            all_results: list[dict[str, Any]] = []
+            all_results: list[AzureStatusResult] = []
             seen_instance_ids: set[str] = set()
             for resource_id, mapped_ids in grouped_resource_mapping.items():
                 group_handler = handler
@@ -761,6 +787,10 @@ class AzureProviderStrategy(ProviderStrategy):
                 return all_results
 
         resource_id = operation.parameters.get("resource_id")
+        if not resource_id and provider_api == AzureProviderApi.CYCLECLOUD:
+            cyclecloud_cluster_name = request_metadata(operation).get("cluster_name")
+            if cyclecloud_cluster_name not in (None, ""):
+                resource_id = str(cyclecloud_cluster_name)
         if not handler or not resource_id:
             return None
 
@@ -774,13 +804,14 @@ class AzureProviderStrategy(ProviderStrategy):
             extra_metadata,
         )
         if provider_api == AzureProviderApi.SINGLE_VM:
-            return handler.check_hosts_status(request)
+            return normalize_status_results(handler.check_hosts_status(request))
         return filter_status_results(
-            handler.check_hosts_status(request), instance_ids
+            normalize_status_results(handler.check_hosts_status(request)), instance_ids
         )
 
     def _handle_get_instance_status(self, operation: ProviderOperation) -> ProviderResult:
         try:
+            operation = self._resolve_cyclecloud_operation(operation)
             instance_ids = operation.parameters.get("instance_ids", [])
             if not instance_ids:
                 return ProviderResult.error_result(

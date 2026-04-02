@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any, Optional, TypedDict
 
 from orb.domain.base.ports import LoggingPort
 from orb.providers.azure.domain.template.value_objects import AzureProviderApi
@@ -18,6 +18,54 @@ class AzureStatusQueryContext:
     instance_ids: list[str]
     resource_group: str
     provider_api: Optional[AzureProviderApi | str]
+
+
+class AzureStatusProviderData(TypedDict, total=False):
+    """Provider-owned identity fields surfaced by Azure handlers."""
+
+    vm_id: str
+    vmss_instance_id: str
+    node_id: str
+    node_name: str
+    vm_name: str
+
+
+class AzureStatusResult(TypedDict, total=False):
+    """Normalized Azure status result used for cross-handler identity matching."""
+
+    instance_id: str
+    name: str
+    provider_data: AzureStatusProviderData
+
+
+def normalize_status_result(result: dict[str, Any]) -> AzureStatusResult:
+    """Build an AzureStatusResult from a generic handler status dict."""
+    normalized: AzureStatusResult = {}
+
+    instance_id = result.get("instance_id")
+    if isinstance(instance_id, str) and instance_id:
+        normalized["instance_id"] = instance_id
+
+    name = result.get("name")
+    if isinstance(name, str) and name:
+        normalized["name"] = name
+
+    raw_provider_data = result.get("provider_data")
+    if isinstance(raw_provider_data, dict):
+        provider_data: AzureStatusProviderData = {}
+        for key in ("vm_id", "vmss_instance_id", "node_id", "node_name", "vm_name"):
+            value = raw_provider_data.get(key)
+            if isinstance(value, str) and value:
+                provider_data[key] = value
+        if provider_data:
+            normalized["provider_data"] = provider_data
+
+    return normalized
+
+
+def normalize_status_results(results: list[dict[str, Any]]) -> list[AzureStatusResult]:
+    """Normalize a generic handler status list for Azure status matching."""
+    return [normalize_status_result(result) for result in results]
 
 
 CYCLECLOUD_METADATA_KEYS = (
@@ -98,21 +146,22 @@ def build_cyclecloud_request_metadata(
             metadata[key] = value
     return metadata
 
-def status_candidate_ids(result: dict[str, Any]) -> set[str]:
-    """Return all plausible instance identifiers from a single status result."""
+def status_candidate_ids(result: AzureStatusResult) -> set[str]:
+    """Return all plausible instance identifiers from a status result."""
     provider_data = result.get("provider_data") or {}
     candidate_ids = {
-        str(result.get("instance_id")),
-        str(provider_data.get("vm_id")),
-        str(provider_data.get("vmss_instance_id")),
-        str(provider_data.get("node_id")),
-        str(provider_data.get("vm_name")),
+        result.get("instance_id", ""),
+        result.get("name", ""),
+        provider_data.get("vm_id", ""),
+        provider_data.get("vmss_instance_id", ""),
+        provider_data.get("node_id", ""),
+        provider_data.get("node_name", ""),
+        provider_data.get("vm_name", ""),
     }
-    candidate_ids.discard("None")
     candidate_ids.discard("")
     return candidate_ids
 
-def observed_status_ids(instance_details: list[dict[str, Any]]) -> set[str]:
+def observed_status_ids(instance_details: list[AzureStatusResult]) -> set[str]:
     """Collect all candidate identifiers across a list of instance detail dicts."""
     observed_ids: set[str] = set()
     for instance in instance_details:
@@ -120,23 +169,14 @@ def observed_status_ids(instance_details: list[dict[str, Any]]) -> set[str]:
     return observed_ids
 
 def filter_status_results(
-    results: list[dict[str, Any]],
+    results: list[AzureStatusResult],
     requested_ids: list[str],
-) -> list[dict[str, Any]]:
+) -> list[AzureStatusResult]:
     """Return only the results whose candidate IDs overlap with the requested set."""
     requested = {str(item) for item in requested_ids}
-    filtered: list[dict[str, Any]] = []
+    filtered: list[AzureStatusResult] = []
     for result in results:
-        provider_data = result.get("provider_data") or {}
-        candidate_ids = {
-            str(result.get("instance_id")),
-            str(provider_data.get("vm_id")),
-            str(provider_data.get("vmss_instance_id")),
-            str(provider_data.get("node_id")),
-            str(provider_data.get("vm_name")),
-        }
-        candidate_ids.discard("None")
-        if candidate_ids & requested:
+        if status_candidate_ids(result) & requested:
             filtered.append(result)
     return filtered
 

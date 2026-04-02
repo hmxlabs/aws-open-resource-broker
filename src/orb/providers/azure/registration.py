@@ -85,6 +85,9 @@ def create_azure_strategy(
     """Create an ``AzureProviderStrategy`` from provider configuration."""
     from orb.infrastructure.adapters.logging_adapter import LoggingAdapter
     from orb.providers.azure.configuration.config import AzureProviderConfig
+    from orb.providers.azure.services.cyclecloud_request_context_service import (
+        create_cyclecloud_request_lookup,
+    )
     from orb.providers.azure.strategy.azure_provider_strategy import AzureProviderStrategy
 
     try:
@@ -95,6 +98,16 @@ def create_azure_strategy(
         )
         azure_config = AzureProviderConfig(**config_data)
         logger = LoggingAdapter()
+        cyclecloud_request_lookup = None
+        try:
+            from orb.domain.base import UnitOfWorkFactory
+            from orb.infrastructure.di.container import get_container
+
+            cyclecloud_request_lookup = create_cyclecloud_request_lookup(
+                get_container().get(UnitOfWorkFactory)
+            )
+        except Exception as exc:
+            logger.debug("Could not get unit of work factory from DI container: %s", exc)
         runtime_config = _build_azure_client_runtime_config(
             azure_config,
             logger,
@@ -106,6 +119,7 @@ def create_azure_strategy(
             logger=logger,
             provider_instance_name=provider_instance_name,
             azure_client_resolver=lambda: _create_azure_client(runtime_config, logger),
+            cyclecloud_request_lookup=cyclecloud_request_lookup,
         )
 
         return strategy
@@ -345,11 +359,15 @@ def _create_azure_strategy_with_di(
     container: Any, azure_config: Any, instance_name: str
 ) -> Any:
     """Create Azure strategy using DI container."""
+    from orb.domain.base import UnitOfWorkFactory
     from orb.domain.base.ports import LoggingPort
 
     logger = container.get(LoggingPort)
     azure_client = container.get(f"AzureClient_{instance_name}")
 
+    from orb.providers.azure.services.cyclecloud_request_context_service import (
+        create_cyclecloud_request_lookup,
+    )
     from orb.providers.azure.strategy.azure_provider_strategy import AzureProviderStrategy
 
     return AzureProviderStrategy(
@@ -357,6 +375,9 @@ def _create_azure_strategy_with_di(
         logger=logger,
         provider_instance_name=instance_name,
         azure_client_resolver=lambda: azure_client,
+        cyclecloud_request_lookup=create_cyclecloud_request_lookup(
+            container.get(UnitOfWorkFactory)
+        ),
     )
 
 

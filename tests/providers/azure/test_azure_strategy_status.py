@@ -723,6 +723,122 @@ class TestDescribeResourceInstances:
         )
         assert forwarded_request.metadata["cyclecloud_verify_ssl"] is False
 
+    def test_get_instance_status_matches_cyclecloud_node_name_alias(self, strategy):
+        handler = MagicMock()
+        handler.check_hosts_status.return_value = [
+            {
+                "instance_id": "6ecc44d4-417d-41e4-a729-3d504d651fd3",
+                "name": "dynamic-1",
+                "status": "running",
+                "provider_type": "azure",
+                "provider_data": {
+                    "cluster_name": "contoso-slurm-lab-cluster",
+                    "node_id": "6ecc44d4-417d-41e4-a729-3d504d651fd3",
+                    "node_name": "dynamic-1",
+                },
+            }
+        ]
+        strategy._handlers["CycleCloud"] = handler
+
+        op = ProviderOperation(
+            operation_type=ProviderOperationType.GET_INSTANCE_STATUS,
+            parameters={
+                "instance_ids": ["dynamic-1"],
+                "provider_api": "CycleCloud",
+                "resource_id": "contoso-slurm-lab-cluster",
+                "resource_mapping": {"dynamic-1": ("contoso-slurm-lab-cluster", 1)},
+                "template_id": "tmpl-1",
+                "request_metadata": {
+                    "resource_group": "test-rg",
+                    "cluster_name": "contoso-slurm-lab-cluster",
+                    "node_ids": ["dynamic-1"],
+                    "cyclecloud_url": "https://cc.example.com",
+                    "cyclecloud_auth_mode": "bearer",
+                    "cyclecloud_aad_scope": "https://cc.example.com/.default",
+                },
+            },
+        )
+
+        result = run_operation(strategy.execute_operation(op))
+
+        assert result.success
+        assert result.data["queried_count"] == 1
+        assert len(result.data["instances"]) == 1
+        assert result.data["instances"][0]["name"] == "dynamic-1"
+
+    def test_get_instance_status_uses_cyclecloud_cluster_name_when_resource_id_missing(self, strategy):
+        handler = MagicMock()
+        handler.check_hosts_status.return_value = []
+        strategy._handlers["CycleCloud"] = handler
+
+        op = ProviderOperation(
+            operation_type=ProviderOperationType.GET_INSTANCE_STATUS,
+            parameters={
+                "instance_ids": ["dynamic-1"],
+                "provider_api": "CycleCloud",
+                "template_id": "tmpl-1",
+                "request_metadata": {
+                    "resource_group": "test-rg",
+                    "cluster_name": "contoso-slurm-lab-cluster",
+                    "node_ids": ["dynamic-1"],
+                    "cyclecloud_url": "https://cc.example.com",
+                    "cyclecloud_auth_mode": "bearer",
+                    "cyclecloud_aad_scope": "https://cc.example.com/.default",
+                },
+            },
+        )
+
+        result = run_operation(strategy.execute_operation(op))
+
+        assert result.success
+        forwarded_request = handler.check_hosts_status.call_args.args[0]
+        assert forwarded_request.resource_ids == ["contoso-slurm-lab-cluster"]
+
+    def test_get_instance_status_recovers_cyclecloud_context_from_origin_request(
+        self, azure_config, logger
+    ):
+        origin_request = MagicMock()
+        origin_request.provider_data = {
+            "follow_up_context": {
+                "resource_group": "test-rg",
+                "cluster_name": "contoso-slurm-lab-cluster",
+                "cyclecloud_url": "https://cc.example.com",
+                "cyclecloud_auth_mode": "bearer",
+                "cyclecloud_aad_scope": "https://cc.example.com/.default",
+            }
+        }
+        lookup = MagicMock(return_value=origin_request)
+
+        strategy = AzureProviderStrategy(
+            config=azure_config,
+            logger=logger,
+            provider_instance_name="azure-default",
+            cyclecloud_request_lookup=lookup,
+        )
+        strategy.initialize()
+
+        handler = MagicMock()
+        handler.check_hosts_status.return_value = []
+        strategy._handlers["CycleCloud"] = handler
+
+        op = ProviderOperation(
+            operation_type=ProviderOperationType.GET_INSTANCE_STATUS,
+            parameters={
+                "instance_ids": ["dynamic-1"],
+                "provider_api": "CycleCloud",
+                "template_id": "tmpl-1",
+                "request_id": "req-11111111-1111-4111-8111-111111111111",
+            },
+        )
+
+        result = run_operation(strategy.execute_operation(op))
+
+        assert result.success
+        forwarded_request = handler.check_hosts_status.call_args.args[0]
+        assert forwarded_request.resource_ids == ["contoso-slurm-lab-cluster"]
+        assert forwarded_request.metadata["cluster_name"] == "contoso-slurm-lab-cluster"
+        lookup.assert_called_once_with("req-11111111-1111-4111-8111-111111111111")
+
     def test_dry_run_short_circuits_resource_discovery(self, azure_config, logger):
         strategy = AzureProviderStrategy(config=azure_config, logger=logger, provider_instance_name="azure-default")
         strategy.initialize()

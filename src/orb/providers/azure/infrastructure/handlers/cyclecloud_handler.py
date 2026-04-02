@@ -16,6 +16,7 @@ Key CycleCloud concepts:
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from contextlib import contextmanager
 from typing import Any, Iterator, Optional
 
@@ -71,18 +72,98 @@ def resolve_cc_state(state: str) -> str:
     return _CC_STATE_MAP.get(state, "unknown")
 
 
-def _cc_node_value(node: dict[str, Any], *keys: str) -> Any:
-    """Read a CycleCloud node field across the API's mixed key casing."""
+@dataclass(frozen=True)
+class CycleCloudNode:
+    """Normalized CycleCloud node payload used inside the handler."""
+
+    name: str
+    node_id: str
+    node_array: str
+    state: str
+    private_ip: Optional[str]
+    public_ip: Optional[str]
+    machine_type: str
+    create_time: Optional[str]
+    subnet_id: Optional[str]
+    hostname: Optional[str]
+    error_message: Optional[str]
+    error_code: Optional[str]
+
+
+def _optional_text(value: Any) -> Optional[str]:
+    """Return a normalized optional string from an external JSON value."""
+    if value in (None, ""):
+        return None
+    return str(value)
+
+
+def _first_text(node: dict[str, Any], *keys: str, default: str = "") -> str:
+    """Return the first populated string value from an external node payload."""
     for key in keys:
-        value = node.get(key)
-        if value not in (None, ""):
+        value = _optional_text(node.get(key))
+        if value is not None:
+            return value
+    return default
+
+
+def _first_optional_text(node: dict[str, Any], *keys: str) -> Optional[str]:
+    """Return the first populated optional string value from an external node payload."""
+    for key in keys:
+        value = _optional_text(node.get(key))
+        if value is not None:
             return value
     return None
 
 
-def _cc_node_state(node: dict[str, Any]) -> str:
-    """Return the most useful CycleCloud lifecycle state for ORB status mapping."""
-    return str(_cc_node_value(node, "Status", "status", "State", "state") or "Unknown")
+def _parse_cyclecloud_node(node: dict[str, Any]) -> CycleCloudNode:
+    """Normalize a CycleCloud node-list payload into a typed object.
+
+    Learn docs underdocument this response shape; in practice CycleCloud has
+    returned both lower-camel and PascalCase node fields. Normalize those
+    variants once at the provider boundary.
+    """
+    return CycleCloudNode(
+        name=_first_text(node, "name", "Name"),
+        node_id=_first_text(node, "nodeId", "NodeId", "id"),
+        node_array=_first_text(node, "nodeArray", "NodeArray", "Template"),
+        state=_first_text(node, "state", "State", "status", "Status", default="Unknown"),
+        private_ip=_first_optional_text(node, "privateIp", "PrivateIp", "ipAddress", "IpAddress"),
+        public_ip=_first_optional_text(node, "publicIp", "PublicIp"),
+        machine_type=_first_text(node, "machineType", "MachineType", default="unknown"),
+        create_time=_first_optional_text(node, "createTime", "CreateTime"),
+        subnet_id=_first_optional_text(node, "subnetId", "SubnetId"),
+        hostname=_first_optional_text(node, "hostname", "Hostname"),
+        error_message=_first_optional_text(
+            node,
+            "message",
+            "Message",
+            "error",
+            "Error",
+            "statusMessage",
+            "StatusMessage",
+            "failureMessage",
+            "FailureMessage",
+        ),
+        error_code=_first_optional_text(node, "errorCode", "ErrorCode"),
+    )
+
+
+def _parse_cyclecloud_node_result(node: dict[str, Any]) -> CycleCloudNode:
+    """Normalize a CycleCloud node-management result payload into a typed object."""
+    return CycleCloudNode(
+        name=str(node.get("name") or ""),
+        node_id=str(node.get("id") or ""),
+        node_array="",
+        state=str(node.get("status") or "Unknown"),
+        private_ip=None,
+        public_ip=None,
+        machine_type="unknown",
+        create_time=None,
+        subnet_id=None,
+        hostname=None,
+        error_message=_optional_text(node.get("message") or node.get("error")),
+        error_code=_optional_text(node.get("errorCode")),
+    )
 
 
 @injectable
@@ -286,15 +367,14 @@ class CycleCloudHandler(AzureHandler):
         for machine_id in machine_ids:
             matched = False
             for node in nodes:
-                node_name = str(_cc_node_value(node, "Name", "name") or "")
-                node_id = str(_cc_node_value(node, "NodeId", "nodeId", "id") or "")
-                if machine_id in {node_name, node_id}:
-                    if node_id and node_id not in seen_ids:
-                        resolved_ids.append(node_id)
-                        seen_ids.add(node_id)
-                    if node_name and node_name not in seen_names:
-                        resolved_names.append(node_name)
-                        seen_names.add(node_name)
+                parsed_node = _parse_cyclecloud_node(node)
+                if machine_id in {parsed_node.name, parsed_node.node_id}:
+                    if parsed_node.node_id and parsed_node.node_id not in seen_ids:
+                        resolved_ids.append(parsed_node.node_id)
+                        seen_ids.add(parsed_node.node_id)
+                    if parsed_node.name and parsed_node.name not in seen_names:
+                        resolved_names.append(parsed_node.name)
+                        seen_names.add(parsed_node.name)
                     matched = True
                     break
             if not matched and machine_id and machine_id not in seen_names:
@@ -321,39 +401,34 @@ class CycleCloudHandler(AzureHandler):
         node_array: str,
     ) -> list[ProviderErrorEntry]:
         """Extract structured node errors from CycleCloud node payloads."""
-        state = _cc_node_state(node)
-        message = (
-            _cc_node_value(
-                node,
-                "Message",
-                "message",
-                "StatusMessage",
-                "statusMessage",
-                "Error",
-                "error",
-                "FailureMessage",
-                "failureMessage",
-            )
-        )
-        error_code = _cc_node_value(node, "ErrorCode", "errorCode") or (
-            "NodeFailed" if state == "Failed" else None
+        parsed_node = _parse_cyclecloud_node(node)
+        if parsed_node.state == "Unknown" and (
+            node.get("status") not in (None, "")
+            or node.get("id") not in (None, "")
+        ):
+            parsed_node = _parse_cyclecloud_node_result(node)
+
+        message = parsed_node.error_message
+        error_code = parsed_node.error_code or (
+            "NodeFailed" if parsed_node.state == "Failed" else None
         )
 
         if not error_code and not message:
             return []
-        if state != "Failed" and not message:
+        if parsed_node.state != "Failed" and not message:
             return []
 
-        node_id = _cc_node_value(node, "name", "Name", "nodeId", "NodeId", "id")
         node_error: ProviderErrorEntry = {
             "error_code": str(error_code or "CycleCloudNodeError"),
-            "error_message": str(message or f"CycleCloud node entered state {state}"),
+            "error_message": str(
+                message or f"CycleCloud node entered state {parsed_node.state}"
+            ),
             "resource_id": cluster_name,
             "node_array": node_array,
-            "cc_state": state,
+            "cc_state": parsed_node.state,
         }
-        if node_id not in (None, ""):
-            node_error["instance_id"] = str(node_id)
+        if parsed_node.name or parsed_node.node_id:
+            node_error["instance_id"] = parsed_node.name or parsed_node.node_id
         return [node_error]
 
     # ------------------------------------------------------------------
@@ -605,21 +680,12 @@ class CycleCloudHandler(AzureHandler):
         results: list[dict[str, Any]] = []
 
         for node in all_nodes:
-            node_name = str(_cc_node_value(node, "Name", "name") or "")
-            node_id = str(_cc_node_value(node, "NodeId", "nodeId", "id") or node_name)
+            parsed_node = _parse_cyclecloud_node(node)
+            node_name = parsed_node.name
+            node_id = parsed_node.node_id or node_name
 
             # Filter by node array if specified
-            node_na = str(
-                _cc_node_value(
-                    node,
-                    "NodeArray",
-                    "nodeArray",
-                    "nodearray",
-                    "Template",
-                    "template",
-                )
-                or ""
-            )
+            node_na = parsed_node.node_array
             if node_array and node_na != node_array:
                 continue
 
@@ -627,14 +693,11 @@ class CycleCloudHandler(AzureHandler):
             if node_ids and node_name not in node_ids and node_id not in node_ids:
                 continue
 
-            cc_state = _cc_node_state(node)
+            cc_state = parsed_node.state
             status = resolve_cc_state(cc_state)
             if status == "unknown":
                 self._logger.warning("Unmapped CycleCloud node state: %s", cc_state)
 
-            private_ip = _cc_node_value(node, "PrivateIp", "privateIp", "IpAddress", "ipAddress")
-            public_ip = _cc_node_value(node, "PublicIp", "publicIp")
-            machine_type = _cc_node_value(node, "MachineType", "machineType") or "unknown"
             fleet_errors = self._extract_cyclecloud_node_errors(
                 node,
                 cluster_name=cluster_name,
@@ -642,15 +705,15 @@ class CycleCloudHandler(AzureHandler):
             )
 
             results.append({
-                "instance_id": node_id or node_name,
-                "name": node_name or _cc_node_value(node, "Hostname", "hostname"),
+                "instance_id": node_name or node_id,
+                "name": node_name or parsed_node.hostname,
                 "resource_id": cluster_name,
                 "status": status,
-                "private_ip": private_ip,
-                "public_ip": public_ip,
-                "launch_time": _cc_node_value(node, "CreateTime", "createTime"),
-                "instance_type": machine_type,
-                "subnet_id": _cc_node_value(node, "SubnetId", "subnetId"),
+                "private_ip": parsed_node.private_ip,
+                "public_ip": parsed_node.public_ip,
+                "launch_time": parsed_node.create_time,
+                "instance_type": parsed_node.machine_type,
+                "subnet_id": parsed_node.subnet_id,
                 "vpc_id": None,
                 "availability_zone": None,
                 "provider_type": "azure",
@@ -661,7 +724,7 @@ class CycleCloudHandler(AzureHandler):
                     "node_id": node_id,
                     "node_name": node_name,
                     "cc_state": cc_state,
-                    "hostname": _cc_node_value(node, "Hostname", "hostname"),
+                    "hostname": parsed_node.hostname,
                     "fleet_errors": fleet_errors,
                 },
             })

@@ -146,6 +146,7 @@ class TestMachineGroupingServiceSkipsMissingProviderApi:
         m.provider_name = provider_name
         m.provider_api = provider_api
         m.resource_id = resource_id
+        m.provider_data = {}
         return m
 
     def _setup_uow(self, machines_by_id: dict):
@@ -208,7 +209,6 @@ class TestMachineGroupingServiceSkipsMissingProviderApi:
         assert m2 not in all_machines
         self.logger.warning.assert_called_once()
         assert "i-bbb" in str(self.logger.warning.call_args)
-
 
 # ---------------------------------------------------------------------------
 # TemplateDefaultsService: raises ValueError instead of returning 'EC2Fleet'

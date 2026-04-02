@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable, Optional
 
+from orb.providers.azure.domain.template.value_objects import AzureProviderApi
 from orb.providers.azure.infrastructure.handlers.azure_handler import AzureHandler
 from orb.providers.base.strategy import ProviderOperation, ProviderResult
 
@@ -63,6 +64,11 @@ class AzureTerminationService:
         default_resource_id = operation.parameters.get("resource_id")
         if not default_resource_id and grouped_resource_mapping:
             default_resource_id = next(iter(grouped_resource_mapping.keys()))
+        if not default_resource_id and provider_api_value == AzureProviderApi.CYCLECLOUD.value:
+            request_metadata = operation.parameters.get("request_metadata", {}) or {}
+            cyclecloud_cluster_name = request_metadata.get("cluster_name")
+            if cyclecloud_cluster_name not in (None, ""):
+                default_resource_id = str(cyclecloud_cluster_name)
         if not default_resource_id and not is_dry_run:
             return ProviderResult.error_result(
                 "resource_id or resource_mapping is required for Azure termination",
