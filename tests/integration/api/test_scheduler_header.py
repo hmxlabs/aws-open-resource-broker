@@ -184,9 +184,7 @@ class TestSchedulerHeaderNotWiredInRoutes:
 
         return app
 
-    def test_x_orb_scheduler_header_present_in_request_reaches_server(
-        self, app_with_real_routes
-    ):
+    def test_x_orb_scheduler_header_present_in_request_reaches_server(self, app_with_real_routes):
         """A request with X-ORB-Scheduler header is accepted (not rejected by middleware)."""
         from fastapi.testclient import TestClient
 
@@ -206,18 +204,11 @@ class TestSchedulerHeaderNotWiredInRoutes:
         """
         import ast
 
-        routers_dir = (
-            Path(__file__).parent.parent.parent
-            / "src" / "orb" / "api" / "routers"
-        )
+        routers_dir = Path(__file__).parent.parent.parent / "src" / "orb" / "api" / "routers"
         for router_file in routers_dir.glob("*.py"):
             source = router_file.read_text()
             tree = ast.parse(source)
-            names_used = {
-                node.id
-                for node in ast.walk(tree)
-                if isinstance(node, ast.Name)
-            }
+            names_used = {node.id for node in ast.walk(tree) if isinstance(node, ast.Name)}
             # Current state: routers use get_response_formatting_service
             if "get_response_formatting_service" in source:
                 assert "get_response_formatting_service" in names_used, (
@@ -249,7 +240,9 @@ class TestResponseFormattingServiceSchedulerOutput:
         scheduler = _make_mock_scheduler("hf")
         svc = ResponseFormattingService(scheduler)
 
-        result = svc.format_request_operation({"request_id": "req-1", "status": "pending"}, "pending")
+        result = svc.format_request_operation(
+            {"request_id": "req-1", "status": "pending"}, "pending"
+        )
 
         scheduler.format_request_response.assert_called_once()
         assert result.data.get("scheduler") == "hf"
