@@ -224,9 +224,7 @@ class TestAWSTemplateLaunchTemplateIdWithoutImageId:
         assert template.image_id is None
         assert template.launch_template_id == "lt-12345678abcdef012"
 
-    def test_aws_template_provider_api_defaults_to_ec2fleet_when_absent(
-        self, moto_vpc_resources
-    ):
+    def test_aws_template_provider_api_defaults_to_ec2fleet_when_absent(self, moto_vpc_resources):
         """When provider_api is None, the template still constructs; EC2Fleet is the expected default."""
         subnet_id = moto_vpc_resources["subnet_ids"][0]
         sg_id = moto_vpc_resources["sg_id"]
@@ -427,9 +425,7 @@ class TestEC2FleetSpotWithLaunchTemplateId:
         resp = ec2_client.describe_fleets(FleetIds=[fleet_id])
         assert len(resp["Fleets"]) == 1
 
-    def test_ec2fleet_spot_provider_data_resource_type(
-        self, aws_client, moto_vpc_resources
-    ):
+    def test_ec2fleet_spot_provider_data_resource_type(self, aws_client, moto_vpc_resources):
         """provider_data identifies resource as ec2_fleet for launch_template_id template."""
         from orb.providers.aws.infrastructure.handlers.ec2_fleet.handler import EC2FleetHandler
         from orb.providers.aws.utilities.aws_operations import AWSOperations
