@@ -11,6 +11,16 @@ from orb.config import PerformanceConfig
 
 if TYPE_CHECKING:
     from orb.domain.base.ports import LoggingPort
+    from orb.domain.base.ports.configuration_port import ConfigurationPort
+    from orb.providers.azure.configuration.config import AzureProviderConfig
+    from orb.providers.azure.infrastructure.adapters.azure_validation_adapter import (
+        AzureValidationAdapter,
+    )
+    from orb.providers.azure.infrastructure.azure_client import (
+        AzureClient,
+        AzureClientRuntimeConfig,
+    )
+    from orb.providers.azure.strategy.azure_provider_strategy import AzureProviderStrategy
     from orb.providers.registry import ProviderRegistry
 
 from orb.domain.template.extensions import TemplateExtensionRegistry
@@ -19,8 +29,8 @@ from orb.providers.azure.configuration.template_extension import AzureTemplateEx
 
 
 def _resolve_performance_config(
-    config_port: Any,
-    logger: Any,
+    config_port: Any,  # ConfigurationPort.get_typed() is called with non-standard args
+    logger: "LoggingPort",
 ) -> PerformanceConfig:
     """Resolve shared performance config, falling back to defaults."""
     if config_port is None:
@@ -44,12 +54,12 @@ def _resolve_performance_config(
 
 
 def _build_azure_client_runtime_config(
-    azure_config: Any,
-    logger: Any,
+    azure_config: "AzureProviderConfig",
+    logger: "LoggingPort",
     *,
     performance_config: PerformanceConfig | None = None,
-    config_port: Any = None,
-) -> Any:
+    config_port: Optional["ConfigurationPort"] = None,
+) -> "AzureClientRuntimeConfig":
     """Assemble the explicit runtime config owned by Azure infrastructure."""
     from orb.providers.azure.infrastructure.azure_client import AzureClientRuntimeConfig
 
@@ -61,9 +71,9 @@ def _build_azure_client_runtime_config(
 
 
 def _create_azure_client(
-    runtime_config: Any,
-    logger: Any,
-) -> Any:
+    runtime_config: "AzureClientRuntimeConfig",
+    logger: "LoggingPort",
+) -> "AzureClient":
     """Construct an ``AzureClient`` from explicit runtime config."""
     from orb.providers.azure.infrastructure.azure_client import AzureClient
 
@@ -80,8 +90,8 @@ def create_azure_strategy(
     *,
     provider_instance_name: str,
     performance_config: PerformanceConfig | None = None,
-    config_port: Any = None,
-) -> Any:
+    config_port: Optional["ConfigurationPort"] = None,
+) -> "AzureProviderStrategy":
     """Create an ``AzureProviderStrategy`` from provider configuration."""
     from orb.infrastructure.adapters.logging_adapter import LoggingAdapter
     from orb.providers.azure.configuration.config import AzureProviderConfig
@@ -129,7 +139,7 @@ def create_azure_strategy(
         raise RuntimeError(f"Failed to create Azure strategy: {exc!s}")
 
 
-def create_azure_config(data: dict[str, Any]) -> Any:
+def create_azure_config(data: dict[str, Any]) -> "AzureProviderConfig":
     """Create an ``AzureProviderConfig`` from a data dict."""
     try:
         from orb.providers.azure.configuration.config import AzureProviderConfig
@@ -142,7 +152,7 @@ def create_azure_config(data: dict[str, Any]) -> Any:
         raise RuntimeError(f"Failed to create Azure config: {exc!s}")
 
 
-def create_azure_validator(provider_config: Any = None) -> Any:
+def create_azure_validator(provider_config: Any = None) -> Optional["AzureValidationAdapter"]:
     """Create an Azure template validator."""
     from orb.infrastructure.adapters.logging_adapter import LoggingAdapter
     from orb.providers.azure.configuration.config import AzureProviderConfig
@@ -176,7 +186,7 @@ def _register_named_azure_provider_instance(
     registry: "ProviderRegistry",
     instance_name: str,
     *,
-    config_port: Any = None,
+    config_port: Optional["ConfigurationPort"] = None,
 ) -> None:
     """Register a named Azure provider instance with the registry."""
     registry.register_provider_instance(
@@ -196,7 +206,7 @@ def register_azure_provider(
     registry: Optional["ProviderRegistry"] = None,
     logger: Optional["LoggingPort"] = None,
     instance_name: Optional[str] = None,
-    config_port: Any = None,
+    config_port: Optional["ConfigurationPort"] = None,
 ) -> None:
     """Register Azure provider with the provider registry."""
     if registry is None:
@@ -234,7 +244,7 @@ def register_azure_provider(
 def register_azure_provider_instance(
     provider_instance: Any,
     logger: Optional["LoggingPort"] = None,
-    config_port: Any = None,
+    config_port: Optional["ConfigurationPort"] = None,
 ) -> bool:
     """Register an Azure provider instance using the canonical registry contract."""
     try:
@@ -329,7 +339,7 @@ def register_azure_provider_with_di(provider_instance: Any, container: Any) -> b
 
 
 def _register_azure_components_with_di(
-    container: Any, azure_config: Any, instance_name: str
+    container: Any, azure_config: "AzureProviderConfig", instance_name: str
 ) -> None:
     """Register Azure components with DI container for a specific instance."""
     from orb.domain.base.ports import LoggingPort
@@ -356,8 +366,8 @@ def _register_azure_components_with_di(
 
 
 def _create_azure_strategy_with_di(
-    container: Any, azure_config: Any, instance_name: str
-) -> Any:
+    container: Any, azure_config: "AzureProviderConfig", instance_name: str
+) -> "AzureProviderStrategy":
     """Create Azure strategy using DI container."""
     from orb.domain.base import UnitOfWorkFactory
     from orb.domain.base.ports import LoggingPort
