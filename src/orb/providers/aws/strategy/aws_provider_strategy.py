@@ -8,7 +8,7 @@ architecture and single responsibility principle.
 """
 
 import time
-from typing import TYPE_CHECKING, Any, Callable, Optional
+from typing import TYPE_CHECKING, Any, Callable, Mapping, Optional
 
 from orb.application.services.spot_placement_execution import (
     SpotPlacementExecutionService,
@@ -297,6 +297,45 @@ class AWSProviderStrategy(ProviderStrategy):
         cloned_data["placement_zones"] = []
         return AWSTemplate.model_validate(cloned_data)
 
+    @staticmethod
+    def _planned_child_result_with_fulfillment(
+        *,
+        provider_api: str,
+        requested_count: int,
+        raw_result: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        result = dict(raw_result)
+        if "fulfilled_count" in result:
+            return result
+
+        if not result.get("success", True):
+            result["fulfilled_count"] = 0
+            return result
+
+        if provider_api == "RunInstances":
+            instance_ids = result.get("instance_ids")
+            result["fulfilled_count"] = len(instance_ids) if isinstance(instance_ids, list) else 0
+            return result
+
+        if provider_api == "EC2Fleet":
+            provider_data = result.get("provider_data")
+            fleet_errors = (
+                provider_data.get("fleet_errors")
+                if isinstance(provider_data, Mapping)
+                else None
+            )
+            if fleet_errors:
+                instance_ids = result.get("instance_ids")
+                result["fulfilled_count"] = (
+                    len(instance_ids) if isinstance(instance_ids, list) else 0
+                )
+            else:
+                result["fulfilled_count"] = requested_count
+            return result
+
+        result["fulfilled_count"] = requested_count
+        return result
+
     def _execute_planned_spot_launches(self, operation: ProviderOperation) -> ProviderResult:
         template_config = operation.parameters.get("template_config", {})
         count = operation.parameters.get("count", 1)
@@ -340,8 +379,10 @@ class AWSProviderStrategy(ProviderStrategy):
                 parent_request_id=base_request_id,
                 plan_entry_index=idx,
             ),
-            launch_child=lambda child_request, child_template: handler.acquire_hosts(
-                child_request, child_template
+            launch_child=lambda child_request, child_template: self._planned_child_result_with_fulfillment(
+                provider_api=provider_api,
+                requested_count=child_request.requested_count,
+                raw_result=handler.acquire_hosts(child_request, child_template),
             ),
             is_capacity_like_failure=self._is_capacity_like_failure,
         )

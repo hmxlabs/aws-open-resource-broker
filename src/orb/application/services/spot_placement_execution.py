@@ -1,7 +1,6 @@
 """Provider-agnostic execution helpers for spot placement plans."""
 
 from __future__ import annotations
-
 from dataclasses import dataclass
 from typing import Any, Callable, Mapping
 
@@ -145,9 +144,19 @@ class SpotPlacementExecutionService:
             if child_result["success"]:
                 resource_ids.extend(child_result["resource_ids"])
                 instances.extend(child_result["instances"])
-                fulfilled += requested_for_entry
-                carryover = 0
-                continue
+                fulfilled_for_child = child_result["fulfilled_count"]
+                fulfilled += fulfilled_for_child
+                carryover = max(requested_for_entry - fulfilled_for_child, 0)
+                if carryover == 0:
+                    continue
+
+                failed_subplans.append(child_result)
+                if is_capacity_like_failure(child_result):
+                    continue
+
+                terminated_early = True
+                terminal_error_message = child_result["error_message"]
+                break
 
             failed_subplans.append(child_result)
             if is_capacity_like_failure(child_result):
@@ -200,10 +209,17 @@ class SpotPlacementExecutionService:
         resource_ids = result.get("resource_ids", [])
         instances = result.get("instances", [])
         provider_data = result.get("provider_data") or {}
+        raw_fulfilled_count = result.get("fulfilled_count")
+        if success:
+            fulfilled_count = requested_count if raw_fulfilled_count is None else int(raw_fulfilled_count)
+        else:
+            fulfilled_count = 0 if raw_fulfilled_count is None else int(raw_fulfilled_count)
+        fulfilled_count = min(max(fulfilled_count, 0), requested_count)
 
         return {
             "candidate_id": plan_entry.score.candidate.candidate_id,
             "requested_count": requested_count,
+            "fulfilled_count": fulfilled_count,
             "success": success,
             "resource_ids": resource_ids,
             "instances": instances,

@@ -77,3 +77,32 @@ def test_execute_plan_rejects_non_mapping_child_result():
             launch_child=lambda child_request, child_template: "legacy-resource-id",
             is_capacity_like_failure=lambda child_result: False,
         )
+
+
+def test_execute_plan_keeps_shortfall_when_child_succeeds_partially():
+    service = SpotPlacementExecutionService()
+    plan = [_plan_entry("azure:eastus2:1:Standard_D4s_v5", planned_count=2)]
+
+    summary = service.execute_plan(
+        plan=plan,
+        total_count=2,
+        build_child_template=lambda plan_entry: {"candidate_id": plan_entry.score.candidate.candidate_id},
+        build_child_request=lambda requested_count, idx: {"count": requested_count, "index": idx},
+        launch_child=lambda child_request, child_template: {
+            "success": True,
+            "resource_ids": ["vmss-a"],
+            "fulfilled_count": 1,
+            "instances": [],
+            "provider_data": {
+                "fleet_errors": [{"error_code": "AllocationFailed"}],
+                "error_codes": ["AllocationFailed"],
+            },
+        },
+        is_capacity_like_failure=lambda child_result: "AllocationFailed" in child_result["error_codes"],
+    )
+
+    assert summary.resource_ids == ["vmss-a"]
+    assert summary.unfulfilled_count == 1
+    assert summary.terminated_early is False
+    assert summary.failed_subplans == [summary.child_results[0]]
+    assert summary.child_results[0]["fulfilled_count"] == 1

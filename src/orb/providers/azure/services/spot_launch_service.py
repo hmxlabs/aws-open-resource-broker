@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Mapping, Optional
 
 from orb.application.services.spot_placement_execution import (
     build_planned_execution_metadata,
@@ -143,6 +143,34 @@ class AzureSpotLaunchService:
         cloned_data["placement_zones"] = []
         return AzureTemplate.model_validate(cloned_data)
 
+    @staticmethod
+    def _planned_child_result_with_fulfillment(
+        *,
+        provider_api_key: str,
+        requested_count: int,
+        raw_result: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        result = dict(raw_result)
+        if "fulfilled_count" in result:
+            return result
+
+        if not result.get("success", True):
+            result["fulfilled_count"] = 0
+            return result
+
+        if provider_api_key == "CycleCloud":
+            provider_data = result.get("provider_data")
+            added_count = (
+                provider_data.get("added_count")
+                if isinstance(provider_data, Mapping)
+                else None
+            )
+            result["fulfilled_count"] = int(added_count or 0)
+            return result
+
+        result["fulfilled_count"] = requested_count
+        return result
+
     def execute_planned_spot_launches(
         self,
         *,
@@ -197,8 +225,10 @@ class AzureSpotLaunchService:
                 parent_request_id=base_request_id,
                 plan_entry_index=idx,
             ),
-            launch_child=lambda child_request, child_template: handler.acquire_hosts(
-                child_request, child_template
+            launch_child=lambda child_request, child_template: self._planned_child_result_with_fulfillment(
+                provider_api_key=provider_api_key,
+                requested_count=child_request.requested_count,
+                raw_result=handler.acquire_hosts(child_request, child_template),
             ),
             is_capacity_like_failure=capacity_like_failure_checker or self.is_capacity_like_failure,
         )
