@@ -35,19 +35,10 @@ async def main() -> None:
         if len(sys.argv) == 1:
             sys.argv.append("--help")
 
-        from io import StringIO
-
-        old_stderr = sys.stderr
-        sys.stderr = captured_stderr = StringIO()
-
         try:
             args, resource_parsers = parse_args()
-            sys.stderr = old_stderr
         except SystemExit as e:
-            sys.stderr = old_stderr
-            error_output = captured_stderr.getvalue()
-
-            if e.code == 2 and len(sys.argv) >= 2 and "required: action" in error_output:
+            if e.code == 2 and len(sys.argv) >= 2:
                 resource_name = sys.argv[1]
                 if resource_name in [
                     "templates",
@@ -68,9 +59,6 @@ async def main() -> None:
                         if help_exit.code == 0:
                             sys.exit(0)
                     sys.argv = original_argv
-
-            if error_output.strip():
-                print_error(error_output.strip())
             raise
 
         # Setup environment after arg parse — skip for init (it calls get_config_location() directly)

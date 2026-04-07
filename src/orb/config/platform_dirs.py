@@ -1,9 +1,12 @@
 """Platform-specific directory detection for ORB configuration."""
 
+import logging
 import os
 import site
 import sys
 from pathlib import Path
+
+_logger = logging.getLogger(__name__)
 
 
 def in_virtualenv() -> bool:
@@ -97,7 +100,15 @@ def get_root_location() -> Path:
 
     # 7. System installation
     if is_system_install():
-        return Path(sys.prefix) / "orb"
+        candidate = Path(sys.prefix) / "orb"
+        if not os.access(candidate.parent, os.W_OK):
+            _logger.warning(
+                "System install location %s is not writable; falling back to ~/.orb. "
+                "Set ORB_ROOT_DIR to override.",
+                candidate,
+            )
+            return Path.home() / ".orb"
+        return candidate
 
     # 8. Fallback
     return cwd

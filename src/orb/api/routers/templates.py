@@ -19,6 +19,7 @@ from orb.api.dependencies import (
     get_validate_template_orchestrator,
 )
 from orb.api.models.base import APIRequest
+from orb.api.models.responses import TemplateListResponse, TemplateMutationResponse
 from orb.application.services.orchestration.dtos import (
     CreateTemplateInput,
     DeleteTemplateInput,
@@ -85,7 +86,12 @@ class TemplateUpdateRequest(APIRequest):
     version: Optional[str] = None
 
 
-@router.get("/", summary="List Templates", description="Get all available templates")
+@router.get(
+    "/",
+    summary="List Templates",
+    description="Get all available templates",
+    response_model=TemplateListResponse,
+)
 @handle_rest_exceptions(endpoint="/api/v1/templates", method="GET")
 async def list_templates(
     provider_api: Optional[str] = PROVIDER_API_QUERY,
@@ -114,6 +120,7 @@ async def list_templates(
     "/validate",
     summary="Validate Template",
     description="Validate template configuration",
+    response_model=TemplateMutationResponse,
 )
 @handle_rest_exceptions(endpoint="/api/v1/templates/validate", method="POST")
 async def validate_template(
@@ -146,7 +153,12 @@ async def validate_template(
     )
 
 
-@router.post("/refresh", summary="Refresh Templates", description="Refresh template cache")
+@router.post(
+    "/refresh",
+    summary="Refresh Templates",
+    description="Refresh template cache",
+    response_model=TemplateListResponse,
+)
 @handle_rest_exceptions(endpoint="/api/v1/templates/refresh", method="POST")
 async def refresh_templates(
     orchestrator=REFRESH_ORCHESTRATOR,
@@ -162,7 +174,12 @@ async def refresh_templates(
     )
 
 
-@router.get("/{template_id}", summary="Get Template", description="Get template by ID")
+@router.get(
+    "/{template_id}",
+    summary="Get Template",
+    description="Get template by ID",
+    response_model=TemplateListResponse,
+)
 @handle_rest_exceptions(endpoint="/api/v1/templates/{template_id}", method="GET")
 async def get_template(
     template_id: str,
@@ -183,7 +200,12 @@ async def get_template(
     )
 
 
-@router.post("/", summary="Create Template", description="Create a new template")
+@router.post(
+    "/",
+    summary="Create Template",
+    description="Create a new template",
+    response_model=TemplateMutationResponse,
+)
 @handle_rest_exceptions(endpoint="/api/v1/templates", method="POST")
 async def create_template(
     template_data: TemplateCreateRequest,
@@ -225,6 +247,7 @@ async def create_template(
     "/{template_id}",
     summary="Update Template",
     description="Update an existing template",
+    response_model=TemplateMutationResponse,
 )
 @handle_rest_exceptions(endpoint="/api/v1/templates/{template_id}", method="PUT")
 async def update_template(
@@ -263,7 +286,12 @@ async def update_template(
     )
 
 
-@router.delete("/{template_id}", summary="Delete Template", description="Delete a template")
+@router.delete(
+    "/{template_id}",
+    summary="Delete Template",
+    description="Delete a template",
+    response_model=TemplateMutationResponse,
+)
 @handle_rest_exceptions(endpoint="/api/v1/templates/{template_id}", method="DELETE")
 async def delete_template(
     template_id: str,

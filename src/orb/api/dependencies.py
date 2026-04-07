@@ -4,6 +4,11 @@ from __future__ import annotations
 
 from typing import Any, TypeVar
 
+try:
+    from fastapi import Depends, Request
+except ImportError:
+    pass  # FastAPI optional — only needed when API is active
+
 from orb.application.ports.scheduler_port import SchedulerPort
 from orb.application.services.orchestration.acquire_machines import AcquireMachinesOrchestrator
 from orb.application.services.orchestration.cancel_request import CancelRequestOrchestrator
@@ -151,6 +156,43 @@ def get_refresh_templates_orchestrator() -> RefreshTemplatesOrchestrator:
 def get_response_formatting_service() -> ResponseFormattingService:
     """Get ResponseFormattingService from DI container."""
     return get_di_container().get(ResponseFormattingService)
+
+
+def get_request_formatter(
+    request: "Request",
+    container=Depends(get_di_container),
+) -> ResponseFormattingService:
+    """Get ResponseFormattingService, optionally overridden by X-ORB-Scheduler header."""
+    scheduler_override = request.headers.get("X-ORB-Scheduler")
+    if scheduler_override:
+        from orb.infrastructure.scheduler.registry import get_scheduler_registry
+
+        registry = get_scheduler_registry()
+        if registry.is_registered(scheduler_override):
+            try:
+                scheduler = registry.create_strategy(scheduler_override, container)
+                return ResponseFormattingService(scheduler)
+            except Exception:
+                pass  # Fall through to default
+    return container.get(ResponseFormattingService)
+
+
+def get_request_scheduler(
+    request: "Request",
+    container=Depends(get_di_container),
+) -> SchedulerPort:
+    """Get SchedulerPort, optionally overridden by X-ORB-Scheduler header."""
+    scheduler_override = request.headers.get("X-ORB-Scheduler")
+    if scheduler_override:
+        from orb.infrastructure.scheduler.registry import get_scheduler_registry
+
+        registry = get_scheduler_registry()
+        if registry.is_registered(scheduler_override):
+            try:
+                return registry.create_strategy(scheduler_override, container)
+            except Exception:
+                pass  # Fall through to default
+    return container.get(SchedulerPort)
 
 
 def get_health_check_port() -> Any:

@@ -17,6 +17,7 @@ from orb.api.dependencies import (
     get_request_status_orchestrator,
     get_response_formatting_service,
 )
+from orb.api.models.responses import RequestOperationResponse, RequestStatusResponse
 from orb.application.services.orchestration.dtos import (
     CancelRequestInput,
     GetRequestStatusInput,
@@ -40,7 +41,12 @@ OFFSET_QUERY = Query(0, ge=0, description="Number of results to skip")
 _TERMINAL_STATUSES = {"complete", "completed", "failed", "error", "cancelled", "canceled"}
 
 
-@router.get("/", summary="List Requests", description="List requests with optional filtering")
+@router.get(
+    "/",
+    summary="List Requests",
+    description="List requests with optional filtering",
+    response_model=RequestStatusResponse,
+)
 @handle_rest_exceptions(endpoint="/api/v1/requests", method="GET")
 async def list_requests(
     status: Optional[str] = STATUS_QUERY,
@@ -64,7 +70,12 @@ async def list_requests(
     return JSONResponse(content=formatter.format_request_status(result.requests).data)
 
 
-@router.get("/return", summary="List Return Requests", description="List requests pending return")
+@router.get(
+    "/return",
+    summary="List Return Requests",
+    description="List requests pending return",
+    response_model=RequestStatusResponse,
+)
 @handle_rest_exceptions(endpoint="/api/v1/requests/return", method="GET")
 async def list_return_requests(
     limit: int = LIMIT_QUERY,
@@ -80,6 +91,7 @@ async def list_return_requests(
     "/{request_id}/status",
     summary="Get Request Status",
     description="Get status of a specific request",
+    response_model=RequestStatusResponse,
 )
 @handle_rest_exceptions(endpoint="/api/v1/requests/{request_id}/status", method="GET")
 async def get_request_status(
@@ -142,7 +154,12 @@ async def stream_request_status(
     )
 
 
-@router.delete("/{request_id}", summary="Cancel Request", description="Cancel a pending request")
+@router.delete(
+    "/{request_id}",
+    summary="Cancel Request",
+    description="Cancel a pending request",
+    response_model=RequestOperationResponse,
+)
 @handle_rest_exceptions(endpoint="/api/v1/requests/{request_id}", method="DELETE")
 async def cancel_request(
     request_id: str,
