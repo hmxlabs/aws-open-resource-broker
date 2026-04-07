@@ -215,6 +215,16 @@ local-security: ; @$(MAKE) local-workflow security
 local-test-matrix: ; @$(MAKE) local-workflow test-matrix
 local-clean: ; @$(MAKE) local-workflow clean
 
+# @SECTION Go SDK
+sdk-go-test:  ## Run Go SDK tests
+	cd sdk/go && go test ./...
+
+sdk-go-build:  ## Build Go SDK
+	cd sdk/go && go build ./...
+
+sdk-go-generate:  ## Regenerate Go SDK from OpenAPI spec
+	cd sdk/go && go generate ./...
+
 ci-git-setup:  ## Setup git configuration for CI automated commits
 	git config --local user.name "github-actions[bot]"
 	git config --local user.email "github-actions[bot]@users.noreply.github.com"

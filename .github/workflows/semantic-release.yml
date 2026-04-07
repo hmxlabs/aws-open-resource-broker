@@ -113,3 +113,27 @@ jobs:
         with:
           github_token: ${{ steps.app-token.outputs.token }}
           tag: ${{ steps.release.outputs.tag }}
+
+      - name: Export OpenAPI spec for Go SDK
+        if: steps.release.outputs.released == 'true'
+        run: |
+          orb system serve --socket-path /tmp/orb-spec.sock &
+          sleep 5
+          curl --unix-socket /tmp/orb-spec.sock http://localhost/openapi.json > sdk/go/openapi.json
+          kill %1 || true
+
+      - name: Update Go SDK version
+        if: steps.release.outputs.released == 'true'
+        run: |
+          VERSION="${{ steps.release.outputs.version }}"
+          sed -i "s/MinCompatibleVersion = \".*\"/MinCompatibleVersion = \"${VERSION}\"/" sdk/go/orb/version.go
+          git add sdk/go/openapi.json sdk/go/orb/version.go
+          git diff --cached --quiet || git commit -m "chore(sdk/go): update for v${VERSION} [skip ci]"
+          git push
+
+      - name: Tag Go SDK
+        if: steps.release.outputs.released == 'true'
+        run: |
+          VERSION="${{ steps.release.outputs.version }}"
+          git tag "sdk/go/v${VERSION}"
+          git push origin "sdk/go/v${VERSION}"

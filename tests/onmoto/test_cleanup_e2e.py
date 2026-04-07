@@ -705,6 +705,135 @@ def run_instances_template_id(orb_config_dir_cqrs):
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# External LT not deleted on cancel
+# ---------------------------------------------------------------------------
+
+
+def test_external_lt_not_deleted_on_cancel(aws_client, subnet_id, sg_id, ec2):
+    """External LT (no orb tags) must survive cancel_resource.
+
+    Creates a launch template directly in moto without any ORB tags, builds an
+    AWSTemplate with launch_template_id pointing at it, acquires instances via
+    RunInstancesHandler with the REAL AWSLaunchTemplateManager (not the tagged
+    mock), cancels the resource, then asserts the external LT still exists.
+
+    The real manager calls _use_existing_template_strategy which never writes
+    orb:request-id to the external LT, so _delete_orb_launch_template cannot
+    find it and must leave it alone.
+    """
+    from moto import mock_aws
+
+    @mock_aws
+    def _run():
+        import boto3 as _boto3
+
+        region = REGION
+        ec2_client = _boto3.client("ec2", region_name=region)
+        autoscaling_client = _boto3.client("autoscaling", region_name=region)
+        sts_client = _boto3.client("sts", region_name=region)
+
+        # Create VPC/subnet/sg for the external LT
+        vpc = ec2_client.create_vpc(CidrBlock="10.0.0.0/16")
+        vpc_id = vpc["Vpc"]["VpcId"]
+        subnet = ec2_client.create_subnet(VpcId=vpc_id, CidrBlock="10.0.1.0/24")
+        ext_subnet_id = subnet["Subnet"]["SubnetId"]
+        sg = ec2_client.create_security_group(
+            GroupName="ext-lt-sg", Description="ext lt sg", VpcId=vpc_id
+        )
+        ext_sg_id = sg["GroupId"]
+
+        # Create external LT directly — no ORB tags
+        ext_lt_resp = ec2_client.create_launch_template(
+            LaunchTemplateName="external-lt-no-orb-tags",
+            LaunchTemplateData={
+                "ImageId": "ami-12345678",
+                "InstanceType": "t3.micro",
+                "NetworkInterfaces": [
+                    {
+                        "DeviceIndex": 0,
+                        "SubnetId": ext_subnet_id,
+                        "Groups": [ext_sg_id],
+                        "AssociatePublicIpAddress": False,
+                    }
+                ],
+            },
+        )
+        ext_lt_id = ext_lt_resp["LaunchTemplate"]["LaunchTemplateId"]
+
+        # Build AWSTemplate referencing the external LT
+        template = AWSTemplate(
+            template_id="tpl-ext-lt",
+            name="test-ext-lt",
+            provider_api="RunInstances",
+            machine_types={"t3.micro": 1},
+            image_id="ami-12345678",
+            max_instances=1,
+            price_type="ondemand",
+            subnet_ids=[ext_subnet_id],
+            security_group_ids=[ext_sg_id],
+            launch_template_id=ext_lt_id,
+        )
+
+        # Wire up real dependencies
+        from unittest.mock import MagicMock
+
+        aws_client_obj = MagicMock(spec=AWSClient)
+        aws_client_obj.ec2_client = ec2_client
+        aws_client_obj.autoscaling_client = autoscaling_client
+        aws_client_obj.sts_client = sts_client
+
+        logger = _make_logger()
+        config_port = _make_cleanup_config_port()
+
+        # Use the REAL AWSLaunchTemplateManager — not the tagged mock
+        real_lt_manager = AWSLaunchTemplateManager(
+            aws_client=aws_client_obj,
+            logger=logger,
+            config_port=config_port,
+        )
+
+        from orb.providers.aws.infrastructure.handlers.run_instances.handler import (
+            RunInstancesHandler,
+        )
+        from orb.providers.aws.utilities.aws_operations import AWSOperations
+
+        aws_ops = AWSOperations(aws_client_obj, logger, config_port)
+        handler = RunInstancesHandler(
+            aws_client=aws_client_obj,
+            logger=logger,
+            aws_ops=aws_ops,
+            launch_template_manager=real_lt_manager,
+            config_port=config_port,
+        )
+
+        req_id = "cleanup-ext-lt-001"
+        request = _make_request(request_id=req_id, requested_count=1)
+
+        # Acquire — uses _use_existing_template_strategy, no orb tag written to ext LT
+        result: dict = handler.acquire_hosts(request, template)  # type: ignore[assignment]
+        assert result["success"] is True
+
+        # Verify external LT still has no orb:request-id tag
+        lt_check = ec2_client.describe_launch_templates(LaunchTemplateIds=[ext_lt_id])
+        lt_tags = {t["Key"]: t["Value"] for t in lt_check["LaunchTemplates"][0].get("Tags", [])}
+        assert "orb:request-id" not in lt_tags, (
+            "External LT must not have orb:request-id tag after acquire"
+        )
+
+        # Cancel — _delete_orb_launch_template must not delete the external LT
+        cancel_result = handler.cancel_resource(result["resource_ids"][0], req_id)
+        assert cancel_result["status"] == "success"
+
+        # Assert external LT still exists
+        surviving = ec2_client.describe_launch_templates(LaunchTemplateIds=[ext_lt_id])
+        assert len(surviving["LaunchTemplates"]) == 1, (
+            f"External LT {ext_lt_id!r} was deleted by cancel_resource — it must not be"
+        )
+
+    _run()
+
+
 class TestCleanupViaOrchestrator:
     """Verify that the full acquire -> return cycle via CQRS buses terminates
     instances and deletes the associated launch template in moto."""

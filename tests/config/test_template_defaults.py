@@ -306,7 +306,7 @@ class TestTemplateDefaultsIntegration:
 
         # Should use defaults service for provider_api
         mock_template_defaults_service.resolve_provider_api_default.assert_called_once_with(
-            template_dict
+            template_dict, "default"
         )
         assert result["provider_api"] == "SpotFleet"
 

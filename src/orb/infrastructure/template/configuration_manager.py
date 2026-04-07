@@ -575,8 +575,8 @@ class TemplateConfigurationManager:
             result["errors"].append("Provider API is required")
 
         # Validate essential configuration fields directly from DTO
-        if not template.image_id:
-            result["errors"].append("Image ID is required in configuration")
+        if not template.image_id and not template.metadata.get("launch_template_id"):
+            result["errors"].append("Image ID is required when no launchTemplateId is specified")
             result["is_valid"] = False
 
         if template.max_instances <= 0:
