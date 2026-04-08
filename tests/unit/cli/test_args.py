@@ -265,3 +265,33 @@ class TestProviderAzureArgs:
         assert ns.provider_name == "azure-default"
         assert ns.azure_resource_group == "orb-updated-rg"
         assert ns.azure_location == "westeurope"
+
+
+class TestInitAzureArgs:
+    """Azure init CLI arguments."""
+
+    def test_init_accepts_azure_fields(self):
+        ns = _parse(
+            [
+                "init",
+                "--non-interactive",
+                "--provider",
+                "azure",
+                "--azure-subscription-id",
+                "12345678-1234-1234-1234-123456789012",
+                "--azure-resource-group",
+                "orb-test-rg",
+                "--azure-location",
+                "eastus2",
+                "--azure-client-id",
+                "managed-identity-client-id",
+                "--azure-cyclecloud-no-verify-ssl",
+            ]
+        )
+
+        assert ns.provider == "azure"
+        assert ns.azure_subscription_id == "12345678-1234-1234-1234-123456789012"
+        assert ns.azure_resource_group == "orb-test-rg"
+        assert ns.azure_location == "eastus2"
+        assert ns.azure_client_id == "managed-identity-client-id"
+        assert ns.azure_cyclecloud_no_verify_ssl is True

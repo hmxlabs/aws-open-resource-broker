@@ -711,6 +711,33 @@ For more information, visit: {DOCS_URL}
     init_parser.add_argument("--provider", default="aws", help="Provider type")
     init_parser.add_argument("--region", help="AWS region")
     init_parser.add_argument("--profile", help="AWS profile")
+    init_parser.add_argument("--azure-subscription-id", help="Azure subscription ID")
+    init_parser.add_argument("--azure-resource-group", help="Azure resource group")
+    init_parser.add_argument("--azure-location", help="Azure location")
+    init_parser.add_argument("--azure-client-id", help="Azure managed identity client ID")
+    init_parser.add_argument("--azure-cyclecloud-url", help="Azure CycleCloud URL")
+    init_parser.add_argument(
+        "--azure-cyclecloud-credential-path",
+        help="Secret path or file path for CycleCloud credentials",
+    )
+    init_parser.add_argument(
+        "--azure-cyclecloud-auth-mode",
+        help="CycleCloud auth mode override",
+    )
+    init_parser.add_argument(
+        "--azure-cyclecloud-aad-scope",
+        help="CycleCloud AAD scope override",
+    )
+    init_parser.add_argument(
+        "--azure-cyclecloud-verify-ssl",
+        action="store_true",
+        help="Verify TLS certificates for CycleCloud",
+    )
+    init_parser.add_argument(
+        "--azure-cyclecloud-no-verify-ssl",
+        action="store_true",
+        help="Disable TLS certificate verification for CycleCloud",
+    )
     init_parser.add_argument("--config-dir", help="Custom configuration directory")
     init_parser.add_argument(
         "--subnet-ids",

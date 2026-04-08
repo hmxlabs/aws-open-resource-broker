@@ -437,6 +437,66 @@ class AzureProviderStrategy(ProviderStrategy):
         """Return Azure credential source options."""
         return [{"name": None, "description": "DefaultAzureCredential / managed identity"}]
 
+    def get_credential_requirements(self) -> dict:
+        """Azure auth uses ambient credentials and does not require pre-auth prompts."""
+        return {}
+
+    def get_operational_requirements(self) -> dict:
+        """Return the Azure values init must collect to build a working provider config."""
+        return {
+            "subscription_id": {"required": True, "description": "Azure subscription ID"},
+            "resource_group": {"required": True, "description": "Azure resource group"},
+            "region": {"required": True, "description": "Azure location"},
+            "client_id": {
+                "required": False,
+                "prompt": True,
+                "description": "Managed identity client ID (optional)",
+            },
+        }
+
+    def get_default_region(self) -> str:
+        """Return the default Azure location for CLI prompts."""
+        return "eastus2"
+
+    def get_cli_provider_config(self, args: Any) -> dict[str, Any]:
+        """Extract Azure provider config from init CLI args."""
+        args_dict = vars(args)
+        provider_config: dict[str, Any] = {
+            "region": args_dict.get("azure_location") or self.get_default_region(),
+        }
+
+        field_map = {
+            "subscription_id": "azure_subscription_id",
+            "resource_group": "azure_resource_group",
+            "client_id": "azure_client_id",
+        }
+        for config_key, arg_name in field_map.items():
+            value = args_dict.get(arg_name)
+            if value not in (None, ""):
+                provider_config[config_key] = value
+
+        cyclecloud: dict[str, Any] = {}
+        cyclecloud_field_map = {
+            "url": "azure_cyclecloud_url",
+            "credential_path": "azure_cyclecloud_credential_path",
+            "auth_mode": "azure_cyclecloud_auth_mode",
+            "aad_scope": "azure_cyclecloud_aad_scope",
+        }
+        for config_key, arg_name in cyclecloud_field_map.items():
+            value = args_dict.get(arg_name)
+            if value not in (None, ""):
+                cyclecloud[config_key] = value
+
+        if args_dict.get("azure_cyclecloud_verify_ssl"):
+            cyclecloud["verify_ssl"] = True
+        elif args_dict.get("azure_cyclecloud_no_verify_ssl"):
+            cyclecloud["verify_ssl"] = False
+
+        if cyclecloud:
+            provider_config["cyclecloud"] = cyclecloud
+
+        return provider_config
+
     def test_credentials(self, credential_source: Optional[str] = None, **kwargs) -> dict:
         """Validate Azure credentials by performing a health check."""
         del credential_source
