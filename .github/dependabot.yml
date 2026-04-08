@@ -85,6 +85,22 @@ updates:
         patterns:
           - "*"
 
+  # Go dependencies (SDK)
+  - package-ecosystem: "gomod"
+    directory: "/sdk/go"
+    schedule:
+      interval: "weekly"
+      day: "sunday"
+      time: "06:00"
+      timezone: "America/New_York"
+    labels:
+      - "dependencies"
+      - "go"
+    commit-message:
+      prefix: "chore(deps)"
+      include: "scope"
+    open-pull-requests-limit: 2
+
   # Docker dependencies
   - package-ecosystem: "docker"
     directory: "/"
