@@ -23,6 +23,9 @@ class _ComputeClientStub:
         self.created_instances: list[tuple[str, dict]] = []
         self.created_templates: list[tuple[str, dict]] = []
         self.created_migs: list[tuple[str, str, dict]] = []
+        self.deleted_regional_migs: list[tuple[str, str]] = []
+        self.deleted_regional_managed_instances: list[tuple[str, str, list[str]]] = []
+        self.regional_managed_instances: dict[str, list[object]] = {}
 
     def create_instance(self, *, zone: str, body: object) -> object:
         self.created_instances.append((zone, body))
@@ -47,6 +50,24 @@ class _ComputeClientStub:
             self_link=f"projects/{image_project}/global/images/family/{family}",
             name=family,
         )
+
+    def delete_regional_mig(self, *, region: str, mig_name: str) -> object:
+        self.deleted_regional_migs.append((region, mig_name))
+        return SimpleNamespace(name=f"delete-{mig_name}")
+
+    def delete_regional_managed_instances(
+        self,
+        *,
+        region: str,
+        mig_name: str,
+        instance_urls: list[str],
+    ) -> object:
+        self.deleted_regional_managed_instances.append((region, mig_name, instance_urls))
+        return SimpleNamespace(name=f"delete-instances-{mig_name}")
+
+    def list_regional_managed_instances(self, *, region: str, mig_name: str) -> list[object]:
+        _ = region
+        return self.regional_managed_instances.get(mig_name, [])
 
 
 def _config(**overrides: object) -> GCPProviderConfig:
@@ -145,6 +166,106 @@ def test_mig_handler_acquire_hosts_submits_template_and_group() -> None:
     assert len(compute_client.created_migs) == 1
 
 
+def test_mig_handler_terminates_multiple_resource_ids() -> None:
+    compute_client = _ComputeClientStub()
+    handler = GCPManagedInstanceGroupHandler(
+        compute_client=compute_client,
+        config=_config(),
+        logger=MagicMock(),
+    )
+
+    result = handler.terminate_hosts(
+        resource_ids=["mig-a", "mig-b"],
+        instance_ids=[],
+        context={"region": "us-central1", "scope": "regional"},
+    )
+
+    assert result["terminated_ids"] == ["mig-a", "mig-b"]
+    assert compute_client.deleted_regional_migs == [
+        ("us-central1", "mig-a"),
+        ("us-central1", "mig-b"),
+    ]
+
+
+def test_mig_handler_status_checks_multiple_resource_ids() -> None:
+    compute_client = _ComputeClientStub()
+    compute_client.regional_managed_instances = {
+        "mig-a": [
+            SimpleNamespace(
+                instance_url="projects/orb-example-12345/zones/us-central1-a/instances/vm-a",
+                instance_status="RUNNING",
+                current_action="NONE",
+            )
+        ],
+        "mig-b": [
+            SimpleNamespace(
+                instance_url="projects/orb-example-12345/zones/us-central1-b/instances/vm-b",
+                instance_status="STAGING",
+                current_action="CREATING",
+            )
+        ],
+    }
+    handler = GCPManagedInstanceGroupHandler(
+        compute_client=compute_client,
+        config=_config(),
+        logger=MagicMock(),
+    )
+
+    result = handler.check_hosts_status(
+        resource_ids=["mig-a", "mig-b"],
+        instance_ids=[],
+        context={"region": "us-central1", "scope": "regional"},
+    )
+
+    assert [item["instance_id"] for item in result] == ["vm-a", "vm-b"]
+    assert [item["provider_data"]["resource_id"] for item in result] == ["mig-a", "mig-b"]
+
+
+def test_mig_handler_terminates_instances_across_multiple_resource_ids() -> None:
+    compute_client = _ComputeClientStub()
+    compute_client.regional_managed_instances = {
+        "mig-a": [
+            SimpleNamespace(
+                instance_url="projects/orb-example-12345/zones/us-central1-a/instances/vm-a",
+                instance_status="RUNNING",
+                current_action="NONE",
+            )
+        ],
+        "mig-b": [
+            SimpleNamespace(
+                instance_url="projects/orb-example-12345/zones/us-central1-b/instances/vm-b",
+                instance_status="RUNNING",
+                current_action="NONE",
+            )
+        ],
+    }
+    handler = GCPManagedInstanceGroupHandler(
+        compute_client=compute_client,
+        config=_config(),
+        logger=MagicMock(),
+    )
+
+    result = handler.terminate_hosts(
+        resource_ids=["mig-a", "mig-b"],
+        instance_ids=["vm-a", "vm-b"],
+        context={"project_id": "orb-example-12345", "region": "us-central1", "scope": "regional"},
+    )
+
+    assert result["terminated_ids"] == ["vm-a", "vm-b"]
+    assert compute_client.deleted_regional_managed_instances == [
+        (
+            "us-central1",
+            "mig-a",
+            ["projects/orb-example-12345/zones/us-central1-a/instances/vm-a"],
+        ),
+        (
+            "us-central1",
+            "mig-b",
+            ["projects/orb-example-12345/zones/us-central1-b/instances/vm-b"],
+        ),
+    ]
+
+
 @pytest.mark.asyncio
 async def test_strategy_create_instances_delegates_to_handler() -> None:
     strategy = GCPProviderStrategy(config=_config(), logger=MagicMock(), provider_name="gcp-default")
@@ -210,6 +331,32 @@ async def test_strategy_create_singlevm_rejects_missing_zone() -> None:
 
     assert result.success is False
     assert "SingleVM templates require exactly one explicit zone" in result.error_message
+
+
+@pytest.mark.asyncio
+async def test_strategy_terminate_instances_supports_multiple_mig_resource_ids() -> None:
+    strategy = GCPProviderStrategy(config=_config(), logger=MagicMock(), provider_name="gcp-default")
+    assert strategy.initialize() is True
+    strategy._compute_client = _ComputeClientStub()
+    strategy._handler_factory = GCPHandlerFactory(
+        compute_client=strategy._compute_client,
+        config=_config(),
+        logger=MagicMock(),
+    )
+
+    result = await strategy.execute_operation(
+        ProviderOperation(
+            operation_type=ProviderOperationType.TERMINATE_INSTANCES,
+            parameters={
+                "provider_api": "MIG",
+                "resource_ids": ["mig-a", "mig-b"],
+                "request_metadata": {"region": "us-central1", "scope": "regional"},
+            },
+        )
+    )
+
+    assert result.success is True
+    assert result.data["terminated_count"] == 2
 
 
 @pytest.mark.asyncio

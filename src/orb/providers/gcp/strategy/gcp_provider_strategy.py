@@ -343,7 +343,7 @@ class GCPProviderStrategy(ProviderStrategy):
         if isinstance(zone, str):
             context.setdefault("zone", zone)
         resource_ids = operation.parameters.get("resource_ids", []) or []
-        if resource_ids:
+        if len(resource_ids) == 1:
             context.setdefault("mig_name", resource_ids[0])
         provider_api = operation.parameters.get("provider_api")
         if isinstance(provider_api, str):

@@ -81,39 +81,52 @@ class GCPManagedInstanceGroupHandler(GCPHandler):
         instance_ids: list[str],
         context: GCPHandlerContext,
     ) -> GCPMutationResult:
-        mig_name = self._require_mig_name(resource_ids, context)
+        mig_names = self._require_mig_names(resource_ids, context)
         template_name = context.get("instance_template_name")
         scope = str(context.get("scope") or GCPMIGScope.REGIONAL.value)
 
         if instance_ids:
-            instance_urls = [self._instance_url(instance_id, context=context) for instance_id in instance_ids]
-            if scope == GCPMIGScope.ZONAL.value:
-                response = self._compute_client.delete_zonal_managed_instances(
-                    zone=self._require_zone(context),
-                    mig_name=mig_name,
-                    instance_urls=instance_urls,
-                )
-            else:
-                response = self._compute_client.delete_regional_managed_instances(
-                    region=self._require_region(context),
-                    mig_name=mig_name,
-                    instance_urls=instance_urls,
-                )
+            grouped_instance_urls = self._group_instance_urls_by_mig(
+                mig_names=mig_names,
+                instance_ids=instance_ids,
+                context=context,
+                scope=scope,
+            )
+            operations: list[dict[str, str | None]] = []
+            for mig_name, instance_urls in grouped_instance_urls.items():
+                if scope == GCPMIGScope.ZONAL.value:
+                    response = self._compute_client.delete_zonal_managed_instances(
+                        zone=self._require_zone(context),
+                        mig_name=mig_name,
+                        instance_urls=instance_urls,
+                    )
+                else:
+                    response = self._compute_client.delete_regional_managed_instances(
+                        region=self._require_region(context),
+                        mig_name=mig_name,
+                        instance_urls=instance_urls,
+                    )
+                operations.append({"operation_name": response.name, "mig_name": mig_name})
             return {
                 "terminated_ids": instance_ids,
-                "operations": [{"operation_name": response.name, "mig_name": mig_name}],
+                "operations": operations,
             }
 
-        if scope == GCPMIGScope.ZONAL.value:
-            response = self._compute_client.delete_zonal_mig(
-                zone=self._require_zone(context),
-                mig_name=mig_name,
-            )
-        else:
-            response = self._compute_client.delete_regional_mig(
-                region=self._require_region(context),
-                mig_name=mig_name,
-            )
+        operations: list[dict[str, str | None]] = []
+        terminated_ids: list[str] = []
+        for mig_name in mig_names:
+            if scope == GCPMIGScope.ZONAL.value:
+                response = self._compute_client.delete_zonal_mig(
+                    zone=self._require_zone(context),
+                    mig_name=mig_name,
+                )
+            else:
+                response = self._compute_client.delete_regional_mig(
+                    region=self._require_region(context),
+                    mig_name=mig_name,
+                )
+            operations.append({"operation_name": response.name, "mig_name": mig_name})
+            terminated_ids.append(mig_name)
 
         if template_name:
             try:
@@ -122,8 +135,8 @@ class GCPManagedInstanceGroupHandler(GCPHandler):
                 self._logger.debug("Best-effort instance template cleanup failed for %s", template_name)
 
         return {
-            "terminated_ids": [mig_name],
-            "operations": [{"operation_name": response.name, "mig_name": mig_name}],
+            "terminated_ids": terminated_ids,
+            "operations": operations,
         }
 
     def check_hosts_status(
@@ -133,35 +146,36 @@ class GCPManagedInstanceGroupHandler(GCPHandler):
         instance_ids: list[str],
         context: GCPHandlerContext,
     ) -> list[GCPInstanceStatus]:
-        mig_name = self._require_mig_name(resource_ids, context)
+        mig_names = self._require_mig_names(resource_ids, context)
         scope = str(context.get("scope") or GCPMIGScope.REGIONAL.value)
-        if scope == GCPMIGScope.ZONAL.value:
-            payload = self._compute_client.list_zonal_managed_instances(
-                zone=self._require_zone(context),
-                mig_name=mig_name,
-            )
-        else:
-            payload = self._compute_client.list_regional_managed_instances(
-                region=self._require_region(context),
-                mig_name=mig_name,
-            )
-
         results: list[GCPInstanceStatus] = []
-        for instance in payload:
-            instance_name = instance.instance_url.rsplit("/", 1)[-1]
-            if instance_ids and instance_name not in instance_ids:
-                continue
-            results.append(
-                {
-                    "instance_id": instance_name,
-                    "status": instance.instance_status or instance.current_action or "UNKNOWN",
-                    "provider_data": {
-                        "resource_id": mig_name,
-                        "scope": scope,
-                        "instance_url": instance.instance_url,
-                    },
-                }
-            )
+        for mig_name in mig_names:
+            if scope == GCPMIGScope.ZONAL.value:
+                payload = self._compute_client.list_zonal_managed_instances(
+                    zone=self._require_zone(context),
+                    mig_name=mig_name,
+                )
+            else:
+                payload = self._compute_client.list_regional_managed_instances(
+                    region=self._require_region(context),
+                    mig_name=mig_name,
+                )
+
+            for instance in payload:
+                instance_name = instance.instance_url.rsplit("/", 1)[-1]
+                if instance_ids and instance_name not in instance_ids:
+                    continue
+                results.append(
+                    {
+                        "instance_id": instance_name,
+                        "status": instance.instance_status or instance.current_action or "UNKNOWN",
+                        "provider_data": {
+                            "resource_id": mig_name,
+                            "scope": scope,
+                            "instance_url": instance.instance_url,
+                        },
+                    }
+                )
         return results
 
     def start_instances(
@@ -284,11 +298,71 @@ class GCPManagedInstanceGroupHandler(GCPHandler):
         )
 
     @staticmethod
-    def _require_mig_name(resource_ids: list[str], context: GCPHandlerContext) -> str:
-        mig_name = (resource_ids[0] if resource_ids else None) or context.get("mig_name")
+    def _require_mig_names(resource_ids: list[str], context: GCPHandlerContext) -> list[str]:
+        mig_names = [str(resource_id) for resource_id in resource_ids if resource_id]
+        if mig_names:
+            return mig_names
+        mig_name = context.get("mig_name")
         if not mig_name:
             raise ValueError("MIG operations require a mig resource id")
-        return str(mig_name)
+        return [str(mig_name)]
+
+    def _group_instance_urls_by_mig(
+        self,
+        *,
+        mig_names: list[str],
+        instance_ids: list[str],
+        context: GCPHandlerContext,
+        scope: str,
+    ) -> dict[str, list[str]]:
+        grouped: dict[str, list[str]] = {mig_name: [] for mig_name in mig_names}
+        for instance_id in instance_ids:
+            mig_name, instance_url = self._resolve_instance_membership(
+                mig_names=mig_names,
+                instance_id=instance_id,
+                context=context,
+                scope=scope,
+            )
+            grouped[mig_name].append(instance_url)
+        return {mig_name: urls for mig_name, urls in grouped.items() if urls}
+
+    def _resolve_instance_membership(
+        self,
+        *,
+        mig_names: list[str],
+        instance_id: str,
+        context: GCPHandlerContext,
+        scope: str,
+    ) -> tuple[str, str]:
+        requested_value = str(instance_id)
+        requested_name = requested_value.rsplit("/", 1)[-1]
+        matches: list[tuple[str, str]] = []
+
+        for mig_name in mig_names:
+            if scope == GCPMIGScope.ZONAL.value:
+                payload = self._compute_client.list_zonal_managed_instances(
+                    zone=self._require_zone(context),
+                    mig_name=mig_name,
+                )
+            else:
+                payload = self._compute_client.list_regional_managed_instances(
+                    region=self._require_region(context),
+                    mig_name=mig_name,
+                )
+
+            for instance in payload:
+                instance_url = str(instance.instance_url)
+                instance_name = instance_url.rsplit("/", 1)[-1]
+                if requested_value == instance_url or requested_name == instance_name:
+                    matches.append((mig_name, instance_url))
+
+        if not matches:
+            raise ValueError(f"Could not resolve MIG membership for instance '{requested_value}'")
+        if len(matches) > 1:
+            raise ValueError(
+                f"Instance '{requested_value}' matches multiple MIG resources; use fully qualified instance URLs"
+            )
+        return matches[0]
 
     @staticmethod
     def _require_region(context: GCPHandlerContext) -> str:
