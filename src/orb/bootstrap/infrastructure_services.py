@@ -102,6 +102,19 @@ def _register_template_services(container: DIContainer):
                 "Azure provider module not available; Azure-specific templates will not be registered: %s",
                 exc,
             )
+        try:
+            from orb.providers.gcp.registration import (
+                register_gcp_extensions,
+                register_gcp_template_factory,
+            )
+
+            register_gcp_extensions(c.get(LoggingPort))
+            register_gcp_template_factory(factory, c.get(LoggingPort))
+        except ImportError as exc:
+            c.get(LoggingPort).debug(
+                "GCP provider module not available; GCP-specific templates will not be registered: %s",
+                exc,
+            )
         return factory
 
     from orb.domain.template.factory import TemplateFactory, TemplateFactoryPort

@@ -1,0 +1,63 @@
+"""Factory for GCP runtime handlers."""
+
+from __future__ import annotations
+
+from orb.domain.base.dependency_injection import injectable
+from orb.domain.base.ports import LoggingPort
+from orb.providers.gcp.configuration.config import GCPProviderConfig
+from orb.providers.gcp.domain.template.value_objects import GCPProviderApi
+from orb.providers.gcp.infrastructure.compute_client import GCPComputeClient
+from orb.providers.gcp.infrastructure.handlers.base_handler import GCPHandler
+
+
+@injectable
+class GCPHandlerFactory:
+    """Create and cache GCP handlers keyed by provider API."""
+
+    def __init__(
+        self,
+        compute_client: GCPComputeClient,
+        config: GCPProviderConfig,
+        logger: LoggingPort,
+    ) -> None:
+        self._compute_client = compute_client
+        self._config = config
+        self._logger = logger
+        self._handlers: dict[str, GCPHandler] = {}
+        self._handler_classes: dict[str, type[GCPHandler]] = {}
+        self._register_handler_classes()
+
+    def create_handler(self, handler_type: GCPProviderApi | str) -> GCPHandler:
+        handler_key = handler_type.value if isinstance(handler_type, GCPProviderApi) else handler_type
+        if handler_key in self._handlers:
+            return self._handlers[handler_key]
+
+        try:
+            GCPProviderApi(handler_key)
+        except ValueError as exc:
+            raise ValueError(f"Invalid GCP handler type: {handler_key}") from exc
+
+        handler_class = self._handler_classes.get(handler_key)
+        if handler_class is None:
+            raise ValueError(f"No handler class registered for type: {handler_key}")
+
+        handler = handler_class(
+            compute_client=self._compute_client,
+            config=self._config,
+            logger=self._logger,
+        )
+        self._handlers[handler_key] = handler
+        return handler
+
+    def _register_handler_classes(self) -> None:
+        from orb.providers.gcp.infrastructure.handlers.mig_handler import (
+            GCPManagedInstanceGroupHandler,
+        )
+        from orb.providers.gcp.infrastructure.handlers.single_vm_handler import (
+            GCPSingleVMHandler,
+        )
+
+        self._handler_classes = {
+            GCPProviderApi.MIG.value: GCPManagedInstanceGroupHandler,
+            GCPProviderApi.SINGLE_VM.value: GCPSingleVMHandler,
+        }

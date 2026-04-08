@@ -11,9 +11,11 @@ def register_all_provider_types() -> None:
 
     from orb.providers.aws.registration import register_aws_provider
     from orb.providers.azure.registration import register_azure_provider
+    from orb.providers.gcp.registration import register_gcp_provider
 
     register_aws_provider(registry)
     register_azure_provider(registry, config_port=config_manager)
+    register_gcp_provider(registry)
 
 
 def register_fallback_provider(

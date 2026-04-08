@@ -158,7 +158,6 @@ class ConfigurationLoader:
             from orb.providers.registry import get_provider_registry
 
             registry = get_provider_registry()
-            registry.ensure_provider_type_registered("aws")
             cls._merge_config(merged, registry.collect_defaults())
         except Exception as e:
             get_config_logger().warning("Failed to load provider defaults: %s", e)
