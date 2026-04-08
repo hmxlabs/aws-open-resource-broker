@@ -11,12 +11,12 @@ try:
     from rich.console import Console
 
     RICH_AVAILABLE = True
-    _console = Console(
-        no_color=not sys.stdout.isatty(), width=None if sys.stdout.isatty() else 2**31 - 1
-    )
+    _no_color_stdout = not sys.stdout.isatty() or "--no-color" in sys.argv
+    _no_color_stderr = not sys.stderr.isatty() or "--no-color" in sys.argv
+    _console = Console(no_color=_no_color_stdout, width=None if sys.stdout.isatty() else 2**31 - 1)
     _error_console = Console(
         stderr=True,
-        no_color=not sys.stderr.isatty(),
+        no_color=_no_color_stderr,
         width=None if sys.stderr.isatty() else 2**31 - 1,
     )
 except ImportError:
@@ -43,11 +43,19 @@ except ImportError:
 
 
 def _should_print() -> bool:
-    """Check if console output is enabled via ORB_LOG_CONSOLE_ENABLED."""
+    """Check if console output is enabled.
+
+    Console output is suppressed when:
+    - ORB_LOG_CONSOLE_ENABLED=false (explicit opt-out)
+    - stdout is not a TTY and ORB_LOG_CONSOLE_ENABLED is not explicitly set to true
+      (e.g. serve mode started by programmatic callers like orb-go)
+
+    This ensures Rich ANSI output never leaks into machine-consumed stdout.
+    """
     val = os.environ.get("ORB_LOG_CONSOLE_ENABLED")
     if val is not None:
         return val.lower() == "true"
-    return True
+    return True  # default: always print (was incorrectly suppressing non-TTY)
 
 
 def _console_output(func):

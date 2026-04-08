@@ -127,7 +127,7 @@ class HostFactorySchedulerStrategy(BaseSchedulerStrategy):
         target_provider = provider_override or self._get_provider_name()
         if self._template_defaults_service:
             mapped["provider_api"] = self._template_defaults_service.resolve_provider_api_default(
-                template
+                template, target_provider
             )
             mapped["provider_api"] = self._resolve_api_alias(mapped["provider_api"])
         else:

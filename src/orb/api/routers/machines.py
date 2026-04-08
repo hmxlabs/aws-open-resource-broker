@@ -17,6 +17,7 @@ from orb.api.dependencies import (
     get_return_machines_orchestrator,
 )
 from orb.api.models.base import APIRequest
+from orb.api.models.responses import MachineListResponse, RequestOperationResponse
 from orb.application.services.orchestration.dtos import (
     AcquireMachinesInput,
     GetMachineInput,
@@ -65,6 +66,7 @@ class ReturnMachinesRequest(APIRequest):
     summary="Request Machines",
     description="Request new machines from a template",
     status_code=202,
+    response_model=RequestOperationResponse,
 )
 @handle_rest_exceptions(endpoint="/api/v1/machines/request", method="POST")
 async def request_machines(
@@ -99,7 +101,12 @@ async def request_machines(
     )
 
 
-@router.post("/return", summary="Return Machines", description="Return machines to the provider")
+@router.post(
+    "/return",
+    summary="Return Machines",
+    description="Return machines to the provider",
+    response_model=RequestOperationResponse,
+)
 @handle_rest_exceptions(endpoint="/api/v1/machines/return", method="POST")
 async def return_machines(
     request_data: ReturnMachinesRequest,
@@ -131,7 +138,12 @@ async def return_machines(
     )
 
 
-@router.get("/", summary="List Machines", description="List machines with optional filtering")
+@router.get(
+    "/",
+    summary="List Machines",
+    description="List machines with optional filtering",
+    response_model=MachineListResponse,
+)
 @handle_rest_exceptions(endpoint="/api/v1/machines", method="GET")
 async def list_machines(
     status: Optional[str] = STATUS_QUERY,
@@ -154,7 +166,12 @@ async def list_machines(
     return JSONResponse(content=formatter.format_machine_list(result.machines).data)
 
 
-@router.get("/{machine_id}", summary="Get Machine", description="Get specific machine details")
+@router.get(
+    "/{machine_id}",
+    summary="Get Machine",
+    description="Get specific machine details",
+    response_model=MachineListResponse,
+)
 @handle_rest_exceptions(endpoint="/api/v1/machines/{machine_id}", method="GET")
 async def get_machine(
     machine_id: str,

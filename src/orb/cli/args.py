@@ -9,14 +9,33 @@ import argparse
 import os
 import sys
 
+# Optional: Rich formatting for help text
+import sys as _sys
+
 from orb.domain.machine.machine_status import MachineStatus
 from orb.domain.request.value_objects import RequestStatus
 
-# Optional: Rich formatting for help text
 try:
-    from rich_argparse import RichHelpFormatter  # type: ignore[import-untyped]
+    import rich.console as _rich_console  # type: ignore[import-untyped,import-not-found]
+    from rich_argparse import (  # type: ignore[import-untyped,import-not-found]
+        RichHelpFormatter as _RichHelpFormatter,
+    )
 
-    HELP_FORMATTER = RichHelpFormatter
+    class _TtyAwareFormatter(_RichHelpFormatter):
+        """RichHelpFormatter that produces plain text when stderr is not a TTY."""
+
+        @property
+        def console(self) -> _rich_console.Console:
+            if self._console is None:
+                is_tty = _sys.stderr.isatty() and "--no-color" not in _sys.argv
+                self._console = _rich_console.Console(
+                    stderr=True,
+                    force_terminal=is_tty,
+                    color_system="auto" if is_tty else None,
+                )
+            return self._console
+
+    HELP_FORMATTER = _TtyAwareFormatter
 except ImportError:
     HELP_FORMATTER = argparse.RawDescriptionHelpFormatter
 
@@ -505,6 +524,12 @@ For more information, visit: {DOCS_URL}
     system_serve.add_argument("--workers", type=int, default=1, help="Number of workers")
     system_serve.add_argument("--reload", action="store_true", help="Enable auto-reload")
     system_serve.add_argument("--server-log-level", default="info", help="Server log level")
+    system_serve.add_argument(
+        "--socket-path",
+        dest="socket_path",
+        default=None,
+        help="Unix domain socket path for IPC (alternative to --host/--port, used by programmatic callers like orb-go)",
+    )
 
     # Infrastructure
     infrastructure_parser = subparsers.add_parser("infrastructure", help="Infrastructure discovery")
@@ -658,6 +683,11 @@ For more information, visit: {DOCS_URL}
     init_parser.add_argument("--region", help="AWS region")
     init_parser.add_argument("--profile", help="AWS profile")
     init_parser.add_argument("--config-dir", help="Custom configuration directory")
+    init_parser.add_argument(
+        "--scripts-dir",
+        dest="scripts_dir",
+        help="Directory for ORB scripts (default: derived from config dir or ORB_SCRIPTS_DIR)",
+    )
     init_parser.add_argument(
         "--subnet-ids",
         help="Comma-separated subnet IDs for template_defaults (non-interactive only)",
