@@ -27,6 +27,8 @@ async def handle_serve_api(args) -> dict[str, Any]:
     workers = getattr(args, "workers", 1)
     reload = getattr(args, "reload", False)
     log_level = getattr(args, "server_log_level", "info")
+    socket_path = getattr(args, "socket_path", None)
+    scheduler = getattr(args, "scheduler", None)
 
     try:
         # Import here to avoid circular dependencies
@@ -67,6 +69,8 @@ async def handle_serve_api(args) -> dict[str, Any]:
             server_config.workers = workers
         if log_level:
             server_config.log_level = log_level
+        if scheduler:
+            config_manager.override_scheduler_strategy(scheduler)
 
         # Initialize Application to register providers in the DI container.
         # The CLI path does this via Application.__aenter__, but the REST
@@ -81,29 +85,37 @@ async def handle_serve_api(args) -> dict[str, Any]:
         if not await orb_app.initialize():
             logger.error("Failed to initialize application — providers may not be available")
 
-        logger.info("Starting REST API server on %s:%s", server_config.host, server_config.port)
-        logger.info(
-            "Workers: %s, Reload: %s, Log Level: %s",
-            server_config.workers,
-            reload,
-            server_config.log_level,
-        )
-
         # Create and configure the FastAPI app
         app = create_fastapi_app(server_config)
 
-        # Start the server
-        config = uvicorn.Config(
-            app=app,
-            host=server_config.host,
-            port=server_config.port,
-            workers=(
-                server_config.workers if not reload else 1
-            ),  # Reload mode requires single worker
-            reload=reload,
-            log_level=server_config.log_level,
-            access_log=True,
-        )
+        if socket_path:
+            logger.info("Starting REST API server on Unix socket %s", socket_path)
+            config = uvicorn.Config(
+                app=app,
+                uds=socket_path,
+                workers=1,  # UDS mode requires single worker
+                log_level=log_level,
+                access_log=True,
+            )
+        else:
+            logger.info("Starting REST API server on %s:%s", server_config.host, server_config.port)
+            logger.info(
+                "Workers: %s, Reload: %s, Log Level: %s",
+                server_config.workers,
+                reload,
+                server_config.log_level,
+            )
+            config = uvicorn.Config(
+                app=app,
+                host=server_config.host,
+                port=server_config.port,
+                workers=(
+                    server_config.workers if not reload else 1
+                ),  # Reload mode requires single worker
+                reload=reload,
+                log_level=server_config.log_level,
+                access_log=True,
+            )
 
         server = uvicorn.Server(config)
 
@@ -116,15 +128,19 @@ async def handle_serve_api(args) -> dict[str, Any]:
         signal.signal(signal.SIGINT, signal_handler)
         signal.signal(signal.SIGTERM, signal_handler)
 
+        # Print startup info before blocking — this is the useful message
+        if socket_path:
+            logger.info("ORB REST API listening on unix socket %s", socket_path)
+        else:
+            logger.info(
+                "ORB REST API listening on http://%s:%s", server_config.host, server_config.port
+            )
+
         # Start the server (this blocks until shutdown)
         await server.serve()
 
-        return {
-            "message": "Server started successfully",
-            "host": server_config.host,
-            "port": server_config.port,
-            "workers": server_config.workers,
-        }
+        # Server has shut down — return minimal info for logging
+        return {"message": "Server stopped"}
 
     except Exception as e:
         logger.error("Failed to start server: %s", e, exc_info=True)

@@ -655,8 +655,8 @@ class AWSHandler(ABC):
         errors = {}
 
         # Validate image ID
-        if not template.image_id:
-            errors["imageId"] = "Image ID is required"
+        if not template.image_id and not template.launch_template_id:
+            errors["imageId"] = "Image ID is required when no launchTemplateId is specified"
         # Skip AMI ID format validation as it might have been updated by AWSTemplateAdapter
         # The actual AWS API call will validate the AMI ID format
 

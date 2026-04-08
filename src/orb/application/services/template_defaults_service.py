@@ -264,7 +264,20 @@ class TemplateDefaultsService(TemplateDefaultsPort):
             if hasattr(provider_config, "provider_defaults"):
                 provider_defaults = provider_config.provider_defaults.get(provider_type)  # type: ignore[union-attr]
                 if provider_defaults and hasattr(provider_defaults, "template_defaults"):
-                    return provider_defaults.template_defaults or {}
+                    result = provider_defaults.template_defaults or {}
+                    # Fallback: if no provider_api in template_defaults, read from
+                    # handlers.defaults.default_handler (e.g. the configured default handler name)
+                    if not result.get("provider_api") and hasattr(provider_defaults, "handlers"):
+                        default_handler = (
+                            provider_defaults.handlers.defaults.default_handler
+                            if provider_defaults.handlers
+                            and hasattr(provider_defaults.handlers, "defaults")
+                            else None
+                        )
+                        if default_handler:
+                            result = dict(result)
+                            result["provider_api"] = default_handler
+                    return result
 
             return {}
 

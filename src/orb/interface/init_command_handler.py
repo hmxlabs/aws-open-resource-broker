@@ -30,12 +30,18 @@ async def handle_init(args) -> int:
             run_dir = config_dir.parent
             work_dir = run_dir / "work"
             logs_dir = run_dir / "logs"
-            scripts_dir = run_dir / "scripts"
+            if getattr(args, "scripts_dir", None):
+                scripts_dir = Path(args.scripts_dir)
+            else:
+                scripts_dir = run_dir / "scripts"
         else:
             config_dir = get_config_location()
             work_dir = get_work_location()
             logs_dir = get_logs_location()
-            scripts_dir = get_scripts_location()
+            if getattr(args, "scripts_dir", None):
+                scripts_dir = Path(args.scripts_dir)
+            else:
+                scripts_dir = get_scripts_location()
 
         # Check if already initialized
         config_file = config_dir / "config.json"

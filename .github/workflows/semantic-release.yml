@@ -113,3 +113,11 @@ jobs:
         with:
           github_token: ${{ steps.app-token.outputs.token }}
           tag: ${{ steps.release.outputs.tag }}
+
+      - name: Export OpenAPI spec for Go SDK
+        if: steps.release.outputs.released == 'true'
+        run: make sdk-go-export-spec
+
+      - name: Update Go SDK version
+        if: steps.release.outputs.released == 'true'
+        run: make sdk-go-update-version VERSION=${{ steps.release.outputs.version }}

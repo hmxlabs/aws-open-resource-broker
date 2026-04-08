@@ -1,0 +1,9 @@
+# Go
+/vendor/
+*.test
+*.out
+coverage.txt
+
+# Generated
+internal/generated/
+!internal/generated/.gitkeep
