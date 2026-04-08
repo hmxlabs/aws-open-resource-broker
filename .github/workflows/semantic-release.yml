@@ -132,4 +132,9 @@ jobs:
         run: |
           VERSION="${{ steps.release.outputs.version }}"
           git tag "sdk/go/v${VERSION}"
-          git push origin "sdk/go/v${VERSION}"
+          git push origin "sdk/go/v${VERSION}" || {
+            echo "ERROR: Failed to push Go SDK tag sdk/go/v${VERSION}" >&2
+            echo "Python release v${VERSION} was published but Go SDK tag is missing." >&2
+            echo "Manual fix: git tag sdk/go/v${VERSION} && git push origin sdk/go/v${VERSION}" >&2
+            exit 1
+          }
