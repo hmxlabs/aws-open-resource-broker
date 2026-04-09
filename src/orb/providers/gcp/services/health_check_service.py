@@ -21,7 +21,7 @@ class GCPHealthCheckService:
     def check_health(self) -> ProviderHealthStatus:
         """Perform a lightweight ADC-oriented health check."""
         start_time = time.time()
-        credential_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS") or self._config.credential_file
+        credential_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
         response_time_ms = (time.time() - start_time) * 1000
         if credential_path or os.getenv("GOOGLE_CLOUD_PROJECT") or os.getenv("GCP_PROJECT"):
             return ProviderHealthStatus.healthy(
@@ -63,9 +63,9 @@ class GCPHealthCheckService:
     def get_credential_requirements(self) -> dict:
         """Describe GCP auth requirements."""
         return {
-            "use_application_default_credentials": {
+            "application_default_credentials": {
                 "required": True,
-                "description": "GCP provider supports ADC only",
+                "description": "GCP provider uses Application Default Credentials only",
             }
         }
 

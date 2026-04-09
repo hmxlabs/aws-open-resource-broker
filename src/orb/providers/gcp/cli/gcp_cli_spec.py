@@ -32,12 +32,9 @@ class GCPCLISpec:
         )
 
     def extract_config(self, args: argparse.Namespace) -> dict[str, Any]:
-        # The CLI keeps auth surface aligned with ADC-only provider behavior:
-        # https://cloud.google.com/docs/authentication/application-default-credentials
         config = {
             "project_id": args.gcp_project_id,
             "region": args.gcp_region,
-            "use_application_default_credentials": True,
         }
         if args.gcp_zones:
             config["zones"] = [zone.strip() for zone in args.gcp_zones.split(",") if zone.strip()]

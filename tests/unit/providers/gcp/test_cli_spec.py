@@ -14,7 +14,7 @@ def test_validate_add_requires_project_and_region() -> None:
     assert "--gcp-region is required" in errors
 
 
-def test_extract_config_returns_adc_only_gcp_config() -> None:
+def test_extract_config_returns_gcp_provider_config_fields_only() -> None:
     spec = GCPCLISpec()
 
     config = spec.extract_config(
@@ -37,7 +37,7 @@ def test_extract_config_returns_adc_only_gcp_config() -> None:
     assert config["zones"] == ["us-central1-a", "us-central1-b"]
     assert "service_account_email" not in config
     assert "service_account_scopes" not in config
-    assert config["use_application_default_credentials"] is True
+    assert "use_application_default_credentials" not in config
 
 
 def test_generate_name_uses_project_and_region() -> None:

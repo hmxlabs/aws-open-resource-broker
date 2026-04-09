@@ -19,12 +19,6 @@ def validate_gcp_config(config: GCPProviderConfig) -> dict[str, Any]:
         errors.append("project_id is required for GCP operations")
     if not config.region:
         errors.append("region is required for GCP operations")
-    if config.credential_file:
-        warnings.append(
-            "credential_file is accepted as a path reference only; raw key material must not be persisted "
-            "(ADC reference: https://cloud.google.com/docs/authentication/application-default-credentials)"
-        )
-
     return {"valid": len(errors) == 0, "errors": errors, "warnings": warnings}
 
 
