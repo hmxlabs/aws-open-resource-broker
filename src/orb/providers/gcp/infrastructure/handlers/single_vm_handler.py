@@ -4,7 +4,6 @@ from __future__ import annotations
 
 # noinspection PyTypeHints
 # PyCharm treats google-cloud-compute generated proto classes as Any in annotations here.
-from dataclasses import dataclass, field
 import uuid
 from typing import TYPE_CHECKING, Callable
 
@@ -97,7 +96,7 @@ class GCPSingleVMHandler(GCPHandler):
         """Terminate the targeted standalone VM instances."""
         zone = self._require_zone(context)
         target_ids = instance_ids or resource_ids
-        outcome = self._run_per_instance_mutation(
+        return self._run_per_instance_mutation(
             target_ids=target_ids,
             operation_name="terminate_instance",
             mutation=lambda instance_name: self._compute_client.delete_instance(
@@ -105,7 +104,6 @@ class GCPSingleVMHandler(GCPHandler):
                 instance_name=instance_name,
             ),
         )
-        return outcome.to_mutation_result("terminated_ids")
 
     def check_hosts_status(
         self,
@@ -140,7 +138,7 @@ class GCPSingleVMHandler(GCPHandler):
     ) -> GCPMutationResult:
         """Start the targeted standalone VM instances."""
         zone = self._require_zone(context)
-        outcome = self._run_per_instance_mutation(
+        return self._run_per_instance_mutation(
             target_ids=instance_ids,
             operation_name="start_instance",
             mutation=lambda instance_name: self._compute_client.start_instance(
@@ -148,7 +146,6 @@ class GCPSingleVMHandler(GCPHandler):
                 instance_name=instance_name,
             ),
         )
-        return outcome.to_mutation_result("started_instance_ids")
 
     def stop_instances(
         self,
@@ -158,7 +155,7 @@ class GCPSingleVMHandler(GCPHandler):
     ) -> GCPMutationResult:
         """Stop the targeted standalone VM instances."""
         zone = self._require_zone(context)
-        outcome = self._run_per_instance_mutation(
+        return self._run_per_instance_mutation(
             target_ids=instance_ids,
             operation_name="stop_instance",
             mutation=lambda instance_name: self._compute_client.stop_instance(
@@ -166,7 +163,6 @@ class GCPSingleVMHandler(GCPHandler):
                 instance_name=instance_name,
             ),
         )
-        return outcome.to_mutation_result("stopped_instance_ids")
 
     def _build_instance_payload(self, instance_name: str, template: GCPTemplate) -> Instance:
         from google.cloud import compute_v1
@@ -244,8 +240,12 @@ class GCPSingleVMHandler(GCPHandler):
         target_ids: list[str],
         operation_name: str,
         mutation: Callable[[str], object],
-    ) -> _PerInstanceMutationOutcome:
-        outcome = _PerInstanceMutationOutcome()
+    ) -> GCPMutationResult:
+        result: GCPMutationResult = {
+            "successful_ids": [],
+            "operations": [],
+            "results": {},
+        }
 
         for instance_name in target_ids:
             try:
@@ -256,7 +256,8 @@ class GCPSingleVMHandler(GCPHandler):
                     operation=operation_name,
                     details={"instance_id": instance_name},
                 )
-                outcome.failed_operations.append(
+                failed_operations = result.setdefault("failed_operations", [])
+                failed_operations.append(
                     {
                         "target_id": instance_name,
                         "error_code": translated.error_code,
@@ -264,19 +265,19 @@ class GCPSingleVMHandler(GCPHandler):
                         "operation": operation_name,
                     }
                 )
-                outcome.results[instance_name] = False
+                result["results"][instance_name] = False
                 continue
 
-            outcome.operations.append(
+            result["operations"].append(
                 {
                     "instance_id": instance_name,
                     "operation_name": response.name,
                 }
             )
-            outcome.successful_ids.append(instance_name)
-            outcome.results[instance_name] = True
+            result["successful_ids"].append(instance_name)
+            result["results"][instance_name] = True
 
-        return outcome
+        return result
 
 
 def _recoverable_gcp_operation_exceptions() -> tuple[type[BaseException], ...]:
@@ -285,26 +286,3 @@ def _recoverable_gcp_operation_exceptions() -> tuple[type[BaseException], ...]:
     if google_exceptions is not None:
         exceptions = exceptions + (google_exceptions.GoogleAPICallError,)
     return exceptions
-
-
-@dataclass
-class _PerInstanceMutationOutcome:
-    """Internal normalized outcome before mapping to the public mutation shape."""
-
-    successful_ids: list[str] = field(default_factory=list)
-    operations: list[dict[str, str | None]] = field(default_factory=list)
-    results: dict[str, bool] = field(default_factory=dict)
-    failed_operations: list[GCPFailedOperation] = field(default_factory=list)
-
-    def to_mutation_result(
-        self,
-        success_field: str,
-    ) -> GCPMutationResult:
-        result: GCPMutationResult = {
-            success_field: self.successful_ids,
-            "operations": self.operations,
-            "results": self.results,
-        }
-        if self.failed_operations:
-            result["failed_operations"] = self.failed_operations
-        return result

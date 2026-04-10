@@ -111,12 +111,13 @@ class GCPManagedInstanceGroupHandler(GCPHandler):
                     )
                 operations.append({"operation_name": response.name, "mig_name": mig_name})
             return {
-                "terminated_ids": instance_ids,
+                "successful_ids": instance_ids,
                 "operations": operations,
+                "results": {instance_id: True for instance_id in instance_ids},
             }
 
         operations: list[dict[str, str | None]] = []
-        terminated_ids: list[str] = []
+        successful_ids: list[str] = []
         for mig_name in mig_names:
             if scope == GCPMIGScope.ZONAL.value:
                 response = self._compute_client.delete_zonal_mig(
@@ -129,7 +130,7 @@ class GCPManagedInstanceGroupHandler(GCPHandler):
                     mig_name=mig_name,
                 )
             operations.append({"operation_name": response.name, "mig_name": mig_name})
-            terminated_ids.append(mig_name)
+            successful_ids.append(mig_name)
 
         if template_name:
             try:
@@ -138,8 +139,9 @@ class GCPManagedInstanceGroupHandler(GCPHandler):
                 self._logger.debug("Best-effort instance template cleanup failed for %s", template_name)
 
         return {
-            "terminated_ids": terminated_ids,
+            "successful_ids": successful_ids,
             "operations": operations,
+            "results": {resource_id: True for resource_id in successful_ids},
         }
 
     def check_hosts_status(
@@ -190,7 +192,7 @@ class GCPManagedInstanceGroupHandler(GCPHandler):
     ) -> GCPMutationResult:
         """Report that direct start operations are unsupported for MIG-managed instances."""
         return {
-            "started_instance_ids": [],
+            "successful_ids": [],
             "operations": [],
             "results": {instance_id: False for instance_id in instance_ids},
             "warning": "MIG-managed instances follow group policy; start is not supported directly",
@@ -204,7 +206,7 @@ class GCPManagedInstanceGroupHandler(GCPHandler):
     ) -> GCPMutationResult:
         """Report that direct stop operations are unsupported for MIG-managed instances."""
         return {
-            "stopped_instance_ids": [],
+            "successful_ids": [],
             "operations": [],
             "results": {instance_id: False for instance_id in instance_ids},
             "warning": "MIG-managed instances follow group policy; stop is not supported directly",

@@ -65,9 +65,7 @@ class GCPFailedOperation(TypedDict):
 class GCPMutationResult(TypedDict, total=False):
     """Result returned from GCP mutation operations."""
 
-    terminated_ids: list[str]
-    started_instance_ids: list[str]
-    stopped_instance_ids: list[str]
+    successful_ids: list[str]
     results: dict[str, bool]
     operations: list[dict[str, str | None]]
     failed_operations: list[GCPFailedOperation]

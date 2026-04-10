@@ -231,14 +231,14 @@ class GCPProviderStrategy(ProviderStrategy):
             instance_ids=instance_ids,
             context=context,
         )
-        terminated_ids = result.get("terminated_ids", [])
+        successful_ids = result.get("successful_ids", [])
         failed_operations = result.get("failed_operations", [])
         mutation_results = result.get("results", {})
         return ProviderResult.success_result(
             {
                 "success": not failed_operations,
-                "terminated_count": len(terminated_ids),
-                "terminated_ids": terminated_ids,
+                "successful_count": len(successful_ids),
+                "successful_ids": successful_ids,
                 "results": mutation_results,
                 "failed_operations": failed_operations,
             },

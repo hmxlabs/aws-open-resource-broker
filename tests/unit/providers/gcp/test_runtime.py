@@ -237,7 +237,7 @@ def test_single_vm_handler_start_instances_tracks_partial_failures() -> None:
         context={"zone": "us-central1-a"},
     )
 
-    assert result["started_instance_ids"] == ["vm-a"]
+    assert result["successful_ids"] == ["vm-a"]
     assert result["results"] == {"vm-a": True, "vm-b": False}
     assert result["failed_operations"] == [
         {
@@ -317,7 +317,7 @@ def test_mig_handler_terminates_multiple_resource_ids() -> None:
         context={"region": "us-central1", "scope": "regional"},
     )
 
-    assert result["terminated_ids"] == ["mig-a", "mig-b"]
+    assert result["successful_ids"] == ["mig-a", "mig-b"]
     assert compute_client.deleted_regional_migs == [
         ("us-central1", "mig-a"),
         ("us-central1", "mig-b"),
@@ -388,7 +388,7 @@ def test_mig_handler_terminates_instances_across_multiple_resource_ids() -> None
         context={"project_id": "orb-example-12345", "region": "us-central1", "scope": "regional"},
     )
 
-    assert result["terminated_ids"] == ["vm-a", "vm-b"]
+    assert result["successful_ids"] == ["vm-a", "vm-b"]
     assert compute_client.deleted_regional_managed_instances == [
         (
             "us-central1",
@@ -602,7 +602,8 @@ async def test_strategy_terminate_instances_supports_multiple_mig_resource_ids()
     )
 
     assert result.success is True
-    assert result.data["terminated_count"] == 2
+    assert result.data["successful_count"] == 2
+    assert result.data["successful_ids"] == ["mig-a", "mig-b"]
 
 
 @pytest.mark.asyncio
