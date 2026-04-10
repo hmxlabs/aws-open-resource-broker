@@ -66,7 +66,7 @@ def create_default_azure_credential(
     """Create the canonical Azure DefaultAzureCredential for ORB Azure flows."""
     try:
         from azure.identity import DefaultAzureCredential
-    except ImportError as exc:
+    except ImportError:
         logger.error("azure-identity package is not installed")
         raise
 

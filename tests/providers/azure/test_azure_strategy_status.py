@@ -1,12 +1,9 @@
 """Focused tests for Azure strategy status and discovery flows."""
-
-import threading
 from unittest.mock import MagicMock
 
 from orb.providers.azure.configuration.config import AzureProviderConfig
 from orb.providers.azure.domain.template.value_objects import AzureProviderApi
 from orb.providers.azure.exceptions.azure_exceptions import CycleCloudConnectionError
-from orb.providers.azure.infrastructure.vmss_cleanup import PendingVmssCleanup
 from orb.providers.azure.strategy.azure_provider_strategy import AzureProviderStrategy
 from orb.providers.base.strategy import ProviderOperation, ProviderOperationType
 from tests.providers.azure.strategy_test_support import run_operation

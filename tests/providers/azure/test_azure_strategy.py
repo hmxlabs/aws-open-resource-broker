@@ -7,13 +7,10 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from orb.providers.azure.configuration.config import AzureProviderConfig
 from orb.providers.azure.domain.template.azure_template_aggregate import AzureTemplate
-from orb.providers.azure.domain.template.value_objects import AzureProviderApi
 from orb.providers.azure.infrastructure.services.spot_placement_score_adapter import (
     AzureSpotPlacementScoreAdapter,
 )
-import orb.providers.azure.strategy.azure_provider_strategy as azure_strategy_module
 from orb.providers.azure.strategy.azure_provider_strategy import AzureProviderStrategy
 from orb.providers.base.strategy import (
     ProviderOperation,
