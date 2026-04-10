@@ -192,6 +192,7 @@ class GCPManagedInstanceGroupHandler(GCPHandler):
         return {
             "started_instance_ids": [],
             "operations": [],
+            "results": {instance_id: False for instance_id in instance_ids},
             "warning": "MIG-managed instances follow group policy; start is not supported directly",
         }
 
@@ -205,6 +206,7 @@ class GCPManagedInstanceGroupHandler(GCPHandler):
         return {
             "stopped_instance_ids": [],
             "operations": [],
+            "results": {instance_id: False for instance_id in instance_ids},
             "warning": "MIG-managed instances follow group policy; stop is not supported directly",
         }
 

@@ -199,6 +199,7 @@ class GCPProviderStrategy(ProviderStrategy):
         )
         request.provider_api = gcp_template.provider_api.value
         handler_result = handler.acquire_hosts(request, gcp_template)
+        failed_operations = handler_result.get("failed_operations", [])
         return ProviderResult.success_result(
             {
                 "resource_ids": handler_result.get("resource_ids", []),
@@ -206,11 +207,17 @@ class GCPProviderStrategy(ProviderStrategy):
                 "provider_api": gcp_template.provider_api.value,
                 "count": count,
                 "template_id": gcp_template.template_id,
+                "failed_operations": failed_operations,
+                "results": {
+                    **{instance["instance_id"]: True for instance in handler_result.get("instances", [])},
+                    **{failure["target_id"]: False for failure in failed_operations},
+                },
             },
             {
                 "operation": "create_instances",
                 "handler_used": gcp_template.provider_api.value,
                 "provider_data": handler_result.get("provider_data", {}),
+                "partial_failure": bool(failed_operations),
             },
         )
 
@@ -225,13 +232,22 @@ class GCPProviderStrategy(ProviderStrategy):
             context=context,
         )
         terminated_ids = result.get("terminated_ids", [])
+        failed_operations = result.get("failed_operations", [])
+        mutation_results = result.get("results", {})
         return ProviderResult.success_result(
-            {"success": True, "terminated_count": len(terminated_ids)},
+            {
+                "success": not failed_operations,
+                "terminated_count": len(terminated_ids),
+                "terminated_ids": terminated_ids,
+                "results": mutation_results,
+                "failed_operations": failed_operations,
+            },
             {
                 "operation": "terminate_instances",
                 "instance_ids": instance_ids,
                 "resource_ids": resource_ids,
                 "provider_data": result,
+                "partial_failure": bool(failed_operations),
             },
         )
 
@@ -282,7 +298,13 @@ class GCPProviderStrategy(ProviderStrategy):
             instance_ids=operation.parameters.get("instance_ids", []) or [],
             context=self._build_handler_context(operation),
         )
-        return ProviderResult.success_result(result, {"operation": "start_instances"})
+        return ProviderResult.success_result(
+            result,
+            {
+                "operation": "start_instances",
+                "partial_failure": bool(result.get("failed_operations", [])),
+            },
+        )
 
     def _handle_stop_instances(self, operation: ProviderOperation) -> ProviderResult:
         handler = self._get_handler_for_operation(operation)
@@ -290,7 +312,13 @@ class GCPProviderStrategy(ProviderStrategy):
             instance_ids=operation.parameters.get("instance_ids", []) or [],
             context=self._build_handler_context(operation),
         )
-        return ProviderResult.success_result(result, {"operation": "stop_instances"})
+        return ProviderResult.success_result(
+            result,
+            {
+                "operation": "stop_instances",
+                "partial_failure": bool(result.get("failed_operations", [])),
+            },
+        )
 
     def _build_gcp_template_config(
         self,

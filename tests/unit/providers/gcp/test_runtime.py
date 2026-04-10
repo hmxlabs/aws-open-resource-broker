@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import uuid
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -34,8 +35,14 @@ class _ComputeClientStub:
         self.deleted_regional_migs: list[tuple[str, str]] = []
         self.deleted_regional_managed_instances: list[tuple[str, str, list[str]]] = []
         self.regional_managed_instances: dict[str, list[object]] = {}
+        self.fail_create_instance_for: set[str] = set()
+        self.fail_start_instance_for: set[str] = set()
+        self.fail_stop_instance_for: set[str] = set()
+        self.fail_delete_instance_for: set[str] = set()
 
     def create_instance(self, *, zone: str, body: object) -> object:
+        if body.name in self.fail_create_instance_for:
+            raise google_exceptions.ResourceExhausted("quota exhausted")
         self.created_instances.append((zone, body))
         return SimpleNamespace(name=f"op-{body.name}", status="PENDING", target_link=None)
 
@@ -76,6 +83,24 @@ class _ComputeClientStub:
     def list_regional_managed_instances(self, *, region: str, mig_name: str) -> list[object]:
         _ = region
         return self.regional_managed_instances.get(mig_name, [])
+
+    def start_instance(self, *, zone: str, instance_name: str) -> object:
+        _ = zone
+        if instance_name in self.fail_start_instance_for:
+            raise google_exceptions.ServiceUnavailable("service unavailable")
+        return SimpleNamespace(name=f"start-{instance_name}")
+
+    def stop_instance(self, *, zone: str, instance_name: str) -> object:
+        _ = zone
+        if instance_name in self.fail_stop_instance_for:
+            raise google_exceptions.ServiceUnavailable("service unavailable")
+        return SimpleNamespace(name=f"stop-{instance_name}")
+
+    def delete_instance(self, *, zone: str, instance_name: str) -> object:
+        _ = zone
+        if instance_name in self.fail_delete_instance_for:
+            raise google_exceptions.NotFound("instance was not found")
+        return SimpleNamespace(name=f"delete-{instance_name}")
 
 
 def _config(**overrides: object) -> GCPProviderConfig:
@@ -146,6 +171,99 @@ def test_single_vm_handler_acquire_hosts_submits_instance_creation() -> None:
     assert len(result["resource_ids"]) == 1
     assert result["provider_data"]["zone"] == "us-central1-a"
     assert compute_client.created_instances[0][0] == "us-central1-a"
+
+
+def test_single_vm_handler_acquire_hosts_tracks_partial_failures() -> None:
+    compute_client = _ComputeClientStub()
+    logger = MagicMock()
+    handler = GCPSingleVMHandler(
+        compute_client=compute_client,
+        config=_config(),
+        logger=logger,
+    )
+    request = Request.create_new_request(
+        request_type=RequestType.ACQUIRE,
+        template_id="gcp-single",
+        machine_count=2,
+        provider_type="gcp",
+    )
+    template = GCPTemplate.model_validate(
+        {
+            "template_id": "gcp-single",
+            "provider_type": "gcp",
+            "provider_api": "SingleVM",
+            "project_id": "orb-example-12345",
+            "region": "us-central1",
+            "zones": ["us-central1-a"],
+            "instance_type": "e2-standard-4",
+            "max_instances": 1,
+            "source_image_family": "debian-12",
+            "source_image_project": "debian-cloud",
+        }
+    )
+    failing_name = "gcp-gcp-single-deadbeef"
+    compute_client.fail_create_instance_for = {failing_name}
+    generated = [
+        SimpleNamespace(hex="deadbeefcafebabe"),
+        SimpleNamespace(hex="cafebabedeadbeef"),
+    ]
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(
+            uuid,
+            "uuid4",
+            lambda: generated.pop(0) if generated else SimpleNamespace(hex="feedfacecafebeef"),
+        )
+        result = handler.acquire_hosts(request, template)
+
+    assert result["provider_data"]["partial_failure"] is True
+    assert result["provider_data"]["submitted_count"] == 1
+    assert result["failed_operations"][0]["target_id"] == failing_name
+    assert result["failed_operations"][0]["error_code"] == "GCPQuotaExceededError"
+    assert len(result["resource_ids"]) == 1
+
+
+def test_single_vm_handler_start_instances_tracks_partial_failures() -> None:
+    compute_client = _ComputeClientStub()
+    compute_client.fail_start_instance_for = {"vm-b"}
+    handler = GCPSingleVMHandler(
+        compute_client=compute_client,
+        config=_config(),
+        logger=MagicMock(),
+    )
+
+    result = handler.start_instances(
+        instance_ids=["vm-a", "vm-b"],
+        context={"zone": "us-central1-a"},
+    )
+
+    assert result["started_instance_ids"] == ["vm-a"]
+    assert result["results"] == {"vm-a": True, "vm-b": False}
+    assert result["failed_operations"] == [
+        {
+            "target_id": "vm-b",
+            "error_code": "GCPNetworkError",
+            "error_message": "503 service unavailable",
+            "operation": "start_instance",
+        }
+    ]
+
+
+def test_mig_handler_start_instances_returns_failed_results_for_unsupported_targets() -> None:
+    compute_client = _ComputeClientStub()
+    handler = GCPManagedInstanceGroupHandler(
+        compute_client=compute_client,
+        config=_config(),
+        logger=MagicMock(),
+    )
+
+    result = handler.start_instances(
+        instance_ids=["vm-a", "vm-b"],
+        context={"region": "us-central1", "scope": "regional"},
+    )
+
+    assert result["results"] == {"vm-a": False, "vm-b": False}
+    assert result["warning"].startswith("MIG-managed instances follow group policy")
 
 
 def test_mig_handler_acquire_hosts_submits_template_and_group() -> None:
@@ -485,6 +603,34 @@ async def test_strategy_terminate_instances_supports_multiple_mig_resource_ids()
 
     assert result.success is True
     assert result.data["terminated_count"] == 2
+
+
+@pytest.mark.asyncio
+async def test_strategy_start_instances_surfaces_partial_results() -> None:
+    strategy = GCPProviderStrategy(config=_config(), logger=MagicMock(), provider_name="gcp-default")
+    assert strategy.initialize() is True
+    strategy._compute_client = _ComputeClientStub()
+    strategy._handler_factory = GCPHandlerFactory(
+        compute_client=strategy._compute_client,
+        config=_config(),
+        logger=MagicMock(),
+    )
+    strategy._compute_client.fail_start_instance_for = {"vm-b"}
+
+    result = await strategy.execute_operation(
+        ProviderOperation(
+            operation_type=ProviderOperationType.START_INSTANCES,
+            parameters={
+                "provider_api": "SingleVM",
+                "instance_ids": ["vm-a", "vm-b"],
+                "request_metadata": {"zone": "us-central1-a"},
+            },
+        )
+    )
+
+    assert result.success is True
+    assert result.data["results"] == {"vm-a": True, "vm-b": False}
+    assert result.metadata["partial_failure"] is True
 
 
 @pytest.mark.asyncio

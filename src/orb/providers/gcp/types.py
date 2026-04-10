@@ -44,12 +44,22 @@ class GCPInstanceStatus(TypedDict):
     provider_data: dict[str, str]
 
 
-class GCPCreateHandlerResult(TypedDict):
+class GCPCreateHandlerResult(TypedDict, total=False):
     """Result returned from a GCP acquire_hosts operation."""
 
     resource_ids: list[str]
     instances: list[GCPInstanceStatus]
-    provider_data: dict[str, str | int]
+    provider_data: dict[str, str | int | bool]
+    failed_operations: list[GCPFailedOperation]
+
+
+class GCPFailedOperation(TypedDict):
+    """Structured failure record for a per-target GCP batch operation."""
+
+    target_id: str
+    error_code: str
+    error_message: str
+    operation: str
 
 
 class GCPMutationResult(TypedDict, total=False):
@@ -58,5 +68,7 @@ class GCPMutationResult(TypedDict, total=False):
     terminated_ids: list[str]
     started_instance_ids: list[str]
     stopped_instance_ids: list[str]
+    results: dict[str, bool]
     operations: list[dict[str, str | None]]
+    failed_operations: list[GCPFailedOperation]
     warning: str
