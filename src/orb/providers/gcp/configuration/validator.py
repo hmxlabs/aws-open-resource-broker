@@ -1,4 +1,4 @@
-"""GCP configuration and template validation helpers."""
+"""GCP template validation helpers."""
 
 from __future__ import annotations
 
@@ -6,20 +6,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from orb.providers.gcp.configuration.config import GCPProviderConfig
 from orb.providers.gcp.domain.template.gcp_template_aggregate import GCPTemplate
-
-
-def validate_gcp_config(config: GCPProviderConfig) -> dict[str, Any]:
-    """Validate GCP provider configuration."""
-    errors: list[str] = []
-    warnings: list[str] = []
-
-    if not config.project_id:
-        errors.append("project_id is required for GCP operations")
-    if not config.region:
-        errors.append("region is required for GCP operations")
-    return {"valid": len(errors) == 0, "errors": errors, "warnings": warnings}
 
 
 def validate_gcp_template(template_config: dict[str, Any]) -> dict[str, Any]:
