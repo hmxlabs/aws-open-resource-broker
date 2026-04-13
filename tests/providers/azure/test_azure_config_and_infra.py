@@ -1,7 +1,5 @@
 """Tests for Azure configuration, registration, and resilience behavior."""
 
-import types
-
 import pytest
 from azure.core.exceptions import HttpResponseError, ServiceRequestError
 from unittest.mock import MagicMock, Mock, patch
@@ -18,7 +16,6 @@ from orb.providers.azure.configuration.validator import (
 )
 from orb.providers.azure.configuration.template_extension import AzureTemplateExtensionConfig
 from orb.providers.azure.exceptions.azure_exceptions import (
-    AzureConfigurationError,
     RateLimitError,
 )
 from orb.providers.azure.domain.template.value_objects import AzureProviderApi

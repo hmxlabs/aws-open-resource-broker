@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any, Optional, Protocol
 
 from orb.domain.base.ports import LoggingPort
 
@@ -27,6 +27,27 @@ class VmssCapacitySnapshot:
         }
 
 
+class AzureResourceManagerProtocol(Protocol):
+    """Structural subset of AzureResourceManager used for metadata enrichment."""
+
+    def get_vmss_capacity(self, resource_group: str, vmss_name: str) -> dict[str, object]:
+        """Return VMSS capacity details for one scale set."""
+        ...
+
+
+class AzureDeploymentStatusServiceProtocol(Protocol):
+    """Structural subset of AzureDeploymentService used for deployment status enrichment."""
+
+    def get_deployment_status(
+        self,
+        *,
+        resource_group: str,
+        deployment_name: str,
+    ) -> Optional[dict[str, object]]:
+        """Return deployment provisioning/error state for one ARM deployment."""
+        ...
+
+
 class AzureResourceMetadataService:
     """Own Azure-specific metadata enrichment for discovery/status flows."""
 
@@ -48,7 +69,7 @@ class AzureResourceMetadataService:
         metadata: dict[str, Any],
         resource_ids: list[str],
         *,
-        resource_manager: Any,
+        resource_manager: AzureResourceManagerProtocol | None,
         resource_group: Optional[str] = None,
     ) -> None:
         """Enrich metadata with aggregate VMSS capacity fulfilment from live scale sets."""
@@ -80,7 +101,7 @@ class AzureResourceMetadataService:
         *,
         resource_group: str,
         resource_ids: list[str],
-        resource_manager: Any,
+        resource_manager: AzureResourceManagerProtocol,
     ) -> dict[str, VmssCapacitySnapshot]:
         per_resource_capacity: dict[str, VmssCapacitySnapshot] = {}
         for vmss_name in self._dedupe_resource_ids(resource_ids):
@@ -98,7 +119,7 @@ class AzureResourceMetadataService:
         *,
         resource_group: str,
         vmss_name: str,
-        resource_manager: Any,
+        resource_manager: AzureResourceManagerProtocol,
     ) -> Optional[VmssCapacitySnapshot]:
         try:
             capacity_info = resource_manager.get_vmss_capacity(resource_group, vmss_name)
@@ -146,7 +167,7 @@ class AzureResourceMetadataService:
         request_metadata: dict[str, Any],
         *,
         resource_group: Optional[str],
-        deployment_service: Any,
+        deployment_service: AzureDeploymentStatusServiceProtocol | None,
     ) -> None:
         """Enrich metadata with ARM deployment status for single-VM resources."""
         deployment_name = request_metadata.get("deployment_name")

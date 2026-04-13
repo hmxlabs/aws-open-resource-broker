@@ -45,7 +45,7 @@ class CycleCloudCredentialData:
     aad_scope: Optional[str] = None
 
     @classmethod
-    def from_mapping(cls, data: dict[str, Any]) -> "CycleCloudCredentialData":
+    def from_mapping(cls, data: dict[str, Any]) -> CycleCloudCredentialData:
         """Construct credential data from a flat config mapping."""
         return cls(
             url=_mapping_value(data, "cyclecloud_url", "url"),
@@ -87,7 +87,7 @@ class CycleCloudRequestContext:
     cyclecloud_aad_scope: Optional[str] = None
 
     @classmethod
-    def from_mapping(cls, data: Optional[dict[str, Any]]) -> "CycleCloudRequestContext":
+    def from_mapping(cls, data: Optional[dict[str, Any]]) -> CycleCloudRequestContext:
         """Construct a request context from an optional metadata mapping."""
         if not data:
             return cls()

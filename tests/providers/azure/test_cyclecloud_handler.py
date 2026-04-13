@@ -6,13 +6,10 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 import requests
-from azure.core.exceptions import ClientAuthenticationError
-from azure.identity import CredentialUnavailableError
 
 from orb.providers.azure.configuration.config import AzureProviderConfig
 from orb.providers.azure.domain.template.azure_template_aggregate import AzureTemplate
 from orb.providers.azure.exceptions.azure_exceptions import (
-    AuthenticationError,
     CycleCloudConnectionError,
     CycleCloudNodeError,
     TerminationError,
@@ -68,25 +65,6 @@ def _make_request(count=2, resource_ids=None, metadata=None):
     req.resource_ids = resource_ids or []
     req.metadata = metadata or {}
     return req
-
-
-def _make_cc_builder(*, handler, credential=None, request_context=None):
-    token_provider = None
-    if credential is not None:
-        token_provider = MagicMock()
-        token_provider.get_access_token.side_effect = lambda scope: credential.get_token(scope).token
-        token_provider.get_auth_error_types.return_value = (
-            CredentialUnavailableError,
-            ClientAuthenticationError,
-        )
-    return CycleCloudSessionBuilder(
-        cc_url="https://cc.example.com",
-        verify_ssl=True,
-        template=None,
-        request_context=request_context or CycleCloudRequestContext(),
-        provider_cfg=handler.azure_client.get_provider_config(),
-        token_provider=token_provider,
-    )
 
 
 def _make_cc_request_context(**values):

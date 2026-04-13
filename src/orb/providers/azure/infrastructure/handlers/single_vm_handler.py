@@ -29,7 +29,12 @@ from orb.providers.azure.infrastructure.handlers._network_identity import (
     network_identity_soft_failure_types,
 )
 from orb.providers.azure.infrastructure.handlers.azure_status import resolve_power_state
-from orb.providers.azure.infrastructure.handlers.azure_handler import AzureHandler
+from orb.providers.azure.infrastructure.handlers.azure_handler import (
+    AzureAcquireHostsResult,
+    AzureHandler,
+    AzureHandlerStatusResult,
+    AzureReleaseHostsResult,
+)
 
 
 def _looks_like_uuid(value: str) -> bool:
@@ -70,7 +75,7 @@ class SingleVMHandler(AzureHandler):
 
     def acquire_hosts(
         self, request: Request, template: AzureTemplate
-    ) -> dict[str, Any]:
+    ) -> AzureAcquireHostsResult:
         """Create one or more individual VMs.
 
         VM create operations are submitted and tracked via later status checks,
@@ -281,7 +286,7 @@ class SingleVMHandler(AzureHandler):
             },
         }
 
-    def check_hosts_status(self, request: Request) -> list[dict[str, Any]]:
+    def check_hosts_status(self, request: Request) -> list[AzureHandlerStatusResult]:
         """Return status for individual VM IDs."""
         resource_ids: list[str] = request.resource_ids or []
         resource_group = (
@@ -292,7 +297,7 @@ class SingleVMHandler(AzureHandler):
             self._logger.error("Cannot resolve resource_group for status check")
             return []
 
-        results: list[dict[str, Any]] = []
+        results: list[AzureHandlerStatusResult] = []
         compute = self.azure_client.compute_client
         resolved_vm_names = self._resolve_vm_names(resource_group, resource_ids)
 
@@ -351,7 +356,7 @@ class SingleVMHandler(AzureHandler):
         machine_ids: list[str],
         resource_id: str,
         context: Optional[dict[str, Any]] = None,
-    ) -> Optional[dict[str, Any]]:
+    ) -> Optional[AzureReleaseHostsResult]:
         """Submit deletion for individual VMs.
 
         Azure-native delete options are set on attached resources during

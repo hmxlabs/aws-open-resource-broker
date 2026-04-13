@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from typing import Any, Callable, Mapping, Optional
+from typing import Any, Callable, Mapping, Optional, Protocol
 
 from orb.application.services.spot_placement_execution import (
+    SpotPlacementExecutionSummary,
     build_planned_execution_metadata,
     create_acquire_request,
 )
@@ -18,6 +19,7 @@ from orb.domain.base.ports import LoggingPort
 from orb.providers.azure.configuration.config import AzureProviderConfig
 from orb.providers.azure.domain.template.azure_template_aggregate import AzureTemplate
 from orb.providers.azure.domain.template.value_objects import AzureProviderApi
+from orb.providers.azure.infrastructure.azure_client import AzureClient
 from orb.providers.azure.infrastructure.handlers.azure_handler import AzureHandler
 from orb.providers.azure.infrastructure.services.spot_placement_score_adapter import (
     AzureSpotPlacementScoreAdapter,
@@ -26,6 +28,22 @@ from orb.providers.base.strategy import ProviderOperation, ProviderResult
 
 
 AzureProviderApiRef = AzureProviderApi | str
+
+
+class SpotPlacementExecutionPort(Protocol):
+    """Structural subset of SpotPlacementExecutionService used by Azure spot launches."""
+
+    def execute_plan(
+        self,
+        plan: list[PlacementPlanEntry],
+        total_count: int,
+        build_child_template: Callable[[PlacementPlanEntry], Any],
+        build_child_request: Callable[[int, int], object],
+        launch_child: Callable[[object, object], Mapping[str, Any]],
+        is_capacity_like_failure: Callable[[dict[str, Any]], bool],
+    ) -> SpotPlacementExecutionSummary:
+        """Execute a placement plan and return the aggregated execution summary."""
+        ...
 
 
 class AzureSpotLaunchService:
@@ -37,7 +55,7 @@ class AzureSpotLaunchService:
         config: AzureProviderConfig,
         logger: LoggingPort,
         planner: SpotPlacementPlanner,
-        execution_service: Any,
+        execution_service: SpotPlacementExecutionPort,
     ) -> None:
         self._config = config
         self._logger = logger
@@ -54,7 +72,7 @@ class AzureSpotLaunchService:
         *,
         azure_template: AzureTemplate,
         count: int,
-        azure_client: Any,
+        azure_client: AzureClient | None,
     ) -> list[PlacementPlanEntry]:
         """Score candidate regions/zones and build a placement plan for spot launches."""
         adapter = AzureSpotPlacementScoreAdapter(
@@ -182,7 +200,7 @@ class AzureSpotLaunchService:
         operation: ProviderOperation,
         provider_instance_name: str,
         handler: Optional[AzureHandler],
-        azure_client: Any,
+        azure_client: AzureClient | None,
         plan_override: Optional[list[PlacementPlanEntry]] = None,
         capacity_like_failure_checker: Optional[Callable[[dict[str, Any]], bool]] = None,
     ) -> ProviderResult:
