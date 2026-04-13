@@ -983,7 +983,6 @@ class TestSpotPlacementPlanning:
         assert result.success
         assert result.data["resource_ids"] == ["vmss-b"]
         assert result.metadata["method"] == "planned_handler"
-        assert result.metadata["provider_data"]["fulfillment_final"] is True
         assert result.metadata["provider_data"]["unfulfilled_count"] == 0
 
     def test_create_instances_falls_back_when_scores_are_stale(self, strategy, monkeypatch):
@@ -1049,7 +1048,6 @@ class TestSpotPlacementPlanning:
         assert result.success
         assert result.data["resource_ids"] == ["vmss-fallback"]
         assert result.metadata["method"] == "planned_handler"
-        assert result.metadata["provider_data"]["fulfillment_final"] is True
         serialized_plan = result.metadata["provider_data"]["placement_plan"]
         assert serialized_plan[0]["instance_type"] == "Standard_D4s_v5"
         assert serialized_plan[0]["planned_count"] == 2

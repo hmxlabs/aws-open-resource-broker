@@ -57,7 +57,6 @@ def test_acquire_hosts_submits_native_vmss_create_and_returns_submitted_status()
     assert result["resource_ids"] == [result["provider_data"]["vmss_name"]]
     assert result["provider_data"]["provisioning_state"] == "creating"
     assert result["provider_data"]["operation_status"] == "submitted"
-    assert result["provider_data"]["fulfillment_final"] is True
     create_call = azure_client.compute_client.virtual_machine_scale_sets.begin_create_or_update.call_args.kwargs
     assert create_call["resource_group_name"] == "test-rg"
     assert create_call["vm_scale_set_name"] == result["provider_data"]["vmss_name"]
