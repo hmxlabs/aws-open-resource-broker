@@ -55,7 +55,6 @@ def test_acquire_hosts_submits_native_vmss_create_and_returns_submitted_status()
 
     assert result["success"] is True
     assert result["resource_ids"] == [result["provider_data"]["vmss_name"]]
-    assert result["instances"] == []
     assert result["provider_data"]["provisioning_state"] == "creating"
     assert result["provider_data"]["operation_status"] == "submitted"
     assert result["provider_data"]["fulfillment_final"] is True

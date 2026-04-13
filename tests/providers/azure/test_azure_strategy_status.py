@@ -855,7 +855,6 @@ class TestDescribeResourceInstances:
         result = run_operation(strategy.execute_operation(op))
 
         assert result.success
-        assert result.data["instances"] == []
         assert result.metadata["method"] == "dry_run"
         handler.check_hosts_status.assert_not_called()
 

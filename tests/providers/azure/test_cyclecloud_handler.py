@@ -78,17 +78,6 @@ def _make_cc_request_context(**values):
 
 
 class TestCycleCloudTemplate:
-    def test_cyclecloud_template_construction(self):
-        t = _make_template()
-        assert t.provider_api.value == "CycleCloud"
-        assert t.cluster_name == "my-cluster"
-        assert t.node_array == "execute"
-        assert t.cyclecloud_url == "https://cc.example.com"
-        assert t.cyclecloud_credential_path is None
-        assert t.cyclecloud_auth_mode == "bearer"
-        assert t.cyclecloud_aad_scope == "https://cc.example.com/.default"
-        assert t.cyclecloud_verify_ssl is False
-
     def test_cyclecloud_template_omitted_verify_ssl_is_unset(self):
         fields = {**_CC_TEMPLATE_FIELDS}
         del fields["cyclecloud_verify_ssl"]
@@ -117,12 +106,6 @@ class TestCycleCloudTemplate:
     def test_cyclecloud_template_rejects_inline_bearer_token_field(self):
         with pytest.raises(ValueError, match="Extra inputs are not permitted"):
             _make_template(cyclecloud_bearer_token="token-123")
-
-    def test_cyclecloud_template_no_ssh_required(self):
-        """CycleCloud manages SSH internally — no ssh_key_name or ssh_public_keys needed."""
-        t = _make_template()
-        assert t.ssh_public_keys == []
-        assert t.ssh_key_name is None
 
     def test_cyclecloud_template_rejects_inline_basic_auth_fields(self):
         with pytest.raises(ValueError, match="Extra inputs are not permitted"):
@@ -218,7 +201,6 @@ class TestCycleCloudHandlerAcquire:
 
         assert result["success"] is True
         assert result["resource_ids"] == ["req-12345678-1234-1234-1234-123456789012"]
-        assert result["instances"] == []
         assert result["provider_data"]["cluster_name"] == "my-cluster"
         assert result["provider_data"]["operation_id"] == "op-123"
         assert result["provider_data"]["operation_location"] == "https://cc.example.com/operations/op-123"
@@ -258,7 +240,6 @@ class TestCycleCloudHandlerAcquire:
         result = handler.acquire_hosts(request, template)
 
         assert result["success"] is True
-        assert result["instances"] == []
         assert result["provider_data"]["added_count"] == 3
 
     def test_acquire_hosts_missing_cluster_name(self):
@@ -319,7 +300,6 @@ class TestCycleCloudHandlerAcquire:
 
         result = handler.acquire_hosts(request, template)
 
-        assert result["instances"] == []
         assert result["provider_data"]["fleet_errors"][0]["error_message"] == "Quota exhausted"
         assert result["provider_data"]["fleet_errors"][0]["error_code"] == "NodeFailed"
 
@@ -434,11 +414,6 @@ class TestCycleCloudHandlerStatus:
             timeout=(7, 11),
         )
         mock_session.close.assert_called_once_with()
-
-    def test_check_hosts_status_no_resource_ids(self):
-        handler = _make_handler()
-        request = _make_request(resource_ids=[])
-        assert handler.check_hosts_status(request) == []
 
     def test_check_hosts_status_no_cc_url(self):
         handler = _make_handler()

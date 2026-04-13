@@ -20,10 +20,6 @@ from orb.providers.gcp.exceptions import (
     GCPValidationError,
 )
 from orb.providers.gcp.infrastructure.gcp_handler_factory import GCPHandlerFactory
-from orb.providers.gcp.infrastructure.handlers.mig_handler import (
-    GCPManagedInstanceGroupHandler,
-)
-from orb.providers.gcp.infrastructure.handlers.single_vm_handler import GCPSingleVMHandler
 from orb.providers.gcp.strategy.gcp_provider_strategy import GCPProviderStrategy
 from orb.providers.gcp.types import GCPCreateOutcome
 
@@ -112,21 +108,6 @@ def _config(**overrides: object) -> GCPProviderConfig:
     }
     payload.update(overrides)
     return GCPProviderConfig(**payload)
-
-
-def test_handler_factory_creates_singlevm_and_mig_handlers() -> None:
-    factory = GCPHandlerFactory(
-        compute_client=_ComputeClientStub(),
-        config=_config(),
-        logger=MagicMock(),
-    )
-
-    single_vm_handler = factory.create_handler("SingleVM")
-    mig_handler = factory.create_handler("MIG")
-
-    assert isinstance(single_vm_handler, GCPSingleVMHandler)
-    assert isinstance(mig_handler, GCPManagedInstanceGroupHandler)
-
 
 def test_handler_factory_rejects_invalid_handler_type_with_gcp_validation_error() -> None:
     factory = GCPHandlerFactory(

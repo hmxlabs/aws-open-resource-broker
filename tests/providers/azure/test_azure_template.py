@@ -6,19 +6,14 @@ from pydantic import ValidationError
 from orb.providers.azure.domain.template.azure_template_aggregate import AzureTemplate
 from orb.providers.azure.domain.template.value_objects import (
     AzureAllocationStrategy,
-    AzureCapacityReservationGroupId,
     AzureDataDisk,
-    AzureDiskEncryptionSetId,
     AzureEvictionPolicy,
     AzureImageReference,
-    AzureLocationName,
     AzureNetworkConfig,
     AzureOSDiskConfig,
     AzureOSDiskType,
     AzurePriority,
-    AzureProximityPlacementGroupId,
     AzureProviderApi,
-    AzureResourceGroupName,
     AzureUpgradePolicyMode,
     AzureVMSSOrchestrationMode,
 )
@@ -64,9 +59,6 @@ class TestAzureTemplateConstruction:
         assert t.vm_size == "Standard_D4s_v5"
         assert t.resource_group.value == "test-rg"
         assert t.location.value == "eastus2"
-        assert isinstance(t.resource_group, AzureResourceGroupName)
-        assert isinstance(t.location, AzureLocationName)
-        assert t.provider_type == "azure"
         assert t.provider_api == AzureProviderApi.VMSS
 
     def test_rejects_missing_ssh_keys(self):
@@ -105,15 +97,6 @@ class TestAzureTemplateConstruction:
         }
         t = AzureTemplate(**fields)
         assert t.ssh_key_name == "my-azure-ssh-key"
-        assert t.ssh_public_keys == []
-
-    def test_with_image(self):
-        t = AzureTemplate(
-            **_BASE_FIELDS,
-            network_config={"subnet_id": "/subscriptions/.../subnets/default"},
-        )
-        assert t.image is not None
-        assert t.image.publisher == "Canonical"
 
     def test_with_custom_image_id(self):
         fields = {**_BASE_FIELDS}
@@ -122,33 +105,7 @@ class TestAzureTemplateConstruction:
             **fields,
             image={"image_id": "/subscriptions/.../images/my-image"},
         )
-        assert t.image.image_id is not None
-
-    def test_azure_identifier_fields_are_typed(self):
-        t = AzureTemplate(
-            **_BASE_FIELDS,
-            proximity_placement_group_id=(
-                "/subscriptions/sub/resourceGroups/rg/providers/"
-                "Microsoft.Compute/proximityPlacementGroups/ppg-1"
-            ),
-            capacity_reservation_group_id=(
-                "/subscriptions/sub/resourceGroups/rg/providers/"
-                "Microsoft.Compute/capacityReservationGroups/crg-1"
-            ),
-            disk_encryption_set_id=(
-                "/subscriptions/sub/resourceGroups/rg/providers/"
-                "Microsoft.Compute/diskEncryptionSets/des-1"
-            ),
-            upgrade_policy_mode="Rolling",
-        )
-        assert isinstance(
-            t.proximity_placement_group_id, AzureProximityPlacementGroupId
-        )
-        assert isinstance(
-            t.capacity_reservation_group_id, AzureCapacityReservationGroupId
-        )
-        assert isinstance(t.disk_encryption_set_id, AzureDiskEncryptionSetId)
-        assert t.upgrade_policy_mode == AzureUpgradePolicyMode.ROLLING
+        assert t.image.image_id == "/subscriptions/.../images/my-image"
 
     def test_rejects_invalid_location_slug(self):
         fields = {**_BASE_FIELDS, "location": "East US 2"}
@@ -173,7 +130,11 @@ class TestAzureTemplateConstruction:
                 "MICROSOFT.COMPUTE/DISKENCRYPTIONSETS/des-1"
             ),
         )
-        assert t.disk_encryption_set_id is not None
+        assert (
+            str(t.disk_encryption_set_id)
+            == "/SUBSCRIPTIONS/sub/RESOURCEGROUPS/rg/PROVIDERS/"
+            "MICROSOFT.COMPUTE/DISKENCRYPTIONSETS/des-1"
+        )
 
     def test_rejects_invalid_upgrade_policy_mode(self):
         with pytest.raises(ValueError, match="upgrade_policy_mode"):

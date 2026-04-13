@@ -19,7 +19,6 @@ def test_pending_vmss_cleanup_round_trips_metadata():
 
     restored = PendingVmssCleanup.from_metadata(cleanup.to_metadata())
 
-    assert restored is not None
     assert restored.to_metadata() == {
         "resource_group": "test-rg",
         "vmss_name": "vmss-demo",
@@ -53,9 +52,6 @@ def test_pending_vmss_cleanup_merge_preserves_ids_and_retry_state():
             "last_delete_error": "still deleting",
         }
     )
-
-    assert base is not None
-    assert update is not None
 
     merged = base.combine_for_same_vmss(update)
 
@@ -248,5 +244,4 @@ def test_pending_vmss_cleanup_defaults_member_delete_submission_for_legacy_metad
         }
     )
 
-    assert restored is not None
     assert restored.member_delete_submitted is True

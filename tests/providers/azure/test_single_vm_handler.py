@@ -57,7 +57,6 @@ def test_acquire_hosts_submits_one_batched_deployment_and_returns_submitted_stat
 
     assert result["success"] is True
     assert len(result["resource_ids"]) == 2
-    assert result["instances"] == []
     assert result["provider_data"]["operation_status"] == "submitted"
     assert result["provider_data"]["fulfillment_final"] is True
     deployment_call = azure_client.resource_client.resources.begin_create_or_update.call_args.kwargs

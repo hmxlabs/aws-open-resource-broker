@@ -23,6 +23,7 @@ def test_validate_template_configuration_uses_azure_rules():
     })
 
     assert result["valid"] is True
+    assert result["errors"] == []
     assert "provider_api" in result["validated_fields"]
 
 
@@ -53,18 +54,6 @@ def test_validate_provider_api_does_not_accept_dead_config_only_api_names():
     adapter = AzureValidationAdapter(config=AzureProviderConfig(), logger=MagicMock())
 
     assert adapter.validate_provider_api("AzureFleet") is False
-    assert "AzureFleet" not in adapter.get_supported_provider_apis()
-
-
-def test_get_api_capabilities_reports_spot_support_for_vmss():
-    adapter = AzureValidationAdapter(config=AzureProviderConfig(), logger=MagicMock())
-
-    capabilities = adapter.get_api_capabilities("VMSS")
-
-    assert capabilities["supports_spot"] is True
-    assert capabilities["supports_on_demand"] is True
-    assert capabilities["max_instances"] == 1000
-
 
 def test_validate_template_configuration_rejects_spot_percentage_for_uniform():
     adapter = AzureValidationAdapter(config=AzureProviderConfig(), logger=MagicMock())

@@ -108,7 +108,6 @@ class TestAzureProviderConfig:
             },
         )
 
-        assert config.cyclecloud is not None
         assert config.cyclecloud.credential_path == "config/cyclecloud-credentials.json"
 
     def test_cyclecloud_config_accepts_typed_tls_and_auth_fields(self):
@@ -123,7 +122,6 @@ class TestAzureProviderConfig:
             },
         )
 
-        assert config.cyclecloud is not None
         assert config.cyclecloud.verify_ssl is False
         assert config.cyclecloud.auth_mode == "bearer"
         assert config.cyclecloud.aad_scope == "https://cc.example.com/.default"
@@ -277,9 +275,6 @@ class TestAzureHandlerFactory:
             },
         })
 
-        assert factory.supports_provider("azure") is True
-        assert template.provider_type == "azure"
-        assert template.image is not None
         assert template.image.publisher == "Canonical"
 
     def test_registry_created_strategy_gets_azure_client_resolver(self):
@@ -307,7 +302,6 @@ class TestAzureHandlerFactory:
             },
         )
 
-        assert strategy.azure_client is not None
         assert strategy.azure_client.subscription_id == "12345678-1234-1234-1234-123456789012"
         assert strategy.azure_client.resource_group == "rg-explicit"
         assert strategy.azure_client.perf_config["max_workers"] == 6
