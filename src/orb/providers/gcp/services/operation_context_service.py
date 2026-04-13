@@ -37,14 +37,14 @@ class GCPOperationContextService:
     def build_create_context(
         self,
         operation: ProviderOperation,
-    ) -> GCPCreateOperationContext | ProviderResult:
-        """Resolve a create operation into a typed context or an error result."""
+    ) -> GCPCreateOperationContext:
+        """Resolve a create operation into a typed context."""
         template_config = operation.parameters.get("template_config", {})
         count = int(operation.parameters.get("count", 1))
         if not template_config:
-            return ProviderResult.error_result(
+            raise GCPValidationError(
                 "template_config is required for create_instances",
-                "MISSING_TEMPLATE_CONFIG",
+                error_code="MISSING_TEMPLATE_CONFIG",
             )
 
         template = GCPTemplate.model_validate(self._build_gcp_template_config(template_config, count))

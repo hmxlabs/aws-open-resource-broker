@@ -185,8 +185,6 @@ class GCPProviderStrategy(ProviderStrategy):
 
     def _handle_create_instances(self, operation: ProviderOperation) -> ProviderResult:
         create_context = self._get_operation_context_service().build_create_context(operation)
-        if isinstance(create_context, ProviderResult):
-            return create_context
         outcome = self._execution_service.execute_create(create_context)
         return self._provisioning_service.build_provider_result(
             context=create_context,
