@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 import time
 from threading import Condition, RLock
-from typing import Any, Callable, Optional
+from typing import TYPE_CHECKING, Any, Callable, Optional
 
 from orb.application.services.spot_placement_execution import (
     SpotPlacementExecutionService,
@@ -43,6 +43,7 @@ from orb.providers.azure.infrastructure.vmss_cleanup import VmssCleanupCoordinat
 from orb.providers.azure.managers.azure_resource_manager import AzureResourceManager
 from orb.providers.azure.services.health_check_service import AzureHealthCheckService
 from orb.providers.azure.services.cyclecloud_request_context_service import (
+    CycleCloudRequestLookup,
     resolve_cyclecloud_request_metadata,
 )
 from orb.providers.azure.services.inventory_service import (
@@ -84,6 +85,11 @@ from orb.providers.base.strategy import (
     ProviderStrategy,
 )
 
+if TYPE_CHECKING:
+    from orb.providers.azure.infrastructure.services.azure_deployment_service import (
+        AzureDeploymentService,
+    )
+
 AzureProviderApiRef = AzureProviderApi | str
 
 
@@ -104,7 +110,7 @@ class AzureProviderStrategy(ProviderStrategy):
         provider_instance_name: str,
         azure_client_resolver: Optional[Callable[[], AzureClient]] = None,
         vmss_cleanup_coordinator: Optional[VmssCleanupCoordinator] = None,
-        cyclecloud_request_lookup: Optional[Callable[[str], Any | None]] = None,
+        cyclecloud_request_lookup: Optional[CycleCloudRequestLookup] = None,
     ) -> None:
         """Initialise the Azure strategy with config, logger, and optional client resolver."""
         if not isinstance(config, AzureProviderConfig):
@@ -117,7 +123,7 @@ class AzureProviderStrategy(ProviderStrategy):
         self._client: Optional[AzureClient] = None
         self._azure_client_resolver = azure_client_resolver
         self._resource_manager: Optional[AzureResourceManager] = None
-        self._deployment_service: Optional[Any] = None
+        self._deployment_service: Optional[AzureDeploymentService] = None
         self._handlers: dict[str, AzureHandler] = {}
         self._spot_placement_planner = SpotPlacementPlanner()
         self._spot_placement_execution = SpotPlacementExecutionService()
@@ -198,7 +204,7 @@ class AzureProviderStrategy(ProviderStrategy):
             return self._resource_manager
 
     @property
-    def deployment_service(self) -> Optional[Any]:
+    def deployment_service(self) -> Optional["AzureDeploymentService"]:
         """Get the ARM deployment service with lazy initialisation."""
         with self._lazy_init_lock:
             azure_client = self.azure_client

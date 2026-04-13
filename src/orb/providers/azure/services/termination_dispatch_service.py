@@ -5,7 +5,10 @@ from __future__ import annotations
 from typing import Any, Callable
 
 from orb.domain.base.ports import LoggingPort
-from orb.providers.azure.infrastructure.handlers.azure_handler import AzureHandler
+from orb.providers.azure.infrastructure.handlers.azure_handler import (
+    AzureHandler,
+    AzureReleaseHostsResult,
+)
 
 
 class AzureTerminationDispatchService:
@@ -14,7 +17,7 @@ class AzureTerminationDispatchService:
     def __init__(
         self,
         logger: LoggingPort,
-        record_pending_cleanup: Callable[[Any], None],
+        record_pending_cleanup: Callable[[AzureReleaseHostsResult | None], None],
     ) -> None:
         self._logger = logger
         self._record_pending_cleanup = record_pending_cleanup

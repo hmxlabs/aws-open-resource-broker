@@ -2,19 +2,23 @@
 
 from __future__ import annotations
 
-from typing import Any, Callable, Optional
+from typing import Callable, Optional
 
 from orb.application.services.request_follow_up_context import get_request_follow_up_context
 from orb.domain.base import UnitOfWorkFactory
+from orb.domain.request.aggregate import Request
 from orb.providers.base.strategy import ProviderOperation
+
+
+CycleCloudRequestLookup = Callable[[str], Request | None]
 
 
 def create_cyclecloud_request_lookup(
     uow_factory: UnitOfWorkFactory,
-) -> Callable[[str], Any | None]:
+) -> CycleCloudRequestLookup:
     """Return a loader for request aggregates by request_id string."""
 
-    def _lookup(request_id: str) -> Any | None:
+    def _lookup(request_id: str) -> Request | None:
         with uow_factory.create_unit_of_work() as uow:
             return uow.requests.find_by_request_id(str(request_id))
 
@@ -24,8 +28,8 @@ def create_cyclecloud_request_lookup(
 def resolve_cyclecloud_request_metadata(
     *,
     operation: ProviderOperation,
-    lookup_request_by_id: Optional[Callable[[str], Any | None]],
-) -> dict[str, Any]:
+    lookup_request_by_id: Optional[CycleCloudRequestLookup],
+) -> dict[str, object]:
     """Merge operation request metadata with durable origin-request follow-up context."""
     request_metadata = dict(operation.parameters.get("request_metadata") or {})
     if lookup_request_by_id is None:

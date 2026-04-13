@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Optional, TypedDict
+from typing import Any, Optional, Protocol, TypedDict
 
 from orb.domain.base.ports import LoggingPort
 from orb.providers.azure.domain.template.value_objects import AzureProviderApi
 from orb.providers.azure.infrastructure.azure_client import AzureClient
+from orb.providers.azure.infrastructure.handlers.azure_handler import (
+    AzureHandlerStatusResult,
+)
 from orb.providers.base.strategy import ProviderOperation, ProviderResult
 
 
@@ -38,7 +41,15 @@ class AzureStatusResult(TypedDict, total=False):
     provider_data: AzureStatusProviderData
 
 
-def normalize_status_result(result: dict[str, Any]) -> AzureStatusResult:
+class AzureMachineConversionServiceProtocol(Protocol):
+    """Structural subset of AzureMachineConversionService used by SDK fallback."""
+
+    def convert_sdk_vm(self, vm: object, azure_client: AzureClient) -> dict[str, Any]:
+        """Convert an SDK VM object into the normalized machine/result shape."""
+        ...
+
+
+def normalize_status_result(result: AzureHandlerStatusResult) -> AzureStatusResult:
     """Build an AzureStatusResult from a generic handler status dict."""
     normalized: AzureStatusResult = {}
 
@@ -63,7 +74,7 @@ def normalize_status_result(result: dict[str, Any]) -> AzureStatusResult:
     return normalized
 
 
-def normalize_status_results(results: list[dict[str, Any]]) -> list[AzureStatusResult]:
+def normalize_status_results(results: list[AzureHandlerStatusResult]) -> list[AzureStatusResult]:
     """Normalize a generic handler status list for Azure status matching."""
     return [normalize_status_result(result) for result in results]
 
@@ -203,7 +214,7 @@ def sdk_status_result(
     *,
     status_context: AzureStatusQueryContext,
     azure_client: Optional[AzureClient],
-    machine_conversion_service: Any,
+    machine_conversion_service: AzureMachineConversionServiceProtocol,
     logger: LoggingPort,
 ) -> ProviderResult:
     """Query VM status directly via the Azure SDK as a fallback."""

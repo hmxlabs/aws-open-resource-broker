@@ -9,6 +9,8 @@ from orb.providers.azure.domain.template.value_objects import AzureProviderApi
 from orb.providers.azure.infrastructure.handlers.azure_handler import AzureHandler
 from orb.providers.base.strategy import ProviderOperation, ProviderResult
 
+AzureProviderApiRef = AzureProviderApi | str
+
 
 @dataclass
 class TerminationOperationContext:
@@ -29,8 +31,8 @@ class AzureTerminationService:
             *,
         operation: ProviderOperation,
         is_dry_run: bool,
-        resolve_operation_provider_api: Callable[[ProviderOperation], Optional[Any]],
-        provider_api_key: Callable[[Any], str],
+        resolve_operation_provider_api: Callable[[ProviderOperation], Optional[AzureProviderApiRef]],
+        provider_api_key: Callable[[AzureProviderApiRef], str],
         handlers: dict[str, AzureHandler],
         group_instance_ids_by_resource: Callable[[list[str], dict[str, Any]], dict[str, list[str]]],
         build_cyclecloud_request_metadata: Callable[..., dict[str, Any]],

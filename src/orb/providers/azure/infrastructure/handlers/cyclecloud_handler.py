@@ -43,7 +43,12 @@ from orb.providers.azure.infrastructure.cyclecloud_session_builder import (
 from orb.providers.azure.infrastructure.credential_factory import (
     AzureCredentialAccessTokenProvider,
 )
-from orb.providers.azure.infrastructure.handlers.azure_handler import AzureHandler
+from orb.providers.azure.infrastructure.handlers.azure_handler import (
+    AzureAcquireHostsResult,
+    AzureHandler,
+    AzureHandlerStatusResult,
+    AzureReleaseHostsResult,
+)
 from orb.providers.infrastructure.error_codes import (
     ProviderErrorEntry,
     collect_provider_error_codes,
@@ -436,7 +441,7 @@ class CycleCloudHandler(AzureHandler):
 
     def acquire_hosts(
         self, request: Request, template: AzureTemplate
-    ) -> dict[str, Any]:
+    ) -> AzureAcquireHostsResult:
         """Add nodes to a CycleCloud cluster's node array.
 
         Uses the CycleCloud REST API ``POST /clusters/{cluster}/nodes/create``
@@ -607,7 +612,7 @@ class CycleCloudHandler(AzureHandler):
     # check_hosts_status
     # ------------------------------------------------------------------
 
-    def check_hosts_status(self, request: Request) -> list[dict[str, Any]]:
+    def check_hosts_status(self, request: Request) -> list[AzureHandlerStatusResult]:
         """Check status of nodes in a CycleCloud cluster.
 
         Uses CycleCloud REST API ``GET /clusters/{cluster}/nodes`` with the
@@ -676,7 +681,7 @@ class CycleCloudHandler(AzureHandler):
             raise
 
         all_nodes = nodes_response.get("nodes", [])
-        results: list[dict[str, Any]] = []
+        results: list[AzureHandlerStatusResult] = []
 
         for node in all_nodes:
             parsed_node = _parse_cyclecloud_node(node)
@@ -745,7 +750,7 @@ class CycleCloudHandler(AzureHandler):
         machine_ids: list[str],
         resource_id: str,
         context: Optional[dict[str, Any]] = None,
-    ) -> Optional[dict[str, Any]]:
+    ) -> Optional[AzureReleaseHostsResult]:
         """Remove/terminate nodes from a CycleCloud cluster.
 
         Uses CycleCloud REST API to deallocate and remove specific nodes.

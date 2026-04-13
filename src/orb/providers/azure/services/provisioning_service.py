@@ -5,9 +5,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable, Optional, cast
 
+from orb.domain.request.aggregate import Request
 from orb.providers.azure.domain.template.azure_template_aggregate import AzureTemplate
 from orb.providers.azure.domain.template.value_objects import AzureProviderApi
-from orb.providers.azure.infrastructure.handlers.azure_handler import AzureHandler
+from orb.providers.azure.infrastructure.handlers.azure_handler import (
+    AzureAcquireHostsResult,
+    AzureHandler,
+)
 from orb.providers.base.strategy import ProviderOperation, ProviderResult
 
 
@@ -124,9 +128,8 @@ class AzureProvisioningService:
         count: int,
         provider_api: AzureProviderApiRef,
         provider_instance_name: str,
-    ) -> Any:
+    ) -> Request:
         """Build a request object for the create operation handler."""
-        from orb.domain.request.aggregate import Request
         from orb.domain.request.value_objects import RequestType
 
         request_metadata = dict(operation.parameters.get("request_metadata", {}) or {})
@@ -147,7 +150,7 @@ class AzureProvisioningService:
 
     def normalize_handler_create_result(
         self,
-        handler_result: Any,
+        handler_result: AzureAcquireHostsResult,
         *,
         template_config: dict[str, Any],
         provider_api: AzureProviderApiRef,
@@ -155,29 +158,24 @@ class AzureProvisioningService:
         template_id: str,
     ) -> ProviderResult:
         """Normalize the result from the handler into a ProviderResult."""
-        if isinstance(handler_result, dict):
-            resource_ids = handler_result.get("resource_ids", [])
-            instances = handler_result.get("instances", [])
-            success = handler_result.get("success", False)
-            error_message = handler_result.get("error_message")
-            provider_data = handler_result.get("provider_data") or {}
+        resource_ids = handler_result["resource_ids"]
+        instances = handler_result["instances"]
+        success = handler_result["success"]
+        error_message = handler_result.get("error_message")
+        provider_data = handler_result.get("provider_data", {})
 
-            if not success:
-                return ProviderResult.error_result(
-                    f"Provisioning failed: {error_message}",
-                    "PROVISIONING_ADAPTER_ERROR",
-                    {
-                        "operation": "create_instances",
-                        "template_config": template_config,
-                        "handler_used": provider_api_key(provider_api),
-                        "method": "handler",
-                        "provider_data": provider_data,
-                    },
-                )
-        else:
-            resource_ids = [handler_result] if handler_result else []
-            instances = []
-            provider_data = {}
+        if not success:
+            return ProviderResult.error_result(
+                f"Provisioning failed: {error_message}",
+                "PROVISIONING_ADAPTER_ERROR",
+                {
+                    "operation": "create_instances",
+                    "template_config": template_config,
+                    "handler_used": provider_api_key(provider_api),
+                    "method": "handler",
+                    "provider_data": provider_data,
+                },
+            )
 
         return ProviderResult.success_result(
             {
@@ -200,7 +198,7 @@ class AzureProvisioningService:
         self,
         *,
         create_context: CreateOperationContext,
-        request: Any,
+        request: Request,
     ) -> ProviderResult:
         """Execute the handler's acquire_hosts method and normalize the result."""
         handler_result = create_context.handler.acquire_hosts(
