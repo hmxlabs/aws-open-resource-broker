@@ -3,6 +3,8 @@
 Creates and caches Azure handlers based on ``provider_api`` values
 """
 
+from threading import RLock
+
 from orb.domain.base.dependency_injection import injectable
 from orb.domain.base.ports import LoggingPort
 from orb.domain.template.template_aggregate import Template
@@ -24,6 +26,7 @@ class AzureHandlerFactory:
         """Initialize the factory with an Azure client and register handler classes."""
         self._azure_client = azure_client
         self._logger = logger
+        self._lock = RLock()
         self._handlers: dict[str, AzureHandler] = {}
         self._handler_classes: dict[str, type[AzureHandler]] = {}
         self._register_handler_classes()
@@ -46,28 +49,28 @@ class AzureHandlerFactory:
             AzureValidationError: If *handler_type* is unknown.
         """
         handler_type_key = self._handler_type_key(handler_type)
-        if handler_type_key in self._handlers:
-            return self._handlers[handler_type_key]
+        with self._lock:
+            if handler_type_key in self._handlers:
+                return self._handlers[handler_type_key]
 
-        # Validate
-        try:
-            AzureProviderApi(handler_type_key)
-        except ValueError:
-            raise AzureValidationError(f"Invalid Azure handler type: {handler_type_key}")
+            try:
+                AzureProviderApi(handler_type_key)
+            except ValueError:
+                raise AzureValidationError(f"Invalid Azure handler type: {handler_type_key}")
 
-        if handler_type_key not in self._handler_classes:
-            raise AzureValidationError(
-                f"No handler class registered for type: {handler_type_key}"
+            if handler_type_key not in self._handler_classes:
+                raise AzureValidationError(
+                    f"No handler class registered for type: {handler_type_key}"
+                )
+
+            handler_class = self._handler_classes[handler_type_key]
+            handler = handler_class(
+                azure_client=self._azure_client,
+                logger=self._logger,
             )
-
-        handler_class = self._handler_classes[handler_type_key]
-        handler = handler_class(
-            azure_client=self._azure_client,
-            logger=self._logger,
-        )
-        self._handlers[handler_type_key] = handler
-        self._logger.debug("Created Azure handler for type: %s", handler_type_key)
-        return handler
+            self._handlers[handler_type_key] = handler
+            self._logger.debug("Created Azure handler for type: %s", handler_type_key)
+            return handler
 
     def create_handler_for_template(self, template: Template) -> AzureHandler:
         """Create handler appropriate for *template.provider_api*."""
@@ -93,6 +96,17 @@ class AzureHandlerFactory:
             "Registered Azure handler classes: %s",
             list(self._handler_classes.keys()),
         )
+
+    def registered_handler_types(self) -> tuple[str, ...]:
+        """Return the registered handler keys in factory-owned canonical order."""
+        return tuple(self._handler_classes.keys())
+
+    def get_all_handlers(self) -> dict[str, AzureHandler]:
+        """Materialize and return handlers for all registered Azure provider APIs."""
+        return {
+            handler_type: self.create_handler(handler_type)
+            for handler_type in self.registered_handler_types()
+        }
 
     def generate_example_templates(self) -> list[dict]:
         """Collect example templates from all registered handlers."""
