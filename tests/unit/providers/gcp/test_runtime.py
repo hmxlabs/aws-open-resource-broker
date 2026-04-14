@@ -80,8 +80,10 @@ class _ComputeClientStub:
         self.deleted_regional_managed_instances.append((region, mig_name, instance_urls))
         return SimpleNamespace(name=f"delete-instances-{mig_name}")
 
-    def list_regional_managed_instances(self, *, region: str, mig_name: str) -> list[object]:
-        _ = region
+    def list_regional_managed_instances(
+        self, *, region: str, mig_name: str, instance_filter: str | None = None,
+    ) -> list[object]:
+        _ = region, instance_filter
         return self.regional_managed_instances.get(mig_name, [])
 
     def start_instance(self, *, zone: str, instance_name: str) -> object:

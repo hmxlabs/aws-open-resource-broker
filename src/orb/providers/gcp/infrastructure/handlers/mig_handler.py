@@ -325,57 +325,65 @@ class GCPManagedInstanceGroupHandler(GCPHandler):
         context: GCPHandlerContext,
         scope: str,
     ) -> dict[str, list[str]]:
-        grouped: dict[str, list[str]] = {mig_name: [] for mig_name in mig_names}
-        for instance_id in instance_ids:
-            mig_name, instance_url = self._resolve_instance_membership(
-                mig_names=mig_names,
-                instance_id=instance_id,
-                context=context,
-                scope=scope,
-            )
-            grouped[mig_name].append(instance_url)
-        return {mig_name: urls for mig_name, urls in grouped.items() if urls}
+        # Ask GCP for only the instances we care about by passing a server-side
+        # filter on the ``instance`` field (full URL).  Each instance name is
+        # matched with a suffix regex so both short names and full URLs work.
+        instance_filter = self._build_instance_filter(instance_ids)
 
-    def _resolve_instance_membership(
-        self,
-        *,
-        mig_names: list[str],
-        instance_id: str,
-        context: GCPHandlerContext,
-        scope: str,
-    ) -> tuple[str, str]:
-        requested_value = str(instance_id)
-        requested_name = requested_value.rsplit("/", 1)[-1]
-        matches: list[tuple[str, str]] = []
-
+        name_to_membership: dict[str, list[tuple[str, str]]] = {}
         for mig_name in mig_names:
             if scope == GCPMIGScope.ZONAL.value:
-                payload = self._compute_client.list_zonal_managed_instances(
+                members = self._compute_client.list_zonal_managed_instances(
                     zone=self._require_zone(context),
                     mig_name=mig_name,
+                    instance_filter=instance_filter,
                 )
             else:
-                payload = self._compute_client.list_regional_managed_instances(
+                members = self._compute_client.list_regional_managed_instances(
                     region=self._require_region(context),
                     mig_name=mig_name,
+                    instance_filter=instance_filter,
                 )
-
-            for instance in payload:
-                instance_url = str(instance.instance_url)
+            for member in members:
+                instance_url = str(member.instance_url)
                 instance_name = instance_url.rsplit("/", 1)[-1]
-                if requested_value == instance_url or requested_name == instance_name:
-                    matches.append((mig_name, instance_url))
+                entry = (mig_name, instance_url)
+                name_to_membership.setdefault(instance_name, []).append(entry)
+                name_to_membership.setdefault(instance_url, []).append(entry)
 
-        if not matches:
-            raise GCPEntityNotFoundError(
-                f"Could not resolve MIG membership for instance '{requested_value}'",
-                details={"instance_id": requested_value, "mig_names": mig_names},
+        grouped: dict[str, list[str]] = {}
+        for instance_id in instance_ids:
+            requested_name = str(instance_id).rsplit("/", 1)[-1]
+            matches = name_to_membership.get(str(instance_id)) or name_to_membership.get(
+                requested_name
             )
-        if len(matches) > 1:
-            raise GCPValidationError(
-                f"Instance '{requested_value}' matches multiple MIG resources; use fully qualified instance URLs"
-            )
-        return matches[0]
+            if not matches:
+                raise GCPEntityNotFoundError(
+                    f"Could not resolve MIG membership for instance '{instance_id}'",
+                    details={"instance_id": str(instance_id), "mig_names": mig_names},
+                )
+            if len(matches) > 1:
+                raise GCPValidationError(
+                    f"Instance '{instance_id}' matches multiple MIG resources; "
+                    "use fully qualified instance URLs"
+                )
+            mig_name, instance_url = matches[0]
+            grouped.setdefault(mig_name, []).append(instance_url)
+        return grouped
+
+    @staticmethod
+    def _build_instance_filter(instance_ids: list[str]) -> str:
+        """Build a Compute API filter expression matching specific instances.
+
+        The ``instance`` field on ManagedInstance is a full URL
+        (``projects/…/zones/…/instances/{name}``).  A suffix regex handles
+        both short names and fully-qualified URLs as input.
+        """
+        clauses = []
+        for instance_id in instance_ids:
+            name = str(instance_id).rsplit("/", 1)[-1]
+            clauses.append(f'(instance eq ".*/{name}")')
+        return " OR ".join(clauses)
 
     @staticmethod
     def _require_region(context: GCPHandlerContext) -> str:

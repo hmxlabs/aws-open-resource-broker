@@ -230,13 +230,19 @@ class GCPComputeClient:
         *,
         region: str,
         mig_name: str,
+        instance_filter: Optional[str] = None,
     ) -> list[GCPManagedInstanceRecord]:
         """List instances currently tracked by a regional managed instance group."""
         self._assert_not_dry_run("list_regional_managed_instances")
+        request: dict[str, Any] = {
+            "project": self._config.project_id,
+            "region": region,
+            "instance_group_manager": mig_name,
+        }
+        if instance_filter is not None:
+            request["filter"] = instance_filter
         response = self._get_region_igm_client().list_managed_instances(
-            project=self._config.project_id,
-            region=region,
-            instance_group_manager=mig_name,
+            request=request,
             **self._request_options("read"),
         )
         return [
@@ -253,13 +259,19 @@ class GCPComputeClient:
         *,
         zone: str,
         mig_name: str,
+        instance_filter: Optional[str] = None,
     ) -> list[GCPManagedInstanceRecord]:
         """List instances currently tracked by a zonal managed instance group."""
         self._assert_not_dry_run("list_zonal_managed_instances")
+        request: dict[str, Any] = {
+            "project": self._config.project_id,
+            "zone": zone,
+            "instance_group_manager": mig_name,
+        }
+        if instance_filter is not None:
+            request["filter"] = instance_filter
         response = self._get_zone_igm_client().list_managed_instances(
-            project=self._config.project_id,
-            zone=zone,
-            instance_group_manager=mig_name,
+            request=request,
             **self._request_options("read"),
         )
         return [
