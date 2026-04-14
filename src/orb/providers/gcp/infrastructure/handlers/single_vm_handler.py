@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Callable
 
 from orb.domain.request.aggregate import Request
 from orb.providers.gcp.domain.template.gcp_template_aggregate import GCPTemplate
+from orb.providers.gcp.domain.template.value_objects import GCPProvisioningModel
 from orb.providers.gcp.exceptions import GCPError, GCPValidationError, translate_gcp_exception
 from orb.providers.gcp.infrastructure.disk_types import normalize_boot_disk_type
 from orb.providers.gcp.infrastructure.handlers.base_handler import GCPHandler
@@ -214,7 +215,7 @@ class GCPSingleVMHandler(GCPHandler):
                     scopes=template.service_account_scopes,
                 )
             ]
-        if template.provisioning_model.value == "SPOT":
+        if template.provisioning_model == GCPProvisioningModel.SPOT:
             payload.scheduling = compute_v1.Scheduling(
                 provisioning_model="SPOT",
                 instance_termination_action="DELETE",

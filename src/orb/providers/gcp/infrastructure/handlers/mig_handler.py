@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 
 from orb.domain.request.aggregate import Request
 from orb.providers.gcp.domain.template.gcp_template_aggregate import GCPTemplate
-from orb.providers.gcp.domain.template.value_objects import GCPMIGScope
+from orb.providers.gcp.domain.template.value_objects import GCPMIGScope, GCPProvisioningModel
 from orb.providers.gcp.exceptions import GCPEntityNotFoundError, GCPValidationError
 from orb.providers.gcp.infrastructure.disk_types import normalize_boot_disk_type
 from orb.providers.gcp.infrastructure.handlers.base_handler import GCPHandler
@@ -261,7 +261,7 @@ class GCPManagedInstanceGroupHandler(GCPHandler):
                     scopes=template.service_account_scopes,
                 )
             ]
-        if template.provisioning_model.value == "SPOT":
+        if template.provisioning_model == GCPProvisioningModel.SPOT:
             properties.scheduling = compute_v1.Scheduling(
                 provisioning_model="SPOT",
                 instance_termination_action="DELETE",
