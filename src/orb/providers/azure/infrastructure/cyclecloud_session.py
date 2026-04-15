@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Optional
 
 import requests
@@ -39,9 +39,9 @@ class CycleCloudCredentialData:
     url: Optional[str] = None
     verify_ssl: Optional[bool] = None
     auth_mode: Optional[str] = None
-    username: Optional[str] = None
-    password: Optional[str] = None
-    bearer_token: Optional[str] = None
+    username: Optional[str] = field(default=None, repr=False)
+    password: Optional[str] = field(default=None, repr=False)
+    bearer_token: Optional[str] = field(default=None, repr=False)
     aad_scope: Optional[str] = None
 
     @classmethod
@@ -147,7 +147,16 @@ class CycleCloudRequestContext:
 class CycleCloudSessionContext:
     """Resolved CycleCloud HTTP session plus ORB-specific connection metadata."""
 
-    session: requests.Session
+    session: requests.Session = field(repr=False)
     base_url: str
     auth_mode: Optional[str]
     credential_path: Optional[str]
+
+    def __repr__(self) -> str:
+        """Return a safe repr that avoids leaking session internals or auth material."""
+        return (
+            "CycleCloudSessionContext("
+            f"base_url={self.base_url!r}, "
+            f"auth_mode={self.auth_mode!r}, "
+            f"credential_path={self.credential_path!r})"
+        )

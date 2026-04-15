@@ -5,6 +5,7 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
+import requests
 from azure.core.exceptions import ClientAuthenticationError
 from azure.identity import CredentialUnavailableError
 
@@ -12,6 +13,7 @@ from orb.providers.azure.configuration.config import AzureProviderConfig
 from orb.providers.azure.infrastructure.cyclecloud_session import (
     CycleCloudCredentialData,
     CycleCloudRequestContext,
+    CycleCloudSessionContext,
 )
 from orb.providers.azure.infrastructure.cyclecloud_session_builder import (
     CycleCloudSessionBuilder,
@@ -176,6 +178,45 @@ def test_build_settings_loads_cyclecloud_config_from_provider():
     resolved_auth_mode = builder.configure_session_auth(session=session, settings=settings)
     assert resolved_auth_mode == "basic"
     assert session.auth == ("cc_admin", "changeme")
+
+
+def test_cyclecloud_credential_data_repr_masks_secret_fields():
+    credential_data = CycleCloudCredentialData(
+        url="https://cc.example.com",
+        auth_mode="bearer",
+        username="cc_admin",
+        password="changeme",
+        bearer_token="tok-123",
+        aad_scope="https://cc.example.com/.default",
+    )
+
+    credential_repr = repr(credential_data)
+
+    assert "cc_admin" not in credential_repr
+    assert "changeme" not in credential_repr
+    assert "tok-123" not in credential_repr
+    assert "https://cc.example.com" in credential_repr
+    assert "bearer" in credential_repr
+
+
+def test_cyclecloud_session_context_repr_does_not_expose_session_auth_material():
+    session = requests.Session()
+    session.auth = ("cc_admin", "changeme")
+    session.headers["Authorization"] = "Bearer tok-123"
+    session_context = CycleCloudSessionContext(
+        session=session,
+        base_url="https://cc.example.com",
+        auth_mode="bearer",
+        credential_path="/tmp/cyclecloud.json",
+    )
+
+    session_context_repr = repr(session_context)
+
+    assert "cc_admin" not in session_context_repr
+    assert "changeme" not in session_context_repr
+    assert "tok-123" not in session_context_repr
+    assert "https://cc.example.com" in session_context_repr
+    assert "/tmp/cyclecloud.json" in session_context_repr
 
 
 def test_build_settings_loads_credentials_from_file(tmp_path: Path):
