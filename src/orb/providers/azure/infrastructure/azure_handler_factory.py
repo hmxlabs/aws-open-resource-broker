@@ -38,8 +38,8 @@ class AzureHandlerFactory:
         self._azure_native_spec_service = azure_native_spec_service
         self._azure_resource_manager = azure_resource_manager
         self._lock = RLock()
-        self._handlers: dict[str, AzureHandler] = {}
-        self._handler_classes: dict[str, type[AzureHandler]] = {}
+        self._handlers: dict[AzureProviderApi, AzureHandler] = {}
+        self._handler_classes: dict[AzureProviderApi, type[AzureHandler]] = {}
         self._register_handler_classes()
 
     @property
@@ -48,10 +48,10 @@ class AzureHandlerFactory:
         return self._azure_client
 
     @staticmethod
-    def _handler_type_key(handler_type: AzureProviderApi | str) -> str:
+    def _normalize_handler_type(handler_type: AzureProviderApi | str) -> AzureProviderApi:
         if isinstance(handler_type, AzureProviderApi):
-            return handler_type.value
-        return handler_type
+            return handler_type
+        return AzureProviderApi(handler_type)
 
     def create_handler(self, handler_type: AzureProviderApi | str) -> AzureHandler:
         """Create (or return cached) handler for *handler_type*.
@@ -59,22 +59,20 @@ class AzureHandlerFactory:
         Raises:
             AzureValidationError: If *handler_type* is unknown.
         """
-        handler_type_key = self._handler_type_key(handler_type)
+        try:
+            handler_type_key = self._normalize_handler_type(handler_type)
+        except ValueError:
+            raise AzureValidationError(f"Invalid Azure handler type: {handler_type}")
         with self._lock:
             if handler_type_key in self._handlers:
                 return self._handlers[handler_type_key]
 
-            try:
-                AzureProviderApi(handler_type_key)
-            except ValueError:
-                raise AzureValidationError(f"Invalid Azure handler type: {handler_type_key}")
-
             if handler_type_key not in self._handler_classes:
                 raise AzureValidationError(
-                    f"No handler class registered for type: {handler_type_key}"
+                    f"No handler class registered for type: {handler_type_key.value}"
                 )
 
-            if handler_type_key == AzureProviderApi.SINGLE_VM.value:
+            if handler_type_key is AzureProviderApi.SINGLE_VM:
                 from orb.providers.azure.infrastructure.handlers.single_vm_handler import (
                     SingleVMHandler,
                 )
@@ -84,10 +82,7 @@ class AzureHandlerFactory:
                     logger=self._logger,
                     azure_native_spec_service=self._azure_native_spec_service,
                 )
-            elif handler_type_key in (
-                AzureProviderApi.VMSS.value,
-                AzureProviderApi.VMSS_UNIFORM.value,
-            ):
+            elif handler_type_key in (AzureProviderApi.VMSS, AzureProviderApi.VMSS_UNIFORM):
                 from orb.providers.azure.infrastructure.handlers.vmss_handler import VMSSHandler
 
                 handler = VMSSHandler(
@@ -106,7 +101,7 @@ class AzureHandlerFactory:
                     logger=self._logger,
                 )
             self._handlers[handler_type_key] = handler
-            self._logger.debug("Created Azure handler for type: %s", handler_type_key)
+            self._logger.debug("Created Azure handler for type: %s", handler_type_key.value)
             return handler
 
     def create_handler_for_template(self, template: Template) -> AzureHandler:
@@ -124,24 +119,24 @@ class AzureHandlerFactory:
         from orb.providers.azure.infrastructure.handlers.vmss_handler import VMSSHandler
 
         self._handler_classes = {
-            AzureProviderApi.VMSS.value: VMSSHandler,
-            AzureProviderApi.VMSS_UNIFORM.value: VMSSHandler,
-            AzureProviderApi.SINGLE_VM.value: SingleVMHandler,
-            AzureProviderApi.CYCLECLOUD.value: CycleCloudHandler,
+            AzureProviderApi.VMSS: VMSSHandler,
+            AzureProviderApi.VMSS_UNIFORM: VMSSHandler,
+            AzureProviderApi.SINGLE_VM: SingleVMHandler,
+            AzureProviderApi.CYCLECLOUD: CycleCloudHandler,
         }
         self._logger.debug(
             "Registered Azure handler classes: %s",
-            list(self._handler_classes.keys()),
+            [handler_type.value for handler_type in self._handler_classes],
         )
 
-    def registered_handler_types(self) -> tuple[str, ...]:
-        """Return the registered handler keys in factory-owned canonical order."""
+    def registered_handler_types(self) -> tuple[AzureProviderApi, ...]:
+        """Return the registered handler enums in factory-owned canonical order."""
         return tuple(self._handler_classes.keys())
 
     def get_all_handlers(self) -> dict[str, AzureHandler]:
-        """Materialize and return handlers for all registered Azure provider APIs."""
+        """Materialize and return handlers keyed by serialized Azure provider API values."""
         return {
-            handler_type: self.create_handler(handler_type)
+            handler_type.value: self.create_handler(handler_type)
             for handler_type in self.registered_handler_types()
         }
 
