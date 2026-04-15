@@ -389,9 +389,8 @@ class VmssCleanupCoordinator:
                     self._pending_cleanups.pop(key, None)
         except Exception as exc:
             with self._lock:
-                current = self._pending_cleanups.get(key)
-                if current is not None:
-                    current.mark_delete_retry_pending(exc)
+                if self._pending_cleanups.get(key) is pending:
+                    pending.mark_delete_retry_pending(exc)
             self._logger.warning(
                 "Failed to clean up pending VMSS '%s' in '%s': %s",
                 vmss_name,
@@ -451,7 +450,6 @@ class VmssCleanupCoordinator:
         except Exception as exc:
             with self._lock:
                 current = self._pending_cleanups.get(key)
-                if current is not None:
-                    current.mark_delete_retry_pending(exc)
+                if current is pending:
+                    pending.mark_delete_retry_pending(exc)
             raise
-
