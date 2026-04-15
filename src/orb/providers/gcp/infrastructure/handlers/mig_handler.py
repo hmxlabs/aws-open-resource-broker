@@ -135,8 +135,12 @@ class GCPManagedInstanceGroupHandler(GCPHandler):
         if template_name:
             try:
                 self._compute_client.delete_instance_template(template_name=str(template_name))
-            except Exception:
-                self._logger.debug("Best-effort instance template cleanup failed for %s", template_name)
+            except Exception as exc:
+                self._logger.warning(
+                    "Best-effort instance template cleanup failed for %s: %s",
+                    template_name,
+                    exc,
+                )
 
         return GCPMutationOutcome(
             attempted_ids=successful_ids,
