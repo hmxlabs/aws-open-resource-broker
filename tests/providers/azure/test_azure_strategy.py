@@ -590,6 +590,37 @@ class TestCleanup:
         assert result_holder[0].success is True
         client.close.assert_called_once_with()
 
+    def test_cleanup_drops_cached_handler_factory_and_client(self, azure_config, logger):
+        client_one = MagicMock()
+        client_two = MagicMock()
+        resolver_calls = 0
+
+        def resolve_client():
+            nonlocal resolver_calls
+            resolver_calls += 1
+            return client_one if resolver_calls == 1 else client_two
+
+        strategy = AzureProviderStrategy(
+            config=azure_config,
+            logger=logger,
+            provider_instance_name="azure-default",
+            azure_client_resolver=resolve_client,
+        )
+        strategy.initialize()
+
+        first_handler = strategy._resolve_handler("VMSS")
+        assert first_handler is not None
+        assert strategy.azure_client is client_one
+
+        strategy.cleanup()
+        strategy.initialize()
+
+        second_handler = strategy._resolve_handler("VMSS")
+        assert second_handler is not None
+        assert strategy.azure_client is client_two
+        assert second_handler is not first_handler
+        client_one.close.assert_called_once_with()
+
     def test_execute_operation_rejects_new_work_after_cleanup_starts(
         self, azure_config, logger, monkeypatch
     ):

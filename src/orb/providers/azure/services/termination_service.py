@@ -39,7 +39,7 @@ class AzureTerminationService:
         is_dry_run: bool,
         resolve_operation_provider_api: Callable[[ProviderOperation], Optional[AzureProviderApiRef]],
         provider_api_key: Callable[[AzureProviderApiRef], str],
-        handlers: dict[str, AzureHandler],
+        resolve_handler: Callable[[AzureProviderApiRef], Optional[AzureHandler]],
         group_instance_ids_by_resource: Callable[[list[str], dict[str, Any]], dict[str, list[str]]],
         resolve_operation_resource_group: Callable[[ProviderOperation], Optional[str]],
     ) -> TerminationOperationContext:
@@ -59,7 +59,7 @@ class AzureTerminationService:
             )
 
         provider_api_value = provider_api_key(provider_api)
-        handler = handlers.get(provider_api_value)
+        handler = resolve_handler(provider_api)
         if handler is None:
             raise AzureValidationError(
                 f"No handler available for provider_api: {provider_api_value}",

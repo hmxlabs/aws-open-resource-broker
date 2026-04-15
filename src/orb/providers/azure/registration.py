@@ -95,6 +95,7 @@ def create_azure_strategy(
     """Create an ``AzureProviderStrategy`` from provider configuration."""
     from orb.infrastructure.adapters.logging_adapter import LoggingAdapter
     from orb.providers.azure.configuration.config import AzureProviderConfig
+    from orb.providers.azure.infrastructure.azure_handler_factory import AzureHandlerFactory
     from orb.providers.azure.services.cyclecloud_request_context_service import (
         create_cyclecloud_request_lookup,
     )
@@ -343,6 +344,7 @@ def _register_azure_components_with_di(
 ) -> None:
     """Register Azure components with DI container for a specific instance."""
     from orb.domain.base.ports import LoggingPort
+    from orb.providers.azure.infrastructure.azure_handler_factory import AzureHandlerFactory
 
     def azure_client_factory(container_instance: Any) -> Any:
         """Factory to create an Azure client with the correct config and logger."""
@@ -364,6 +366,18 @@ def _register_azure_components_with_di(
 
     container.register_factory(f"AzureClient_{instance_name}", azure_client_factory)
 
+    def azure_handler_factory_factory(container_instance: Any) -> Any:
+        """Factory to create an Azure handler factory for the named provider instance."""
+        return AzureHandlerFactory(
+            azure_client=container_instance.get(f"AzureClient_{instance_name}"),
+            logger=container_instance.get(LoggingPort),
+        )
+
+    container.register_factory(
+        f"AzureHandlerFactory_{instance_name}",
+        azure_handler_factory_factory,
+    )
+
 
 def _create_azure_strategy_with_di(
     container: Any, azure_config: "AzureProviderConfig", instance_name: str
@@ -373,7 +387,6 @@ def _create_azure_strategy_with_di(
     from orb.domain.base.ports import LoggingPort
 
     logger = container.get(LoggingPort)
-    azure_client = container.get(f"AzureClient_{instance_name}")
 
     from orb.providers.azure.services.cyclecloud_request_context_service import (
         create_cyclecloud_request_lookup,
@@ -384,7 +397,8 @@ def _create_azure_strategy_with_di(
         config=azure_config,
         logger=logger,
         provider_instance_name=instance_name,
-        azure_client_resolver=lambda: azure_client,
+        azure_client_resolver=lambda: container.get(f"AzureClient_{instance_name}"),
+        azure_handler_factory_resolver=lambda: container.get(f"AzureHandlerFactory_{instance_name}"),
         cyclecloud_request_lookup=create_cyclecloud_request_lookup(
             container.get(UnitOfWorkFactory)
         ),

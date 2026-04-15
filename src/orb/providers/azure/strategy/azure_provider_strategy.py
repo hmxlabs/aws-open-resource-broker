@@ -80,6 +80,7 @@ from orb.providers.base.strategy import (
 
 if TYPE_CHECKING:
     from orb.providers.azure.infrastructure.azure_client import AzureClient
+    from orb.providers.azure.infrastructure.azure_handler_factory import AzureHandlerFactory
     from orb.providers.azure.infrastructure.handlers.azure_handler import AzureHandler
     from orb.providers.azure.managers.azure_resource_manager import AzureResourceManager
     from orb.providers.azure.infrastructure.services.azure_deployment_service import (
@@ -105,6 +106,7 @@ class AzureProviderStrategy(ProviderStrategy):
         logger: LoggingPort,
         provider_instance_name: str,
         azure_client_resolver: Optional[Callable[[], "AzureClient"]] = None,
+        azure_handler_factory_resolver: Optional[Callable[[], "AzureHandlerFactory"]] = None,
         vmss_cleanup_coordinator: Optional[VmssCleanupCoordinator] = None,
         cyclecloud_request_lookup: Optional[CycleCloudRequestLookup] = None,
     ) -> None:
@@ -118,8 +120,10 @@ class AzureProviderStrategy(ProviderStrategy):
         self._provider_instance_name = provider_instance_name
         self._client: Optional["AzureClient"] = None
         self._azure_client_resolver = azure_client_resolver
+        self._azure_handler_factory_resolver = azure_handler_factory_resolver
         self._resource_manager: Optional["AzureResourceManager"] = None
         self._deployment_service: Optional[AzureDeploymentService] = None
+        self._handler_factory: Optional["AzureHandlerFactory"] = None
         self._handlers: dict[str, "AzureHandler"] = {}
         self._spot_placement_planner = SpotPlacementPlanner()
         self._spot_placement_execution = SpotPlacementExecutionService()
@@ -219,40 +223,74 @@ class AzureProviderStrategy(ProviderStrategy):
 
     @property
     def handlers(self) -> dict[str, "AzureHandler"]:
-        """Get handlers with lazy initialisation."""
+        """Get handler mapping, including any explicit test overrides."""
         with self._lazy_init_lock:
-            azure_client = self.azure_client
-            if not self._handlers and azure_client:
-                self._logger.debug("Creating Azure handlers on first access")
-                from orb.providers.azure.infrastructure.handlers.cyclecloud_handler import (
-                    CycleCloudHandler,
-                )
-                from orb.providers.azure.infrastructure.handlers.single_vm_handler import (
-                    SingleVMHandler,
-                )
-                from orb.providers.azure.infrastructure.handlers.vmss_handler import (
-                    VMSSHandler,
-                )
+            handlers = dict(self._handlers)
+            handler_factory = self._get_handler_factory()
+            if handler_factory is None:
+                return handlers
+            handlers.update(handler_factory.get_all_handlers())
+            handlers.update(self._handlers)
+            return handlers
 
-                self._handlers = {
-                    AzureProviderApi.VMSS.value: VMSSHandler(
-                        azure_client=azure_client,
-                        logger=self._logger,
-                    ),
-                    AzureProviderApi.VMSS_UNIFORM.value: VMSSHandler(
-                        azure_client=azure_client,
-                        logger=self._logger,
-                    ),
-                    AzureProviderApi.SINGLE_VM.value: SingleVMHandler(
-                        azure_client=azure_client,
-                        logger=self._logger,
-                    ),
-                    AzureProviderApi.CYCLECLOUD.value: CycleCloudHandler(
-                        azure_client=azure_client,
-                        logger=self._logger,
-                    ),
-                }
-            return self._handlers
+    def _get_handler_factory(self) -> Optional["AzureHandlerFactory"]:
+        """Resolve the Azure handler factory lazily using the strategy-owned client."""
+        with self._lazy_init_lock:
+            if self._handler_factory is not None:
+                return self._handler_factory
+
+            if self._azure_handler_factory_resolver is not None:
+                try:
+                    self._handler_factory = self._azure_handler_factory_resolver()
+                    return self._handler_factory
+                except Exception as exc:
+                    self._logger.warning(
+                        "Failed to resolve AzureHandlerFactory lazily: %s",
+                        exc,
+                        exc_info=True,
+                    )
+                    self._handler_factory = None
+                    return None
+
+            azure_client = self.azure_client
+            if azure_client is None:
+                return None
+
+            from orb.providers.azure.infrastructure.azure_handler_factory import (
+                AzureHandlerFactory,
+            )
+
+            self._handler_factory = AzureHandlerFactory(
+                azure_client=azure_client,
+                logger=self._logger,
+            )
+            return self._handler_factory
+
+    def _resolve_handler(
+        self,
+        provider_api: AzureProviderApiRef,
+        *,
+        allow_vmss_uniform_fallback: bool = False,
+    ) -> Optional["AzureHandler"]:
+        """Resolve one handler from explicit overrides or the canonical factory."""
+        provider_api_value = self._provider_api_key(provider_api)
+        handler = self._handlers.get(provider_api_value)
+        if handler is not None:
+            return handler
+
+        handler_factory = self._get_handler_factory()
+        if handler_factory is None:
+            return None
+
+        try:
+            return handler_factory.create_handler(provider_api)
+        except AzureValidationError:
+            if allow_vmss_uniform_fallback and provider_api == AzureProviderApi.VMSS_UNIFORM:
+                override_handler = self._handlers.get(AzureProviderApi.VMSS.value)
+                if override_handler is not None:
+                    return override_handler
+                return handler_factory.create_handler(AzureProviderApi.VMSS)
+            return None
 
     def _build_azure_template_config(self, template_config: dict[str, Any]) -> dict[str, Any]:
         """Coalesce provider-owned and Azure-default fields before AzureTemplate validation."""
@@ -557,6 +595,7 @@ class AzureProviderStrategy(ProviderStrategy):
             self._client = None
             self._resource_manager = None
             self._deployment_service = None
+            self._handler_factory = None
             self._handlers = {}
             self._vmss_cleanup_coordinator.clear()
             self._initialized = False
@@ -649,7 +688,7 @@ class AzureProviderStrategy(ProviderStrategy):
             create_context = self._provisioning_service.build_create_operation_context(
                 operation=operation,
                 normalize_provider_api=self._normalize_provider_api_value,
-                resolve_handler=lambda api: self.handlers.get(self._provider_api_key(api)),
+                resolve_handler=self._resolve_handler,
                 build_template=lambda tc: AzureTemplate.model_validate(
                     self._build_azure_template_config(tc)
                 ),
@@ -671,7 +710,7 @@ class AzureProviderStrategy(ProviderStrategy):
                     template_config=template_config,
                     operation=operation,
                     provider_instance_name=self.provider_instance_name,
-                    handler=self.handlers.get(api_key),
+                    handler=self._resolve_handler(create_context.provider_api),
                     azure_client=self.azure_client,
                     plan_override=self._build_spot_placement_plan(
                         create_context.azure_template, create_context.count
@@ -732,7 +771,7 @@ class AzureProviderStrategy(ProviderStrategy):
                 is_dry_run=is_dry_run,
                 resolve_operation_provider_api=self._resolve_operation_provider_api,
                 provider_api_key=self._provider_api_key,
-                handlers=self.handlers,
+                resolve_handler=self._resolve_handler,
                 group_instance_ids_by_resource=group_instance_ids_by_resource,
                 resolve_operation_resource_group=lambda op: resolve_operation_resource_group(
                     op, self._azure_config.resource_group,
@@ -802,9 +841,10 @@ class AzureProviderStrategy(ProviderStrategy):
         if not provider_api:
             return None
 
-        handler = self.handlers.get(self._provider_api_key(provider_api))
-        if not handler and provider_api == AzureProviderApi.VMSS_UNIFORM:
-            handler = self.handlers.get(AzureProviderApi.VMSS.value)
+        handler = self._resolve_handler(
+            provider_api,
+            allow_vmss_uniform_fallback=True,
+        )
         if not handler and not grouped_resource_mapping:
             return None
 
@@ -825,7 +865,10 @@ class AzureProviderStrategy(ProviderStrategy):
             for resource_id, mapped_ids in grouped_resource_mapping.items():
                 group_handler = handler
                 if not group_handler and provider_api:
-                    group_handler = self.handlers.get(self._provider_api_key(provider_api))
+                    group_handler = self._resolve_handler(
+                        provider_api,
+                        allow_vmss_uniform_fallback=True,
+                    )
                 if not group_handler:
                     continue
 
@@ -1014,7 +1057,7 @@ class AzureProviderStrategy(ProviderStrategy):
         provider_api_key = read_context.provider_api_key or ""
         resource_group = read_context.resource_group
 
-        handler = self.handlers.get(provider_api_key)
+        handler = self._resolve_handler(provider_api_key)
         if not handler:
             return ProviderResult.error_result(
                 f"No handler available for provider_api: {provider_api_key}",
