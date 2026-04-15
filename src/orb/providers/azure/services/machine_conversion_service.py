@@ -2,17 +2,15 @@
 
 from __future__ import annotations
 
-from typing import Any, Protocol, cast
+from typing import Any, cast
 
 from orb.domain.base.ports import LoggingPort
 from orb.providers.azure.infrastructure.azure_client import AzureClient
 from orb.providers.azure.infrastructure.handlers.azure_status import resolve_power_state
-
-
-class _AzureVmWithName(Protocol):
-    """Structural type for Azure VM objects that expose a name attribute."""
-
-    name: str | None
+from orb.providers.azure.infrastructure.sdk_shapes import (
+    AzureVmWithNameProtocol,
+    instance_view_statuses,
+)
 
 
 class AzureMachineConversionService:
@@ -23,15 +21,15 @@ class AzureMachineConversionService:
 
     @staticmethod
     def _resolve_power_state(vm: Any) -> str:
-        instance_view = vm.instance_view
-        if not instance_view or not hasattr(instance_view, "statuses"):
+        statuses = instance_view_statuses(vm.instance_view)
+        if statuses is None:
             return "unknown"
-        return resolve_power_state(instance_view.statuses)
+        return resolve_power_state(statuses)
 
     def convert_sdk_vm(self, vm: Any, azure_client: AzureClient) -> dict[str, Any]:
         """Convert an Azure SDK VirtualMachine into a normalized machine dict."""
         network_identity = azure_client.resolve_network_identity_from_vm(vm)
-        vm_name = cast(_AzureVmWithName, vm).name
+        vm_name = cast(AzureVmWithNameProtocol, vm).name
         hardware_profile = vm.hardware_profile
 
         return {

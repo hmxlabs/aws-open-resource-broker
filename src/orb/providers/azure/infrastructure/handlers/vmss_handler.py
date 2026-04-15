@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
-from typing import Any, Optional, Protocol, cast
+from typing import Any, Optional, cast
 
 from orb.domain.base.dependency_injection import injectable
 from orb.domain.request.aggregate import Request
@@ -36,6 +36,10 @@ from orb.providers.azure.exceptions.azure_exceptions import (
 from orb.providers.azure.infrastructure.error_utils import (
     canonical_azure_error_code,
     extract_azure_error_details,
+)
+from orb.providers.azure.infrastructure.sdk_shapes import (
+    AzureVmWithIdentityProtocol,
+    instance_view_statuses,
 )
 from orb.providers.azure.infrastructure.handlers._network_identity import (
     empty_network_identity,
@@ -61,16 +65,7 @@ def _status_attr(status: Any, attr: str, default: Any = None) -> Any:
     (SDK InstanceViewStatus, plain dicts wrapped in SimpleNamespace, etc.) and
     the requested attribute varies per call-site.
     """
-    if hasattr(status, attr):
-        return getattr(status, attr)
-    return default
-
-
-class _AzureVmWithIdentity(Protocol):
-    """Protocol for Azure VM objects that expose name and vm_id fields."""
-
-    name: Optional[str]
-    vm_id: Optional[str]
+    return getattr(status, attr, default)
 
 
 @dataclass(frozen=True)
@@ -99,7 +94,7 @@ def _read_vm_identity(vm: Any) -> _AzureVmIdentity:
     `vm_id` but not `instance_id`. When Azure returns a regular VM object,
     `name` becomes the stable machine identifier when `instance_id` is absent.
     """
-    typed_vm = cast(_AzureVmWithIdentity, vm)
+    typed_vm = cast(AzureVmWithIdentityProtocol, vm)
     vm_name = typed_vm.name
     instance_id = str(_status_attr(vm, "instance_id", "") or vm_name or "")
     vm_id = str(typed_vm.vm_id or instance_id)
@@ -834,10 +829,11 @@ class VMSSHandler(AzureHandler):
         # Extract status
         status = "unknown"
         instance_view = vm.instance_view
-        if instance_view and hasattr(instance_view, "statuses"):
-            status = resolve_power_state(instance_view.statuses)
+        vm_statuses = instance_view_statuses(instance_view)
+        if vm_statuses is not None:
+            status = resolve_power_state(vm_statuses)
             fleet_errors = self._extract_vm_errors(
-                instance_view.statuses,
+                vm_statuses,
                 instance_id=vm_identity.instance_id,
                 vmss_name=vmss_name,
             )
@@ -877,8 +873,8 @@ class VMSSHandler(AzureHandler):
 
         # Launch time approximation
         launch_time = None
-        if instance_view and hasattr(instance_view, "statuses"):
-            for s in instance_view.statuses:
+        if vm_statuses is not None:
+            for s in vm_statuses:
                 t = s.time
                 if t is not None:
                     launch_time = str(t)

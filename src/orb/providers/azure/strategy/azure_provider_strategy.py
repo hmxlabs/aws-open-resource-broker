@@ -28,7 +28,7 @@ from orb.providers.azure.capabilities import (
 )
 from orb.providers.azure.domain.template.azure_template_aggregate import AzureTemplate
 from orb.providers.azure.domain.template.value_objects import AzureProviderApi
-from orb.providers.azure.exceptions import AzureValidationError
+from orb.providers.azure.exceptions import AzureError, AzureValidationError
 from orb.providers.azure.infrastructure.error_utils import (
     canonical_azure_error_code,
     extract_azure_error_details,
@@ -88,7 +88,6 @@ if TYPE_CHECKING:
     )
 
 AzureProviderApiRef = AzureProviderApi | str
-
 
 @injectable
 class AzureProviderStrategy(ProviderStrategy):
@@ -626,7 +625,7 @@ class AzureProviderStrategy(ProviderStrategy):
         error_code = getattr(exc, "error_code", None) or default_code
         merged = dict(metadata or {})
         merged["error_class"] = type(exc).__name__
-        if hasattr(exc, "to_dict"):
+        if isinstance(exc, AzureError):
             merged["provider_error"] = exc.to_dict()
         return ProviderResult.error_result(message, error_code, merged)
 
@@ -1101,11 +1100,12 @@ class AzureProviderStrategy(ProviderStrategy):
             }
             if provider_api in (AzureProviderApi.VMSS, AzureProviderApi.VMSS_UNIFORM):
                 vmss_errors: list[dict[str, Any]] = []
-                if resource_group and hasattr(handler, "get_vmss_resource_errors"):
+                # getattr: this VMSS-only helper is optional on the handler surface and
+                # may be provided by test doubles rather than the concrete VMSS class.
+                get_vmss_resource_errors = getattr(handler, "get_vmss_resource_errors", None)
+                if resource_group and callable(get_vmss_resource_errors):
                     for resource_id in resource_ids:
-                        for error in handler.get_vmss_resource_errors(
-                            resource_group, resource_id
-                        ):
+                        for error in get_vmss_resource_errors(resource_group, resource_id):
                             if error not in vmss_errors:
                                 vmss_errors.append(error)
                 if vmss_errors:
