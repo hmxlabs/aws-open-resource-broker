@@ -10,6 +10,7 @@ class ProviderType(str, Enum):
 
     AWS = "aws"
     AZURE = "azure"
+    GCP = "gcp"
     PROVIDER1 = "provider1"
     Provider2 = "provider2"
 
