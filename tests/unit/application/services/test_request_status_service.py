@@ -100,6 +100,20 @@ class TestReturnRequestCompletion:
         assert status == RequestStatus.IN_PROGRESS.value
         assert "follow-up cleanup" in message
 
+    def test_return_request_with_all_terminated_stays_in_progress_while_follow_up_pending(self):
+        machines = [
+            _make_machine(MachineStatus.TERMINATED),
+            _make_machine(MachineStatus.TERMINATED),
+        ]
+        status, message = self.svc.determine_status_from_machines(
+            db_machines=machines,  # type: ignore[arg-type]
+            provider_machines=machines,  # type: ignore[arg-type]
+            request=self.req,
+            provider_metadata={"termination_follow_up_pending": True},
+        )
+        assert status == RequestStatus.IN_PROGRESS.value
+        assert "follow-up cleanup" in message
+
 
 class _FakeUnitOfWork(AbstractContextManager):
     def __init__(self, requests_repo) -> None:
@@ -208,17 +222,3 @@ def test_acquire_request_with_terminal_planned_shortfall_and_no_instances_become
 
     assert status == RequestStatus.FAILED.value
     assert message == "OperationNotAllowed: quota exceeded"
-
-    def test_return_request_with_all_terminated_stays_in_progress_while_follow_up_pending(self):
-        machines = [
-            _make_machine(MachineStatus.TERMINATED),
-            _make_machine(MachineStatus.TERMINATED),
-        ]
-        status, message = self.svc.determine_status_from_machines(
-            db_machines=machines,  # type: ignore[arg-type]
-            provider_machines=machines,  # type: ignore[arg-type]
-            request=self.req,
-            provider_metadata={"termination_follow_up_pending": True},
-        )
-        assert status == RequestStatus.IN_PROGRESS.value
-        assert "follow-up cleanup" in message
