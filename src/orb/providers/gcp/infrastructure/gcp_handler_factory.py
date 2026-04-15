@@ -25,24 +25,30 @@ class GCPHandlerFactory:
         self._compute_client = compute_client
         self._config = config
         self._logger = logger
-        self._handlers: dict[str, GCPHandler] = {}
-        self._handler_classes: dict[str, type[GCPHandler]] = {}
+        self._handlers: dict[GCPProviderApi, GCPHandler] = {}
+        self._handler_classes: dict[GCPProviderApi, type[GCPHandler]] = {}
         self._register_handler_classes()
+
+    @staticmethod
+    def _normalize_handler_type(handler_type: GCPProviderApi | str) -> GCPProviderApi:
+        """Normalize string or enum handler input to the canonical enum."""
+        if isinstance(handler_type, GCPProviderApi):
+            return handler_type
+        return GCPProviderApi(handler_type)
 
     def create_handler(self, handler_type: GCPProviderApi | str) -> GCPHandler:
         """Return a cached handler instance for the requested GCP API."""
-        handler_key = handler_type.value if isinstance(handler_type, GCPProviderApi) else handler_type
+        try:
+            handler_key = self._normalize_handler_type(handler_type)
+        except ValueError as exc:
+            raise GCPValidationError(f"Invalid GCP handler type: {handler_type}") from exc
+
         if handler_key in self._handlers:
             return self._handlers[handler_key]
 
-        try:
-            GCPProviderApi(handler_key)
-        except ValueError as exc:
-            raise GCPValidationError(f"Invalid GCP handler type: {handler_key}") from exc
-
         handler_class = self._handler_classes.get(handler_key)
         if handler_class is None:
-            raise GCPValidationError(f"No handler class registered for type: {handler_key}")
+            raise GCPValidationError(f"No handler class registered for type: {handler_key.value}")
 
         handler = handler_class(
             compute_client=self._compute_client,
@@ -61,6 +67,6 @@ class GCPHandlerFactory:
         )
 
         self._handler_classes = {
-            GCPProviderApi.MIG.value: GCPManagedInstanceGroupHandler,
-            GCPProviderApi.SINGLE_VM.value: GCPSingleVMHandler,
+            GCPProviderApi.MIG: GCPManagedInstanceGroupHandler,
+            GCPProviderApi.SINGLE_VM: GCPSingleVMHandler,
         }
