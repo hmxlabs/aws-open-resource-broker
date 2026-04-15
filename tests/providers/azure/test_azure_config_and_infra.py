@@ -347,6 +347,54 @@ class TestAzureHandlerFactory:
         assert second_strategy.azure_client.perf_config["max_workers"] == 9
         assert config_port.get_typed.call_count == 2
 
+    def test_vmss_handler_receives_explicit_optional_services_from_factory(self):
+        azure_client = MagicMock(spec=AzureClient)
+        logger = MagicMock()
+        azure_native_spec_service = MagicMock()
+        azure_resource_manager = MagicMock()
+
+        factory = AzureHandlerFactory(
+            azure_client=azure_client,
+            logger=logger,
+            azure_native_spec_service=azure_native_spec_service,
+            azure_resource_manager=azure_resource_manager,
+        )
+
+        handler = factory.create_handler(AzureProviderApi.VMSS)
+
+        assert handler.azure_native_spec_service is azure_native_spec_service
+        assert handler.azure_resource_manager is azure_resource_manager
+
+    def test_single_vm_handler_receives_explicit_native_spec_service_from_factory(self):
+        azure_client = MagicMock(spec=AzureClient)
+        logger = MagicMock()
+        azure_native_spec_service = MagicMock()
+
+        factory = AzureHandlerFactory(
+            azure_client=azure_client,
+            logger=logger,
+            azure_native_spec_service=azure_native_spec_service,
+        )
+
+        handler = factory.create_handler(AzureProviderApi.SINGLE_VM)
+
+        assert handler.azure_native_spec_service is azure_native_spec_service
+
+    def test_create_azure_strategy_uses_explicit_native_spec_service(self):
+        azure_native_spec_service = MagicMock()
+
+        strategy = create_azure_strategy(
+            {
+                "subscription_id": "12345678-1234-1234-1234-123456789012",
+                "resource_group": "rg-explicit",
+                "region": "westeurope",
+            },
+            provider_instance_name="azure-test",
+            azure_native_spec_service=azure_native_spec_service,
+        )
+
+        assert strategy._azure_native_spec_service is azure_native_spec_service
+
 
 # ---------------------------------------------------------------------------
 # Template extension

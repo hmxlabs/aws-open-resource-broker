@@ -17,6 +17,9 @@ if TYPE_CHECKING:
     from orb.providers.azure.infrastructure.adapters.azure_validation_adapter import (
         AzureValidationAdapter,
     )
+    from orb.providers.azure.infrastructure.services.azure_native_spec_service import (
+        AzureNativeSpecService,
+    )
     from orb.providers.azure.infrastructure.azure_client import (
         AzureClient,
         AzureClientRuntimeConfig,
@@ -92,6 +95,7 @@ def create_azure_strategy(
     provider_instance_name: str,
     performance_config: PerformanceConfig | None = None,
     config_port: Optional["ConfigurationPort"] = None,
+    azure_native_spec_service: Optional["AzureNativeSpecService"] = None,
 ) -> "AzureProviderStrategy":
     """Create an ``AzureProviderStrategy`` from raw provider config data.
 
@@ -101,7 +105,6 @@ def create_azure_strategy(
     """
     from orb.infrastructure.adapters.logging_adapter import LoggingAdapter
     from orb.providers.azure.configuration.config import AzureProviderConfig
-    from orb.providers.azure.infrastructure.azure_handler_factory import AzureHandlerFactory
     from orb.providers.azure.services.cyclecloud_request_context_service import (
         create_cyclecloud_request_lookup,
     )
@@ -131,6 +134,7 @@ def create_azure_strategy(
             logger=logger,
             provider_instance_name=provider_instance_name,
             azure_client_resolver=lambda: _create_azure_client(runtime_config, logger),
+            azure_native_spec_service=azure_native_spec_service,
             cyclecloud_request_lookup=cyclecloud_request_lookup,
         )
 
@@ -372,9 +376,22 @@ def _register_azure_components_with_di(
 
     def azure_handler_factory_factory(container_instance: Any) -> Any:
         """Factory to create an Azure handler factory for the named provider instance."""
+        from orb.providers.azure.infrastructure.services.azure_native_spec_service import (
+            AzureNativeSpecService,
+        )
+        from orb.providers.azure.managers.azure_resource_manager import AzureResourceManager
+
+        azure_client = container_instance.get(f"AzureClient_{instance_name}")
+        logger_port = container_instance.get(LoggingPort)
         return AzureHandlerFactory(
-            azure_client=container_instance.get(f"AzureClient_{instance_name}"),
-            logger=container_instance.get(LoggingPort),
+            azure_client=azure_client,
+            logger=logger_port,
+            azure_native_spec_service=container_instance.get_optional(AzureNativeSpecService),
+            azure_resource_manager=AzureResourceManager(
+                azure_client=azure_client,
+                config=azure_config,
+                logger=logger_port,
+            ),
         )
 
     container.register_factory(
@@ -395,6 +412,9 @@ def _create_azure_strategy_with_di(
     from orb.providers.azure.services.cyclecloud_request_context_service import (
         create_cyclecloud_request_lookup,
     )
+    from orb.providers.azure.infrastructure.services.azure_native_spec_service import (
+        AzureNativeSpecService,
+    )
     from orb.providers.azure.strategy.azure_provider_strategy import AzureProviderStrategy
 
     return AzureProviderStrategy(
@@ -403,6 +423,7 @@ def _create_azure_strategy_with_di(
         provider_instance_name=instance_name,
         azure_client_resolver=lambda: container.get(f"AzureClient_{instance_name}"),
         azure_handler_factory_resolver=lambda: container.get(f"AzureHandlerFactory_{instance_name}"),
+        azure_native_spec_service=container.get_optional(AzureNativeSpecService),
         cyclecloud_request_lookup=create_cyclecloud_request_lookup(
             container.get(UnitOfWorkFactory)
         ),

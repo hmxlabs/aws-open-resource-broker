@@ -86,6 +86,9 @@ if TYPE_CHECKING:
     from orb.providers.azure.infrastructure.services.azure_deployment_service import (
         AzureDeploymentService,
     )
+    from orb.providers.azure.infrastructure.services.azure_native_spec_service import (
+        AzureNativeSpecService,
+    )
 
 AzureProviderApiRef = AzureProviderApi | str
 
@@ -106,6 +109,7 @@ class AzureProviderStrategy(ProviderStrategy):
         provider_instance_name: str,
         azure_client_resolver: Optional[Callable[[], "AzureClient"]] = None,
         azure_handler_factory_resolver: Optional[Callable[[], "AzureHandlerFactory"]] = None,
+        azure_native_spec_service: Optional["AzureNativeSpecService"] = None,
         vmss_cleanup_coordinator: Optional[VmssCleanupCoordinator] = None,
         cyclecloud_request_lookup: Optional[CycleCloudRequestLookup] = None,
     ) -> None:
@@ -120,6 +124,7 @@ class AzureProviderStrategy(ProviderStrategy):
         self._client: Optional["AzureClient"] = None
         self._azure_client_resolver = azure_client_resolver
         self._azure_handler_factory_resolver = azure_handler_factory_resolver
+        self._azure_native_spec_service = azure_native_spec_service
         self._resource_manager: Optional["AzureResourceManager"] = None
         self._deployment_service: Optional[AzureDeploymentService] = None
         self._handler_factory: Optional["AzureHandlerFactory"] = None
@@ -263,6 +268,8 @@ class AzureProviderStrategy(ProviderStrategy):
             self._handler_factory = AzureHandlerFactory(
                 azure_client=azure_client,
                 logger=self._logger,
+                azure_native_spec_service=self._azure_native_spec_service,
+                azure_resource_manager=self.resource_manager,
             )
             return self._handler_factory
 
