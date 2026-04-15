@@ -112,13 +112,12 @@ class AzureHandlerFactory:
         """Collect example templates from all registered handlers."""
         examples: list[dict] = []
         for handler_type, handler_class in self._handler_classes.items():
-            if hasattr(handler_class, "get_example_templates"):
-                try:
-                    examples.extend(handler_class.get_example_templates())
-                except Exception as exc:
-                    self._logger.warning(
-                        "Failed to get example templates from %s: %s",
-                        handler_type,
-                        exc,
-                    )
+            try:
+                examples.extend(handler_class.get_example_templates())
+            except Exception as exc:
+                self._logger.warning(
+                    "Failed to get example templates from %s: %s",
+                    handler_type,
+                    exc,
+                )
         return examples

@@ -24,6 +24,7 @@ from orb.providers.azure.infrastructure.error_utils import (
     canonical_azure_error_code,
     extract_azure_error_details,
 )
+from orb.providers.azure.infrastructure.sdk_shapes import instance_view_statuses
 from orb.providers.azure.infrastructure.handlers._network_identity import (
     empty_network_identity,
     network_identity_soft_failure_types,
@@ -310,9 +311,9 @@ class SingleVMHandler(AzureHandler):
                     expand="instanceView",
                 )
                 status = "unknown"
-                instance_view = vm.instance_view
-                if instance_view and hasattr(instance_view, "statuses"):
-                    status = resolve_power_state(instance_view.statuses)
+                statuses = instance_view_statuses(vm.instance_view)
+                if statuses is not None:
+                    status = resolve_power_state(statuses)
 
                 hw = vm.hardware_profile
                 network_identity = empty_network_identity()

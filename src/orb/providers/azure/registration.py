@@ -5,6 +5,7 @@ provider with the provider registry, template extension registry, and
 DI container.
 """
 
+from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any, Optional
 
 from orb.config import PerformanceConfig
@@ -86,13 +87,18 @@ def _create_azure_client(
 
 
 def create_azure_strategy(
-    provider_config: Any,
+    provider_config: Mapping[str, Any],
     *,
     provider_instance_name: str,
     performance_config: PerformanceConfig | None = None,
     config_port: Optional["ConfigurationPort"] = None,
 ) -> "AzureProviderStrategy":
-    """Create an ``AzureProviderStrategy`` from provider configuration."""
+    """Create an ``AzureProviderStrategy`` from raw provider config data.
+
+    Azure/GCP are standardized at this boundary for now: provider factories
+    consume only the provider's config mapping, while instance registration
+    is responsible for unpacking ``provider_instance.config``.
+    """
     from orb.infrastructure.adapters.logging_adapter import LoggingAdapter
     from orb.providers.azure.configuration.config import AzureProviderConfig
     from orb.providers.azure.infrastructure.azure_handler_factory import AzureHandlerFactory
@@ -102,12 +108,7 @@ def create_azure_strategy(
     from orb.providers.azure.strategy.azure_provider_strategy import AzureProviderStrategy
 
     try:
-        config_data = (
-            provider_config.config
-            if hasattr(provider_config, "config")
-            else provider_config
-        )
-        azure_config = AzureProviderConfig(**config_data)
+        azure_config = AzureProviderConfig(**provider_config)
         logger = LoggingAdapter()
         cyclecloud_request_lookup = None
         try:
@@ -140,20 +141,21 @@ def create_azure_strategy(
         raise RuntimeError(f"Failed to create Azure strategy: {exc!s}")
 
 
-def create_azure_config(data: dict[str, Any]) -> "AzureProviderConfig":
+def create_azure_config(data: Mapping[str, Any]) -> "AzureProviderConfig":
     """Create an ``AzureProviderConfig`` from a data dict."""
     try:
         from orb.providers.azure.configuration.config import AzureProviderConfig
 
-        config_data = data.config if hasattr(data, "config") else data
-        return AzureProviderConfig(**config_data)
+        return AzureProviderConfig(**data)
     except ImportError as exc:
         raise ImportError(f"Azure configuration not available: {exc!s}")
     except Exception as exc:
         raise RuntimeError(f"Failed to create Azure config: {exc!s}")
 
 
-def create_azure_validator(provider_config: Any = None) -> Optional["AzureValidationAdapter"]:
+def create_azure_validator(
+    provider_config: "AzureProviderConfig | Mapping[str, Any] | None" = None
+) -> Optional["AzureValidationAdapter"]:
     """Create an Azure template validator."""
     from orb.infrastructure.adapters.logging_adapter import LoggingAdapter
     from orb.providers.azure.configuration.config import AzureProviderConfig
@@ -167,9 +169,7 @@ def create_azure_validator(provider_config: Any = None) -> Optional["AzureValida
     try:
         if isinstance(provider_config, AzureProviderConfig):
             azure_config = provider_config
-        elif hasattr(provider_config, "config"):
-            azure_config = AzureProviderConfig(**provider_config.config)
-        elif isinstance(provider_config, dict):
+        elif isinstance(provider_config, Mapping):
             azure_config = AzureProviderConfig(**provider_config)
         else:
             return None
@@ -193,13 +193,17 @@ def _register_named_azure_provider_instance(
     registry.register_provider_instance(
         provider_type="azure",
         instance_name=instance_name,
-        strategy_factory=lambda provider_config: create_azure_strategy(
-            provider_config,
+        # Keep wrapper unpacking at the registry boundary instead of inside
+        # provider factories so Azure/GCP share one local contract.
+        strategy_factory=lambda provider_instance_config: create_azure_strategy(
+            provider_instance_config.config,
             provider_instance_name=instance_name,
             config_port=config_port,
         ),
         config_factory=create_azure_config,
-        validator_factory=create_azure_validator,
+        validator_factory=lambda provider_instance_config: create_azure_validator(
+            provider_instance_config.config
+        ),
     )
 
 
