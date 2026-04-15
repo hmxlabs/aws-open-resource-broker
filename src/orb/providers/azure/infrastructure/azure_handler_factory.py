@@ -4,6 +4,7 @@ Creates and caches Azure handlers based on ``provider_api`` values
 """
 
 from threading import RLock
+from typing import TYPE_CHECKING
 
 from orb.domain.base.dependency_injection import injectable
 from orb.domain.base.ports import LoggingPort
@@ -12,6 +13,12 @@ from orb.providers.azure.domain.template.value_objects import AzureProviderApi
 from orb.providers.azure.exceptions.azure_exceptions import AzureValidationError
 from orb.providers.azure.infrastructure.azure_client import AzureClient
 from orb.providers.azure.infrastructure.handlers.azure_handler import AzureHandler
+
+if TYPE_CHECKING:
+    from orb.providers.azure.infrastructure.services.azure_native_spec_service import (
+        AzureNativeSpecService,
+    )
+    from orb.providers.azure.managers.azure_resource_manager import AzureResourceManager
 
 
 @injectable
@@ -22,10 +29,14 @@ class AzureHandlerFactory:
         self,
         azure_client: AzureClient,
         logger: LoggingPort,
+        azure_native_spec_service: "AzureNativeSpecService | None" = None,
+        azure_resource_manager: "AzureResourceManager | None" = None,
     ) -> None:
         """Initialize the factory with an Azure client and register handler classes."""
         self._azure_client = azure_client
         self._logger = logger
+        self._azure_native_spec_service = azure_native_spec_service
+        self._azure_resource_manager = azure_resource_manager
         self._lock = RLock()
         self._handlers: dict[str, AzureHandler] = {}
         self._handler_classes: dict[str, type[AzureHandler]] = {}
@@ -63,11 +74,37 @@ class AzureHandlerFactory:
                     f"No handler class registered for type: {handler_type_key}"
                 )
 
-            handler_class = self._handler_classes[handler_type_key]
-            handler = handler_class(
-                azure_client=self._azure_client,
-                logger=self._logger,
-            )
+            if handler_type_key == AzureProviderApi.SINGLE_VM.value:
+                from orb.providers.azure.infrastructure.handlers.single_vm_handler import (
+                    SingleVMHandler,
+                )
+
+                handler = SingleVMHandler(
+                    azure_client=self._azure_client,
+                    logger=self._logger,
+                    azure_native_spec_service=self._azure_native_spec_service,
+                )
+            elif handler_type_key in (
+                AzureProviderApi.VMSS.value,
+                AzureProviderApi.VMSS_UNIFORM.value,
+            ):
+                from orb.providers.azure.infrastructure.handlers.vmss_handler import VMSSHandler
+
+                handler = VMSSHandler(
+                    azure_client=self._azure_client,
+                    logger=self._logger,
+                    azure_native_spec_service=self._azure_native_spec_service,
+                    azure_resource_manager=self._azure_resource_manager,
+                )
+            else:
+                from orb.providers.azure.infrastructure.handlers.cyclecloud_handler import (
+                    CycleCloudHandler,
+                )
+
+                handler = CycleCloudHandler(
+                    azure_client=self._azure_client,
+                    logger=self._logger,
+                )
             self._handlers[handler_type_key] = handler
             self._logger.debug("Created Azure handler for type: %s", handler_type_key)
             return handler

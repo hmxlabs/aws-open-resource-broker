@@ -19,11 +19,10 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
-from typing import Any, Optional, cast
+from typing import TYPE_CHECKING, Any, Optional, cast
 
 from orb.domain.base.dependency_injection import injectable
 from orb.domain.request.aggregate import Request
-from orb.infrastructure.di.container import get_container
 from orb.providers.azure.domain.template.azure_template_aggregate import AzureTemplate
 from orb.providers.azure.domain.template.value_objects import AzureProviderApi
 from orb.providers.azure.exceptions.azure_exceptions import (
@@ -56,6 +55,14 @@ from orb.providers.azure.infrastructure.handlers.azure_handler import (
     AzureReleaseHostsResult,
 )
 from orb.providers.azure.domain.template.value_objects import AzureVMSSOrchestrationMode
+
+if TYPE_CHECKING:
+    from orb.domain.base.ports import LoggingPort
+    from orb.providers.azure.infrastructure.azure_client import AzureClient
+    from orb.providers.azure.infrastructure.services.azure_native_spec_service import (
+        AzureNativeSpecService,
+    )
+    from orb.providers.azure.managers.azure_resource_manager import AzureResourceManager
 
 
 def _status_attr(status: Any, attr: str, default: Any = None) -> Any:
@@ -112,24 +119,18 @@ class VMSSHandler(AzureHandler):
     ``provider_api = "VMSS"`` or ``"VMSSUniform"``
     """
 
-    def __init__(self, *args, **kwargs) -> None:
-        """Initialize handler with native-spec and resource-manager services."""
-        super().__init__(*args, **kwargs)
-        container = get_container()
-        try:
-            from orb.providers.azure.infrastructure.services.azure_native_spec_service import (
-                AzureNativeSpecService,
-            )
-
-            self.azure_native_spec_service = container.get(AzureNativeSpecService)
-        except Exception:
-            self.azure_native_spec_service = None
-        try:
-            from orb.providers.azure.managers.azure_resource_manager import AzureResourceManager
-
-            self.azure_resource_manager = container.get(AzureResourceManager)
-        except Exception:
-            self.azure_resource_manager = None
+    def __init__(
+        self,
+        azure_client: "AzureClient",
+        logger: "LoggingPort",
+        *,
+        azure_native_spec_service: "AzureNativeSpecService | None" = None,
+        azure_resource_manager: "AzureResourceManager | None" = None,
+    ) -> None:
+        """Initialize handler with explicit optional infrastructure services."""
+        super().__init__(azure_client=azure_client, logger=logger)
+        self.azure_native_spec_service = azure_native_spec_service
+        self.azure_resource_manager = azure_resource_manager
 
     # ------------------------------------------------------------------
     # acquire_hosts

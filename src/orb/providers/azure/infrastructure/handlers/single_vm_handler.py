@@ -8,12 +8,11 @@ is suitable for long-lived singleton workloads.
 from __future__ import annotations
 
 import uuid
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 from azure.core.exceptions import ResourceNotFoundError as AzureResourceNotFoundError
 from orb.domain.base.dependency_injection import injectable
 from orb.domain.request.aggregate import Request
-from orb.infrastructure.di.container import get_container
 from orb.providers.azure.domain.template.azure_template_aggregate import AzureTemplate
 from orb.providers.azure.domain.template.value_objects import AzureProviderApi
 from orb.providers.azure.exceptions.azure_exceptions import (
@@ -38,6 +37,13 @@ from orb.providers.azure.infrastructure.handlers.azure_handler import (
     AzureReleaseHostsResult,
 )
 
+if TYPE_CHECKING:
+    from orb.domain.base.ports import LoggingPort
+    from orb.providers.azure.infrastructure.azure_client import AzureClient
+    from orb.providers.azure.infrastructure.services.azure_native_spec_service import (
+        AzureNativeSpecService,
+    )
+
 
 def _looks_like_uuid(value: str) -> bool:
     try:
@@ -54,9 +60,15 @@ class SingleVMHandler(AzureHandler):
     ``provider_api = "SingleVM"``
     """
 
-    def __init__(self, *args, **kwargs) -> None:
-        """Initialize handler with deployment and native-spec services."""
-        super().__init__(*args, **kwargs)
+    def __init__(
+        self,
+        azure_client: "AzureClient",
+        logger: "LoggingPort",
+        *,
+        azure_native_spec_service: "AzureNativeSpecService | None" = None,
+    ) -> None:
+        """Initialize handler with deployment and optional native-spec service."""
+        super().__init__(azure_client=azure_client, logger=logger)
         from orb.providers.azure.infrastructure.services.azure_deployment_service import (
             AzureDeploymentService,
         )
@@ -65,15 +77,7 @@ class SingleVMHandler(AzureHandler):
             azure_client=self.azure_client,
             logger=self._logger,
         )
-        container = get_container()
-        try:
-            from orb.providers.azure.infrastructure.services.azure_native_spec_service import (
-                AzureNativeSpecService,
-            )
-
-            self.azure_native_spec_service = container.get(AzureNativeSpecService)
-        except Exception:
-            self.azure_native_spec_service = None
+        self.azure_native_spec_service = azure_native_spec_service
 
     def acquire_hosts(
         self, request: Request, template: AzureTemplate
