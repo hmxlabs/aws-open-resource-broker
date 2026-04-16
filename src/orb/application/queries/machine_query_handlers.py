@@ -143,6 +143,7 @@ class ListMachinesHandler(BaseQueryHandler[ListMachinesQuery, list[MachineDTO]])
 
                 machine_dtos = []
                 for machine in machines:
+                    # Refresh running machines with live AWS state before building DTOs
                     if machine.status.value == "running" and machine.request_id:
                         try:
                             request = uow.requests.get_by_id(machine.request_id)
@@ -161,7 +162,10 @@ class ListMachinesHandler(BaseQueryHandler[ListMachinesQuery, list[MachineDTO]])
                                         request, [machine], provider_machines
                                     )
                                     if synced_machines:
-                                        machine = synced_machines[0]
+                                        for sm in synced_machines:
+                                            if sm.machine_id == machine.machine_id:
+                                                machine = sm
+                                                break
                         except Exception as e:
                             self.logger.debug(f"Sync failed for machine {machine.machine_id}: {e}")
 
