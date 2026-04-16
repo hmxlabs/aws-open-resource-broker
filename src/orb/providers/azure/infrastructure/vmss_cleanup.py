@@ -450,6 +450,6 @@ class VmssCleanupCoordinator:
         except Exception as exc:
             with self._lock:
                 current = self._pending_cleanups.get(key)
-                if current is pending:
-                    pending.mark_delete_retry_pending(exc)
+                if current is not None:
+                    current.mark_delete_retry_pending(exc)
             raise
