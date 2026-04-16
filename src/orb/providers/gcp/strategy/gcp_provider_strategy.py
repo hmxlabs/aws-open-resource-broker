@@ -58,6 +58,7 @@ class GCPProviderStrategy(ProviderStrategy):
         self._provisioning_service = GCPProvisioningService()
         self._compute_client: Optional[GCPComputeClient] = None
         self._handler_factory: Optional[GCPHandlerFactory] = None
+        self._operation_context_service: Optional[GCPOperationContextService] = None
 
     @property
     def provider_type(self) -> str:
@@ -88,6 +89,11 @@ class GCPProviderStrategy(ProviderStrategy):
             compute_client=self._compute_client,
             config=self._config,
             logger=self._logger,
+        )
+        self._operation_context_service = GCPOperationContextService(
+            config=self._config,
+            handler_factory=self._handler_factory,
+            provider_name=self._provider_name,
         )
         self._initialized = True
         self._logger.info("GCP provider strategy ready for project: %s", self._config.project_id)
@@ -322,11 +328,17 @@ class GCPProviderStrategy(ProviderStrategy):
         return self._handler_factory
 
     def _get_operation_context_service(self) -> GCPOperationContextService:
-        return GCPOperationContextService(
-            config=self._config,
-            handler_factory=self._get_handler_factory(),
-            provider_name=self._provider_name,
-        )
+        handler_factory = self._get_handler_factory()
+        if (
+            self._operation_context_service is None
+            or self._operation_context_service.handler_factory is not handler_factory
+        ):
+            self._operation_context_service = GCPOperationContextService(
+                config=self._config,
+                handler_factory=handler_factory,
+                provider_name=self._provider_name,
+            )
+        return self._operation_context_service
 
     def get_capabilities(self) -> ProviderCapabilities:
         """Describe the operations and features supported by the GCP provider."""

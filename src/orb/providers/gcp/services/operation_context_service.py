@@ -6,7 +6,7 @@ from typing import Mapping
 
 from orb.domain.request.aggregate import Request
 from orb.domain.request.value_objects import RequestType
-from orb.providers.base.strategy import ProviderOperation, ProviderResult
+from orb.providers.base.strategy import ProviderOperation
 from orb.providers.gcp.configuration.config import GCPProviderConfig
 from orb.providers.gcp.configuration.template_extension import GCPTemplateExtensionConfig
 from orb.providers.gcp.domain.template.gcp_template_aggregate import GCPTemplate
@@ -33,6 +33,11 @@ class GCPOperationContextService:
         self._config = config
         self._handler_factory = handler_factory
         self._provider_name = provider_name
+
+    @property
+    def handler_factory(self) -> GCPHandlerFactory:
+        """Expose the bound handler factory for strategy cache invalidation."""
+        return self._handler_factory
 
     def build_create_context(
         self,

@@ -42,11 +42,11 @@ class _ComputeClientStub:
         self.template_operation_result_called = False
 
     class _OperationStub(SimpleNamespace):
-        def __init__(self, owner: "_ComputeClientStub", **kwargs) -> None:
+        def __init__(self, owner: _ComputeClientStub, **kwargs) -> None:
             super().__init__(**kwargs)
             self._owner = owner
 
-        def result(self) -> "_ComputeClientStub._OperationStub":
+        def result(self) -> _ComputeClientStub._OperationStub:
             self._owner.template_operation_result_called = True
             return self
 
@@ -808,6 +808,28 @@ def test_health_check_reports_healthy_in_dry_run_mode() -> None:
 
     assert status.is_healthy is True
     assert "DRY-RUN" in status.status_message
+
+
+def test_strategy_reuses_operation_context_service_until_handler_factory_changes() -> None:
+    strategy = GCPProviderStrategy(config=_config(), logger=MagicMock(), provider_name="gcp-default")
+    assert strategy.initialize() is True
+
+    first_service = strategy._get_operation_context_service()
+    second_service = strategy._get_operation_context_service()
+
+    assert second_service is first_service
+
+    replacement_factory = GCPHandlerFactory(
+        compute_client=_ComputeClientStub(),
+        config=_config(),
+        logger=MagicMock(),
+    )
+    strategy._handler_factory = replacement_factory
+
+    refreshed_service = strategy._get_operation_context_service()
+
+    assert refreshed_service is not first_service
+    assert refreshed_service.handler_factory is replacement_factory
 
 
 def test_mig_handler_missing_membership_raises_gcp_entity_not_found() -> None:
