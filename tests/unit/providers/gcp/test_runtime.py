@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from concurrent.futures import TimeoutError as FutureTimeoutError
 import uuid
 from types import SimpleNamespace
 from unittest.mock import MagicMock
@@ -17,6 +18,7 @@ from orb.providers.gcp.configuration.config import GCPProviderConfig
 from orb.providers.gcp.domain.template.gcp_template_aggregate import GCPTemplate
 from orb.providers.gcp.exceptions import (
     GCPEntityNotFoundError,
+    GCPNetworkError,
     GCPRateLimitError,
     GCPValidationError,
 )
@@ -47,7 +49,8 @@ class _ComputeClientStub:
             super().__init__(**kwargs)
             self._owner = owner
 
-        def result(self) -> _ComputeClientStub._OperationStub:
+        def result(self, timeout: float | None = None) -> _ComputeClientStub._OperationStub:
+            _ = timeout
             self._owner.template_operation_result_called = True
             return self
 
@@ -302,6 +305,67 @@ def test_mig_handler_acquire_hosts_submits_template_and_group() -> None:
     assert len(compute_client.created_templates) == 1
     assert compute_client.template_operation_result_called is True
     assert len(compute_client.created_migs) == 1
+
+
+def test_mig_handler_acquire_hosts_times_out_waiting_for_template_operation() -> None:
+    compute_client = _ComputeClientStub()
+
+    class _TimeoutOperationStub(compute_client._OperationStub):
+        def result(self, timeout: float | None = None) -> object:
+            self._owner.template_operation_result_called = True
+            raise FutureTimeoutError(f"timed out after {timeout}")
+
+    def _create_timeout_template(*, template_name: str, body: object) -> object:
+        compute_client.created_templates.append((template_name, body))
+        return _TimeoutOperationStub(
+            compute_client,
+            name=f"template-op-{template_name}",
+            status="PENDING",
+            target_link=None,
+        )
+
+    compute_client.create_instance_template = _create_timeout_template  # type: ignore[method-assign]
+    handler = GCPManagedInstanceGroupHandler(
+        compute_client=compute_client,
+        config=_config(connect_timeout=7, read_timeout=11, max_retries=2),
+        logger=MagicMock(),
+    )
+    request = Request.create_new_request(
+        request_type=RequestType.ACQUIRE,
+        template_id="gcp-mig",
+        machine_count=3,
+        provider_type="gcp",
+    )
+    template = GCPTemplate.model_validate(
+        {
+            "template_id": "gcp-mig",
+            "provider_type": "gcp",
+            "provider_api": "MIG",
+            "project_id": "orb-example-12345",
+            "region": "us-central1",
+            "zones": ["us-central1-a", "us-central1-b"],
+            "mig_scope": "regional",
+            "instance_type": "e2-standard-4",
+            "max_instances": 3,
+            "source_image_family": "debian-12",
+            "source_image_project": "debian-cloud",
+        }
+    )
+
+    with pytest.raises(
+        GCPNetworkError,
+        match="Timed out waiting for GCP instance template creation to finish",
+    ) as exc_info:
+        handler.acquire_hosts(request, template)
+
+    assert exc_info.value.details == {
+        "operation": "create_instance_template",
+        "template_name": compute_client.created_templates[0][0],
+        "operation_name": f"template-op-{compute_client.created_templates[0][0]}",
+        "timeout_seconds": 36,
+    }
+    assert compute_client.template_operation_result_called is True
+    assert compute_client.created_migs == []
 
 
 def test_provisioning_service_projects_failed_operations_into_fleet_errors() -> None:

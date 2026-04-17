@@ -4,13 +4,18 @@ from __future__ import annotations
 
 # noinspection PyTypeHints
 # PyCharm treats google-cloud-compute generated proto classes as Any in annotations here.
+from concurrent.futures import TimeoutError as FutureTimeoutError
 import uuid
 from typing import TYPE_CHECKING
 
 from orb.domain.request.aggregate import Request
 from orb.providers.gcp.domain.template.gcp_template_aggregate import GCPTemplate
 from orb.providers.gcp.domain.template.value_objects import GCPMIGScope
-from orb.providers.gcp.exceptions import GCPEntityNotFoundError, GCPValidationError
+from orb.providers.gcp.exceptions import (
+    GCPEntityNotFoundError,
+    GCPNetworkError,
+    GCPValidationError,
+)
 from orb.providers.gcp.infrastructure.handlers.base_handler import GCPHandler
 from orb.providers.gcp.types import (
     GCPCreateOutcome,
@@ -42,7 +47,19 @@ class GCPManagedInstanceGroupHandler(GCPHandler):
         )
         # Wait for the template insert to finish before creating the MIG, otherwise
         # the subsequent MIG create can race eventual consistency on template lookup.
-        template_operation.result()
+        wait_timeout_seconds = self._operation_wait_timeout_seconds()
+        try:
+            template_operation.result(timeout=wait_timeout_seconds)
+        except FutureTimeoutError as exc:
+            raise GCPNetworkError(
+                "Timed out waiting for GCP instance template creation to finish",
+                details={
+                    "operation": "create_instance_template",
+                    "template_name": template_name,
+                    "operation_name": template_operation.name or "",
+                    "timeout_seconds": wait_timeout_seconds,
+                },
+            ) from exc
 
         if template.mig_scope == GCPMIGScope.REGIONAL:
             region = str(template.region)

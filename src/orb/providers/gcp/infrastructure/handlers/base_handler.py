@@ -142,3 +142,9 @@ class GCPHandler(ABC):
                 f"{template.source_image_family}"
             )
         return None
+
+    def _operation_wait_timeout_seconds(self) -> int:
+        """Return a bounded wait time for long-running GCP operations."""
+        per_attempt_timeout = self._config.connect_timeout + self._config.read_timeout
+        retry_budget = max(1, self._config.max_retries)
+        return max(1, per_attempt_timeout * retry_budget)
