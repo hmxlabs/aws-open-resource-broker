@@ -147,3 +147,74 @@ def test_mig_template_payload_uses_configured_service_account_scopes(monkeypatch
         "https://www.googleapis.com/auth/compute.readonly",
         "https://www.googleapis.com/auth/devstorage.read_only",
     ]
+
+
+def test_single_vm_and_mig_payloads_share_common_instance_configuration(monkeypatch) -> None:
+    _install_fake_compute_v1(monkeypatch)
+    config = _config()
+    single_vm_handler = GCPSingleVMHandler(
+        compute_client=_ComputeClientStub(),
+        config=config,
+        logger=MagicMock(),
+    )
+    mig_handler = GCPManagedInstanceGroupHandler(
+        compute_client=_ComputeClientStub(),
+        config=config,
+        logger=MagicMock(),
+    )
+    base_template = _template("SingleVM").model_dump(mode="python")
+    base_template.update(
+        {
+            "network": "global/networks/orb-net",
+            "subnetwork": "regions/us-central1/subnetworks/orb-subnet",
+            "boot_disk_type": "balanced",
+            "boot_disk_size_gb": 200,
+            "labels": {"env": "test"},
+            "network_tags": ["orb", "worker"],
+            "provisioning_model": "SPOT",
+        }
+    )
+    single_vm_template = GCPTemplate.model_validate(base_template)
+    mig_template = GCPTemplate.model_validate(
+        {
+            **base_template,
+            "template_id": "gcp-mig",
+            "provider_api": "MIG",
+            "max_instances": 2,
+            "zones": ["us-central1-a", "us-central1-b"],
+            "mig_scope": "regional",
+        }
+    )
+
+    instance_payload = single_vm_handler._build_instance_payload("vm-1", single_vm_template)
+    template_payload = mig_handler._build_instance_template_payload(mig_template, "tmpl-1")
+    template_properties = template_payload.properties
+
+    assert instance_payload.disks[0].initialize_params.source_image == (
+        "projects/debian-cloud/global/images/family/debian-12"
+    )
+    assert template_properties.disks[0].initialize_params.source_image == (
+        "projects/debian-cloud/global/images/family/debian-12"
+    )
+    assert instance_payload.disks[0].initialize_params.disk_type == (
+        "zones/us-central1-a/diskTypes/balanced"
+    )
+    assert template_properties.disks[0].initialize_params.disk_type == (
+        "zones/us-central1-a/diskTypes/balanced"
+    )
+    assert instance_payload.disks[0].initialize_params.disk_size_gb == 200
+    assert template_properties.disks[0].initialize_params.disk_size_gb == 200
+    assert instance_payload.network_interfaces[0].network == "global/networks/orb-net"
+    assert template_properties.network_interfaces[0].network == "global/networks/orb-net"
+    assert instance_payload.network_interfaces[0].subnetwork == (
+        "regions/us-central1/subnetworks/orb-subnet"
+    )
+    assert template_properties.network_interfaces[0].subnetwork == (
+        "regions/us-central1/subnetworks/orb-subnet"
+    )
+    assert instance_payload.labels == {"env": "test"}
+    assert template_properties.labels == {"env": "test"}
+    assert instance_payload.tags.items == ["orb", "worker"]
+    assert template_properties.tags.items == ["orb", "worker"]
+    assert instance_payload.scheduling.provisioning_model == "SPOT"
+    assert template_properties.scheduling.provisioning_model == "SPOT"

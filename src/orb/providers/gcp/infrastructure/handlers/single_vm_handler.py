@@ -9,9 +9,7 @@ from typing import TYPE_CHECKING, Callable
 
 from orb.domain.request.aggregate import Request
 from orb.providers.gcp.domain.template.gcp_template_aggregate import GCPTemplate
-from orb.providers.gcp.domain.template.value_objects import GCPProvisioningModel
 from orb.providers.gcp.exceptions import GCPError, GCPValidationError, translate_gcp_exception
-from orb.providers.gcp.infrastructure.disk_types import normalize_boot_disk_type
 from orb.providers.gcp.infrastructure.handlers.base_handler import GCPHandler
 from orb.providers.gcp.types import (
     GCPCreateOutcome,
@@ -169,59 +167,20 @@ class GCPSingleVMHandler(GCPHandler):
     def _build_instance_payload(self, instance_name: str, template: GCPTemplate) -> Instance:
         from google.cloud import compute_v1
 
-        source_image = template.source_image
-        if not source_image and template.source_image_family and template.source_image_project:
-            source_image = (
-                f"projects/{template.source_image_project}/global/images/family/"
-                f"{template.source_image_family}"
-            )
-
-        disk_type = template.boot_disk_type or "pd-balanced"
-        disk_size = template.boot_disk_size_gb or 50
         zone = self._template_zone(template)
-        normalized_disk_type = normalize_boot_disk_type(disk_type, zone=zone)
         machine_type = (
             template.instance_type
             if template.instance_type.startswith("zones/")
             else f"zones/{zone}/machineTypes/{template.instance_type}"
         )
-        payload = compute_v1.Instance(
+        return compute_v1.Instance(
             name=instance_name,
-            machine_type=machine_type,
-            disks=[
-                compute_v1.AttachedDisk(
-                    boot=True,
-                    auto_delete=True,
-                    initialize_params=compute_v1.AttachedDiskInitializeParams(
-                        source_image=source_image,
-                        disk_type=normalized_disk_type,
-                        disk_size_gb=disk_size,
-                    ),
-                )
-            ],
-            labels=template.labels,
-            tags=compute_v1.Tags(items=template.network_tags),
+            **self._build_instance_configuration(
+                template=template,
+                machine_type=machine_type,
+                zone=zone,
+            ),
         )
-        network_interface = compute_v1.NetworkInterface()
-        if template.network:
-            network_interface.network = template.network
-        if template.subnetwork:
-            network_interface.subnetwork = template.subnetwork
-        if template.network or template.subnetwork:
-            payload.network_interfaces = [network_interface]
-        if template.service_account_email:
-            payload.service_accounts = [
-                compute_v1.ServiceAccount(
-                    email=template.service_account_email,
-                    scopes=template.service_account_scopes,
-                )
-            ]
-        if template.provisioning_model == GCPProvisioningModel.SPOT:
-            payload.scheduling = compute_v1.Scheduling(
-                provisioning_model="SPOT",
-                instance_termination_action="DELETE",
-            )
-        return payload
 
     @staticmethod
     def _require_zone(context: GCPHandlerContext) -> str:

@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from typing import Any
 
 from orb.domain.base.ports import LoggingPort
 from orb.domain.request.aggregate import Request
 from orb.providers.gcp.configuration.config import GCPProviderConfig
 from orb.providers.gcp.domain.template.gcp_template_aggregate import GCPTemplate
+from orb.providers.gcp.domain.template.value_objects import GCPProvisioningModel
 from orb.providers.gcp.infrastructure.compute_client import GCPComputeClient
+from orb.providers.gcp.infrastructure.disk_types import normalize_boot_disk_type
 from orb.providers.gcp.types import (
     GCPCreateOutcome,
     GCPHandlerContext,
@@ -71,3 +74,71 @@ class GCPHandler(ABC):
         context: GCPHandlerContext,
     ) -> GCPMutationOutcome:
         """Stop instances managed by this handler."""
+
+    def _build_instance_configuration(
+        self,
+        *,
+        template: GCPTemplate,
+        machine_type: str,
+        zone: str | None,
+    ) -> dict[str, Any]:
+        """Build shared Compute Engine instance configuration fields."""
+        from google.cloud import compute_v1
+
+        disk_type = template.boot_disk_type or "pd-balanced"
+        disk_size = template.boot_disk_size_gb or 50
+        source_image = self._resolve_source_image(template)
+        normalized_disk_type = normalize_boot_disk_type(disk_type, zone=zone)
+
+        payload: dict[str, Any] = {
+            "machine_type": machine_type,
+            "disks": [
+                compute_v1.AttachedDisk(
+                    boot=True,
+                    auto_delete=True,
+                    initialize_params=compute_v1.AttachedDiskInitializeParams(
+                        source_image=source_image,
+                        disk_type=normalized_disk_type,
+                        disk_size_gb=disk_size,
+                    ),
+                )
+            ],
+            "labels": template.labels,
+            "tags": compute_v1.Tags(items=template.network_tags),
+        }
+
+        network_interface = compute_v1.NetworkInterface()
+        if template.network:
+            network_interface.network = template.network
+        if template.subnetwork:
+            network_interface.subnetwork = template.subnetwork
+        if template.network or template.subnetwork:
+            payload["network_interfaces"] = [network_interface]
+
+        if template.service_account_email:
+            payload["service_accounts"] = [
+                compute_v1.ServiceAccount(
+                    email=template.service_account_email,
+                    scopes=template.service_account_scopes,
+                )
+            ]
+
+        if template.provisioning_model == GCPProvisioningModel.SPOT:
+            payload["scheduling"] = compute_v1.Scheduling(
+                provisioning_model="SPOT",
+                instance_termination_action="DELETE",
+            )
+
+        return payload
+
+    @staticmethod
+    def _resolve_source_image(template: GCPTemplate) -> str | None:
+        """Resolve the explicit image or image-family reference for a boot disk."""
+        if template.source_image:
+            return template.source_image
+        if template.source_image_family and template.source_image_project:
+            return (
+                f"projects/{template.source_image_project}/global/images/family/"
+                f"{template.source_image_family}"
+            )
+        return None
