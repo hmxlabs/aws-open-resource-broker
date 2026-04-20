@@ -12,24 +12,26 @@ try:
     from orb.application.dto.commands import (
         BaseCommand,
         CreateRequestCommand,
+        RequestStatus,
         UpdateRequestStatusCommand,
     )
-    from orb.application.dto.queries import GetRequestQuery
+    from orb.application.dto.queries import GetRequestQuery, Query
     from orb.infrastructure.di.buses import CommandBus, QueryBus
 
     IMPORTS_AVAILABLE = True
 except ImportError as e:
     IMPORTS_AVAILABLE = False
     pytestmark = pytest.mark.skip(f"CQRS imports not available: {e}")
+    Query = object  # type: ignore[assignment,misc]
 
 
 # Mock classes for tests that reference non-existent classes
-class GetAvailableTemplatesQuery:
+class GetAvailableTemplatesQuery(Query):  # type: ignore[misc]
     def __init__(self, **kwargs):
         pass
 
 
-class GetMachinesByRequestQuery:
+class GetMachinesByRequestQuery(Query):  # type: ignore[misc]
     def __init__(self, **kwargs):
         pass
 
@@ -43,6 +45,9 @@ class GetAvailableTemplatesHandler:
     def __init__(self, **kwargs):
         pass
 
+    def handle(self, query):
+        return None
+
 
 class GetMachinesByRequestHandler:
     def __init__(self, **kwargs):
@@ -54,6 +59,7 @@ class GetRequestStatusHandler:
         self.request_repository = kwargs.get("request_repository")
 
     def handle(self, query):
+        assert self.request_repository is not None
         return self.request_repository.find_by_id(query.request_id)
 
 
@@ -173,11 +179,11 @@ class TestCommandQuerySeparation:
             provisioning_service=mock_provisioning_service,
         )
 
-        # Execute command with dry_run to avoid provisioning
+        # Execute command with dry_run — PENDING→COMPLETED is now valid
         command = CreateRequestCommand(template_id="test-template", requested_count=2, dry_run=True)
         await handler.handle(command)
 
-        # Verify state was modified via repository save (called twice: initial persist + dry-run update)
+        # Verify state was modified via repository save
         mock_repository.save.assert_called()
 
     def test_query_handlers_do_not_modify_state(self):
@@ -240,7 +246,7 @@ class TestCommandBusImplementation:
             # Execute commands
             create_command = CreateRequestCommand(template_id="test-template", requested_count=2)
             update_command = UpdateRequestStatusCommand(
-                request_id="test-request", status="in_progress"
+                request_id="test-request", status=RequestStatus.IN_PROGRESS
             )
 
             await command_bus.execute(create_command)
@@ -422,16 +428,16 @@ class TestQueryBusImplementation:
         raw_result = {"id": "123", "name": "test"}
         handler.handle.return_value = raw_result
 
-        query_bus.register_handler(GetRequestQuery, handler)
+        query_bus.register_handler(GetRequestQuery, handler)  # type: ignore[attr-defined]
 
         # Add result transformer if supported
         if hasattr(query_bus, "add_transformer"):
             transformer = Mock()
             transformer.transform.return_value = RequestStatusResponse(**raw_result)
-            query_bus.add_transformer(GetRequestQuery, transformer)
+            query_bus.add_transformer(GetRequestQuery, transformer)  # type: ignore[attr-defined]
 
         query = GetRequestQuery(request_id="test-request")
-        query_bus.dispatch(query)
+        query_bus.dispatch(query)  # type: ignore[attr-defined]
 
         # Should have applied transformation if supported
         if hasattr(query_bus, "add_transformer"):
@@ -510,7 +516,7 @@ class TestCommandHandlerImplementation:
             mock_validation_result
         )
 
-        # Should handle valid command without raising
+        # PENDING→COMPLETED is now valid — dry_run should succeed
         await handler.handle(valid_command)
 
         # Invalid command (template doesn't exist)
@@ -589,7 +595,7 @@ class TestCommandHandlerImplementation:
             provisioning_service=Mock(),
         )
 
-        # Execute command with dry_run to avoid provisioning
+        # Execute command with dry_run — PENDING→COMPLETED is now valid
         command = CreateRequestCommand(template_id="test-template", requested_count=2, dry_run=True)
         await handler.handle(command)
 
@@ -885,7 +891,7 @@ class TestCQRSIntegration:
 
         update_command = UpdateRequestStatusCommand(
             request_id="test-request",
-            status="in_progress",  # Use valid enum value
+            status=RequestStatus.IN_PROGRESS,  # Use valid enum value
         )
 
         get_query = GetRequestQuery(request_id="test-request")

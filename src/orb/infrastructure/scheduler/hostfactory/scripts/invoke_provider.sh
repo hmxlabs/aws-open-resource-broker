@@ -1,13 +1,14 @@
 #!/bin/bash
 
-export USE_LOCAL_DEV="true"
-export LOG_CONSOLE_ENABLED=false
-export LOG_SCRIPTS="true"
+# HF_LOGDIR: set by HostFactory to its own log directory (used for scripts.log).
+# ORB_LOG_DIR: set by ORB to control where the orb process writes its own logs.
+# These are intentionally separate — do not conflate them.
 export HF_LOGDIR=${HF_LOGDIR:-./}
 
 SCRIPTS_LOG_FILE="${HF_LOGDIR}/scripts.log"
 
 USE_LOCAL_DEV=${USE_LOCAL_DEV:-false}
+LOG_SCRIPTS=${LOG_SCRIPTS:-false}
 PACKAGE_NAME=${ORB_PACKAGE_NAME:-"open-resource-broker"}
 PACKAGE_COMMAND=${ORB_COMMAND:-"orb"}
 
@@ -30,6 +31,17 @@ if [ "$LOG_SCRIPTS" = "true" ] || [ "$LOG_SCRIPTS" = "1" ]; then
     echo "=== Input Arguments End ==="
     echo "OUTPUT:"
 } >> "$SCRIPTS_LOG_FILE"
+fi
+
+# Source venv if ORB_VENV_PATH is set
+if [ -n "${ORB_VENV_PATH}" ]; then
+    if [ -f "${ORB_VENV_PATH}/bin/activate" ]; then
+        # shellcheck disable=SC1091
+        source "${ORB_VENV_PATH}/bin/activate"
+    else
+        echo "Error: ORB_VENV_PATH set but ${ORB_VENV_PATH}/bin/activate not found" >&2
+        exit 1
+    fi
 fi
 
 # Get script directory and project root

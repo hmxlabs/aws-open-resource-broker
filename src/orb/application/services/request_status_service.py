@@ -220,7 +220,7 @@ class RequestStatusService:
 
         except Exception as e:
             self.logger.error(f"Failed to determine status from machines: {e}")
-            return None, None
+            return RequestStatus.IN_PROGRESS.value, "Status determination failed — will retry"
 
     async def update_request_status(self, request: Request, status: str, message: str) -> Request:
         """Update request status."""
@@ -238,7 +238,7 @@ class RequestStatusService:
 
         except Exception as e:
             self.logger.error(f"Failed to update request status: {e}")
-            return request
+            raise
 
     def map_machine_status_to_result(self, status: str, request_type: RequestType) -> str:
         """Map machine status to result code."""

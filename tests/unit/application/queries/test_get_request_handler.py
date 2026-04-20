@@ -97,6 +97,12 @@ def _make_handler(
     mock_query_service.get_machines_for_request = AsyncMock(return_value=[])
     handler._query_service = mock_query_service
 
+    # Mock status service so it doesn't try to use the real uow
+    mock_status_service = Mock()
+    mock_status_service.determine_status_from_machines = Mock(return_value=(None, None))
+    mock_status_service.update_request_status = AsyncMock(return_value=request)
+    handler._status_service = mock_status_service
+
     mock_cache_service = Mock()
     mock_cache_service.is_caching_enabled = Mock(return_value=True)
     mock_cache_service.get_cached_request = Mock(return_value=None)  # no cache hit
@@ -117,7 +123,7 @@ async def test_get_request_falls_back_to_stored_state_on_sync_error():
     request = _make_request(_ID_FALLBACK)
     sync_error = RuntimeError("provider unreachable")
 
-    handler, mock_query_service, mock_cache_service = _make_handler(
+    handler, _mock_query_service, mock_cache_service = _make_handler(
         request, sync_side_effect=sync_error
     )
 

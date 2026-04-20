@@ -616,3 +616,303 @@ def test_spot_fleet_request_cleanup_cancels_fleet_and_deletes_lt(aws_client, sub
 
     # Assert LT gone
     _assert_no_lt_for_request(ec2, req_id)
+
+
+# ---------------------------------------------------------------------------
+# Fixtures for CQRS-based tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def orb_config_dir_cqrs(orb_config_dir):
+    """Extend orb_config_dir with moto-compatible patches for CQRS tests.
+
+    Removes the AWS profile so boto3 uses env-var credentials (intercepted by
+    moto) and replaces any SSM-path image_id with a literal AMI ID.
+    """
+    import json as _json
+
+    config_path = orb_config_dir / "config.json"
+    if config_path.exists():
+        cfg = _json.loads(config_path.read_text())
+        try:
+            for provider in cfg["provider"]["providers"]:
+                provider.get("config", {}).pop("profile", None)
+        except (KeyError, TypeError):
+            pass  # config structure may vary; profile removal is best-effort
+
+    default_cfg_path = orb_config_dir / "default_config.json"
+    if default_cfg_path.exists():
+        cfg = _json.loads(default_cfg_path.read_text())
+        try:
+            cfg["provider"]["provider_defaults"]["aws"]["template_defaults"]["image_id"] = (
+                "ami-12345678"
+            )
+        except (KeyError, TypeError):
+            pass  # default config may not have this path; image_id override is best-effort
+
+    return orb_config_dir
+
+
+@pytest.fixture
+def cqrs_buses(orb_config_dir_cqrs):
+    """Resolve CommandBusPort and QueryBusPort from the booted DI container."""
+    from orb.infrastructure.di.container import get_container
+
+    container = get_container()
+
+    from orb.domain.base.ports.configuration_port import ConfigurationPort
+    from orb.providers.registry import get_provider_registry
+
+    registry = get_provider_registry()
+    registry._config_port = container.get(ConfigurationPort)
+    try:
+        provider_config = registry._config_port.get_provider_config()
+        if provider_config:
+            for instance in provider_config.get_active_providers():
+                registry.ensure_provider_instance_registered_from_config(instance)
+    except Exception:
+        pass  # provider registration is best-effort in test setup; missing config is non-fatal
+
+    from orb.application.ports.command_bus_port import CommandBusPort
+    from orb.application.ports.query_bus_port import QueryBusPort
+
+    command_bus = container.get(CommandBusPort)
+    query_bus = container.get(QueryBusPort)
+    return {"command_bus": command_bus, "query_bus": query_bus}
+
+
+@pytest.fixture
+def run_instances_template_id(orb_config_dir_cqrs):
+    """Return the template_id of the first RunInstances template in the config."""
+    import asyncio as _asyncio
+
+    from orb.infrastructure.di.container import get_container
+    from orb.infrastructure.template.configuration_manager import TemplateConfigurationManager
+
+    container = get_container()
+    manager = container.get(TemplateConfigurationManager)
+    templates = _asyncio.run(manager.get_all_templates())
+    run_templates = [
+        t for t in templates if str(getattr(t, "provider_api", "")).upper() == "RUNINSTANCES"
+    ]
+    assert run_templates, "No RunInstances template found in test config"
+    return str(run_templates[0].template_id)
+
+
+# ---------------------------------------------------------------------------
+# Full return via CQRS (RunInstances)
+# ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# External LT not deleted on cancel
+# ---------------------------------------------------------------------------
+
+
+def test_external_lt_not_deleted_on_cancel(aws_client, subnet_id, sg_id, ec2):
+    """External LT (no orb tags) must survive cancel_resource.
+
+    Creates a launch template directly in moto without any ORB tags, builds an
+    AWSTemplate with launch_template_id pointing at it, acquires instances via
+    RunInstancesHandler with the REAL AWSLaunchTemplateManager (not the tagged
+    mock), cancels the resource, then asserts the external LT still exists.
+
+    The real manager calls _use_existing_template_strategy which never writes
+    orb:request-id to the external LT, so _delete_orb_launch_template cannot
+    find it and must leave it alone.
+    """
+    from moto import mock_aws
+
+    @mock_aws
+    def _run():
+        import boto3 as _boto3
+
+        region = REGION
+        ec2_client = _boto3.client("ec2", region_name=region)
+        autoscaling_client = _boto3.client("autoscaling", region_name=region)
+        sts_client = _boto3.client("sts", region_name=region)
+
+        # Create VPC/subnet/sg for the external LT
+        vpc = ec2_client.create_vpc(CidrBlock="10.0.0.0/16")
+        vpc_id = vpc["Vpc"]["VpcId"]
+        subnet = ec2_client.create_subnet(VpcId=vpc_id, CidrBlock="10.0.1.0/24")
+        ext_subnet_id = subnet["Subnet"]["SubnetId"]
+        sg = ec2_client.create_security_group(
+            GroupName="ext-lt-sg", Description="ext lt sg", VpcId=vpc_id
+        )
+        ext_sg_id = sg["GroupId"]
+
+        # Create external LT directly — no ORB tags
+        ext_lt_resp = ec2_client.create_launch_template(
+            LaunchTemplateName="external-lt-no-orb-tags",
+            LaunchTemplateData={
+                "ImageId": "ami-12345678",
+                "InstanceType": "t3.micro",
+                "NetworkInterfaces": [
+                    {
+                        "DeviceIndex": 0,
+                        "SubnetId": ext_subnet_id,
+                        "Groups": [ext_sg_id],
+                        "AssociatePublicIpAddress": False,
+                    }
+                ],
+            },
+        )
+        ext_lt_id = ext_lt_resp["LaunchTemplate"]["LaunchTemplateId"]
+
+        # Build AWSTemplate referencing the external LT
+        template = AWSTemplate(
+            template_id="tpl-ext-lt",
+            name="test-ext-lt",
+            provider_api="RunInstances",
+            machine_types={"t3.micro": 1},
+            image_id="ami-12345678",
+            max_instances=1,
+            price_type="ondemand",
+            subnet_ids=[ext_subnet_id],
+            security_group_ids=[ext_sg_id],
+            launch_template_id=ext_lt_id,
+        )
+
+        # Wire up real dependencies
+        from unittest.mock import MagicMock
+
+        aws_client_obj = MagicMock(spec=AWSClient)
+        aws_client_obj.ec2_client = ec2_client
+        aws_client_obj.autoscaling_client = autoscaling_client
+        aws_client_obj.sts_client = sts_client
+
+        logger = _make_logger()
+        config_port = _make_cleanup_config_port()
+
+        # Use the REAL AWSLaunchTemplateManager — not the tagged mock
+        real_lt_manager = AWSLaunchTemplateManager(
+            aws_client=aws_client_obj,
+            logger=logger,
+            config_port=config_port,
+        )
+
+        from orb.providers.aws.infrastructure.handlers.run_instances.handler import (
+            RunInstancesHandler,
+        )
+        from orb.providers.aws.utilities.aws_operations import AWSOperations
+
+        aws_ops = AWSOperations(aws_client_obj, logger, config_port)
+        handler = RunInstancesHandler(
+            aws_client=aws_client_obj,
+            logger=logger,
+            aws_ops=aws_ops,
+            launch_template_manager=real_lt_manager,
+            config_port=config_port,
+        )
+
+        req_id = "cleanup-ext-lt-001"
+        request = _make_request(request_id=req_id, requested_count=1)
+
+        # Acquire — uses _use_existing_template_strategy, no orb tag written to ext LT
+        result: dict = handler.acquire_hosts(request, template)  # type: ignore[assignment]
+        assert result["success"] is True
+
+        # Verify external LT still has no orb:request-id tag
+        lt_check = ec2_client.describe_launch_templates(LaunchTemplateIds=[ext_lt_id])
+        lt_tags = {t["Key"]: t["Value"] for t in lt_check["LaunchTemplates"][0].get("Tags", [])}
+        assert "orb:request-id" not in lt_tags, (
+            "External LT must not have orb:request-id tag after acquire"
+        )
+
+        # Cancel — _delete_orb_launch_template must not delete the external LT
+        cancel_result = handler.cancel_resource(result["resource_ids"][0], req_id)
+        assert cancel_result["status"] == "success"
+
+        # Assert external LT still exists
+        surviving = ec2_client.describe_launch_templates(LaunchTemplateIds=[ext_lt_id])
+        assert len(surviving["LaunchTemplates"]) == 1, (
+            f"External LT {ext_lt_id!r} was deleted by cancel_resource — it must not be"
+        )
+
+    _run()
+
+
+class TestCleanupViaOrchestrator:
+    """Verify that the full acquire -> return cycle via CQRS buses terminates
+    instances and deletes the associated launch template in moto."""
+
+    def test_full_return_via_cqrs_deletes_lt_run_instances(
+        self,
+        cqrs_buses,
+        run_instances_template_id,
+        ec2_client,
+    ):
+        """Acquire via CreateRequestCommand, return via CreateReturnRequestCommand,
+        then assert the instance is terminated and its LT is deleted."""
+        import asyncio
+
+        from orb.application.dto.commands import CreateRequestCommand, CreateReturnRequestCommand
+        from orb.application.dto.queries import GetRequestQuery
+
+        command_bus = cqrs_buses["command_bus"]
+        query_bus = cqrs_buses["query_bus"]
+
+        # --- Arrange: acquire one RunInstances machine ---
+        create_cmd = CreateRequestCommand(template_id=run_instances_template_id, requested_count=1)
+        asyncio.run(command_bus.execute(create_cmd))
+        assert create_cmd.created_request_id, "CreateRequestCommand did not set created_request_id"
+        request_id = create_cmd.created_request_id
+
+        # --- Act: poll request to get machine IDs ---
+        request_dto = asyncio.run(query_bus.execute(GetRequestQuery(request_id=request_id)))
+        assert request_dto is not None
+
+        machine_ids = getattr(request_dto, "machine_ids", None) or []
+        if not machine_ids:
+            refs = getattr(request_dto, "machine_references", None) or []
+            for m in refs:
+                mid = m.get("machine_id") if isinstance(m, dict) else getattr(m, "machine_id", None)
+                if mid:
+                    machine_ids.append(mid)
+        assert machine_ids, f"No machine IDs found in request {request_id} after acquire"
+        instance_id = machine_ids[0]
+
+        # Verify instance is running before return
+        pre_resp = ec2_client.describe_instances(InstanceIds=[instance_id])
+        pre_states = [i["State"]["Name"] for r in pre_resp["Reservations"] for i in r["Instances"]]
+        assert all(s in ("pending", "running") for s in pre_states), (
+            f"Instance not running before return: {pre_states}"
+        )
+
+        # Verify LT exists before return (tagged with orb:request-id)
+        lt_before = ec2_client.describe_launch_templates(
+            Filters=[{"Name": "tag:orb:request-id", "Values": [request_id]}]
+        )
+        assert len(lt_before.get("LaunchTemplates", [])) >= 1, (
+            f"Expected at least one LT tagged orb:request-id={request_id} before return"
+        )
+
+        # --- Act: dispatch return request ---
+        return_cmd = CreateReturnRequestCommand(machine_ids=[instance_id])
+        asyncio.run(command_bus.execute(return_cmd))
+        assert return_cmd.created_request_ids, (
+            "CreateReturnRequestCommand produced no return request IDs"
+        )
+        return_request_id = return_cmd.created_request_ids[0]
+
+        # Poll return request status
+        return_dto = asyncio.run(query_bus.execute(GetRequestQuery(request_id=return_request_id)))
+        assert return_dto is not None
+        return_status = getattr(return_dto, "status", None)
+        assert return_status in ("complete", "completed", "failed", "running", "in_progress"), (
+            f"Unexpected return request status: {return_status}"
+        )
+
+        # --- Assert: instance terminated ---
+        post_resp = ec2_client.describe_instances(InstanceIds=[instance_id])
+        post_states = [
+            i["State"]["Name"] for r in post_resp["Reservations"] for i in r["Instances"]
+        ]
+        assert all(s in ("shutting-down", "terminated") for s in post_states), (
+            f"Instance {instance_id!r} not terminated after return: {post_states}"
+        )
+
+        # --- Assert: LT deleted ---
+        _assert_no_lt_for_request(ec2_client, request_id)

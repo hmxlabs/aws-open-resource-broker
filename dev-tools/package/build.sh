@@ -29,7 +29,7 @@ if [ "$QUIET" = false ]; then
 fi
 rm -rf dist/ build/ -- *.egg-info/
 
-# Install build dependencies if needed
+# Verify build dependencies are present (declared in pyproject.toml dev deps)
 if [ "$QUIET" = false ]; then
     echo "INFO: Checking build dependencies..."
 fi
@@ -38,17 +38,9 @@ if ! $RUN_TOOL python -c "import build" 2>/dev/null; then
         echo "INFO: Installing build dependencies..."
     fi
     if command -v uv >/dev/null 2>&1; then
-        if [ "$QUIET" = true ]; then
-            $RUN_TOOL uv add --dev build >/dev/null 2>&1
-        else
-            $RUN_TOOL uv add --dev build
-        fi
+        uv pip install build --quiet
     else
-        if [ "$QUIET" = true ]; then
-            $RUN_TOOL pip install build >/dev/null 2>&1
-        else
-            $RUN_TOOL pip install build
-        fi
+        $RUN_TOOL pip install build
     fi
 fi
 
@@ -61,17 +53,17 @@ if [ "$QUIET" = true ]; then
     # Suppress all output in quiet mode
     if [ -n "$BUILD_ARGS" ]; then
         # shellcheck disable=SC2086
-        $RUN_TOOL python -m build $BUILD_ARGS >/dev/null 2>&1
+        $RUN_TOOL python -m build --no-isolation $BUILD_ARGS >/dev/null 2>&1
     else
-        $RUN_TOOL python -m build >/dev/null 2>&1
+        $RUN_TOOL python -m build --no-isolation >/dev/null 2>&1
     fi
 else
     # Normal output
     if [ -n "$BUILD_ARGS" ]; then
         # shellcheck disable=SC2086
-        $RUN_TOOL python -m build $BUILD_ARGS 2>/dev/null
+        $RUN_TOOL python -m build --no-isolation $BUILD_ARGS 2>/dev/null
     else
-        $RUN_TOOL python -m build 2>/dev/null
+        $RUN_TOOL python -m build --no-isolation 2>/dev/null
     fi
 fi
 
