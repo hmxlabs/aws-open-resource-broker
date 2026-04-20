@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Callable, Optional, Protocol, TypedDict
+from typing import Any, Optional, Protocol, TypedDict
 
 from orb.domain.base.ports import LoggingPort
 from orb.domain.request.aggregate import Request
@@ -189,17 +189,23 @@ def build_cyclecloud_request_metadata(
     return metadata
 
 
-def resolve_read_provider_api(
+def resolve_operation_provider_api(
     operation: ProviderOperation,
-    normalize_provider_api: Callable[[Any], Any],
 ) -> Optional[AzureProviderApi]:
-    """Resolve and normalize the Azure provider API carried by an operation."""
+    """Resolve the Azure provider API carried by an operation."""
     provider_api = operation.parameters.get("provider_api")
     if provider_api in (None, ""):
         return None
-    normalized_provider_api = normalize_provider_api(provider_api)
-    if isinstance(normalized_provider_api, AzureProviderApi):
-        return normalized_provider_api
+    if isinstance(provider_api, AzureProviderApi):
+        return provider_api
+    if isinstance(provider_api, str):
+        try:
+            return AzureProviderApi(provider_api)
+        except ValueError as exc:
+            raise AzureValidationError(
+                f"Invalid Azure provider_api: {provider_api!r}",
+                error_code="INVALID_PROVIDER_API",
+            ) from exc
     raise AzureValidationError(
         f"Invalid Azure provider_api: {provider_api!r}",
         error_code="INVALID_PROVIDER_API",
@@ -226,12 +232,11 @@ def build_read_operation_context(
     operation: ProviderOperation,
     operation_name: str,
     default_resource_group: Optional[str],
-    normalize_provider_api: Callable[[Any], Any],
 ) -> AzureReadOperationContext:
     """Build the provider-owned runtime context for Azure read operations."""
     metadata = request_metadata(operation)
     cyclecloud_request_context = CycleCloudRequestContext.from_mapping(metadata)
-    provider_api = resolve_read_provider_api(operation, normalize_provider_api)
+    provider_api = resolve_operation_provider_api(operation)
     provider_api_key = provider_api.value if provider_api is not None else None
 
     resource_group = resolve_operation_resource_group(operation, default_resource_group)

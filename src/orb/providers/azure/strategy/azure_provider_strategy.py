@@ -42,6 +42,7 @@ from orb.providers.azure.services.cyclecloud_request_context_service import (
 from orb.providers.azure.services.inventory_service import (
     build_read_operation_context,
     group_instance_ids_by_resource,
+    resolve_operation_provider_api,
     resolve_operation_resource_group,
 )
 from orb.providers.azure.services.inventory_query_service import AzureInventoryQueryService
@@ -576,18 +577,6 @@ class AzureProviderStrategy(ProviderStrategy):
             merged["provider_error"] = exc.to_dict()
         return ProviderResult.error_result(message, error_code, merged)
 
-    @staticmethod
-    def _normalize_provider_api_value(provider_api: Any) -> Any:
-        """Prefer the Azure enum internally and keep unknown values unchanged."""
-        if isinstance(provider_api, AzureProviderApi):
-            return provider_api
-        if isinstance(provider_api, str):
-            try:
-                return AzureProviderApi(provider_api)
-            except ValueError:
-                return provider_api
-        return provider_api
-
     # ------------------------------------------------------------------
     # Internal operation dispatch
     # ------------------------------------------------------------------
@@ -619,21 +608,6 @@ class AzureProviderStrategy(ProviderStrategy):
     # CREATE_INSTANCES
     # ------------------------------------------------------------------
 
-    @staticmethod
-    def _resolve_operation_provider_api(
-        operation: ProviderOperation,
-    ) -> Optional[AzureProviderApi]:
-        provider_api = operation.parameters.get("provider_api")
-        if provider_api in (None, ""):
-            return None
-        normalized_provider_api = AzureProviderStrategy._normalize_provider_api_value(provider_api)
-        if isinstance(normalized_provider_api, AzureProviderApi):
-            return normalized_provider_api
-        raise AzureValidationError(
-            f"Invalid Azure provider_api: {provider_api!r}",
-            error_code="INVALID_PROVIDER_API",
-        )
-
     async def _handle_create_instances(
         self, operation: ProviderOperation
     ) -> ProviderResult:
@@ -642,7 +616,6 @@ class AzureProviderStrategy(ProviderStrategy):
         try:
             create_context = self._provisioning_service.build_create_operation_context(
                 operation=operation,
-                normalize_provider_api=self._normalize_provider_api_value,
                 resolve_handler=self._resolve_handler,
                 build_template=lambda tc: AzureTemplate.model_validate(
                     self._build_azure_template_config(tc)
@@ -723,7 +696,7 @@ class AzureProviderStrategy(ProviderStrategy):
             termination_context = self._termination_service.build_termination_operation_context(
                 operation=operation,
                 is_dry_run=is_dry_run,
-                resolve_operation_provider_api=self._resolve_operation_provider_api,
+                resolve_operation_provider_api=resolve_operation_provider_api,
                 resolve_handler=self._resolve_handler,
                 group_instance_ids_by_resource=group_instance_ids_by_resource,
                 resolve_operation_resource_group=lambda op: resolve_operation_resource_group(
@@ -765,7 +738,7 @@ class AzureProviderStrategy(ProviderStrategy):
 
     def _resolve_cyclecloud_operation(self, operation: ProviderOperation) -> ProviderOperation:
         """Merge durable CycleCloud follow-up context into an operation on demand."""
-        provider_api = self._resolve_operation_provider_api(operation)
+        provider_api = resolve_operation_provider_api(operation)
         if provider_api != AzureProviderApi.CYCLECLOUD:
             return operation
 
@@ -790,7 +763,6 @@ class AzureProviderStrategy(ProviderStrategy):
                 operation=operation,
                 operation_name="get_instance_status",
                 default_resource_group=self._azure_config.resource_group,
-                normalize_provider_api=self._normalize_provider_api_value,
             )
 
             if read_context.resource_group is None:
@@ -876,7 +848,6 @@ class AzureProviderStrategy(ProviderStrategy):
                 operation=operation,
                 operation_name="describe_resource_instances",
                 default_resource_group=self._azure_config.resource_group,
-                normalize_provider_api=self._normalize_provider_api_value,
             )
             if bool(operation.context and operation.context.get("dry_run", False)):
                 return ProviderResult.success_result(

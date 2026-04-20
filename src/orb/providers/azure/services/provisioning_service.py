@@ -51,13 +51,19 @@ def provider_api_key(provider_api: AzureProviderApi) -> str:
 
 def resolve_create_provider_api(
     template_config: dict[str, Any],
-    normalize_provider_api: Callable[[Any], Any],
 ) -> AzureProviderApi:
-    """Resolve the provider API from the template config, normalizing as needed."""
+    """Resolve the provider API from the template config."""
     provider_api = template_config.get("provider_api", AzureProviderApi.VMSS)
-    normalized_provider_api = normalize_provider_api(provider_api)
-    if isinstance(normalized_provider_api, AzureProviderApi):
-        return normalized_provider_api
+    if isinstance(provider_api, AzureProviderApi):
+        return provider_api
+    if isinstance(provider_api, str):
+        try:
+            return AzureProviderApi(provider_api)
+        except ValueError as exc:
+            raise AzureValidationError(
+                f"Invalid Azure provider_api: {provider_api!r}",
+                error_code="INVALID_PROVIDER_API",
+            ) from exc
     raise AzureValidationError(
         f"Invalid Azure provider_api: {provider_api!r}",
         error_code="INVALID_PROVIDER_API",
@@ -92,7 +98,6 @@ class AzureProvisioningService:
         self,
         *,
         operation: ProviderOperation,
-        normalize_provider_api: Callable[[Any], Any],
         resolve_handler: Callable[[AzureProviderApi], Optional[AzureHandler]],
         build_template: Callable[[dict[str, Any]], AzureTemplate],
     ) -> CreateOperationContext:
@@ -101,7 +106,7 @@ class AzureProvisioningService:
         count = get_create_count(operation)
         validate_create_template_config(template_config)
 
-        provider_api = resolve_create_provider_api(template_config, normalize_provider_api)
+        provider_api = resolve_create_provider_api(template_config)
         provider_api_value = provider_api_key(provider_api)
         handler = resolve_handler(provider_api)
         if handler is None:
