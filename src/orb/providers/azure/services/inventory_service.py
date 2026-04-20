@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Callable, Optional, Protocol, TypedDict, cast
+from typing import Any, Callable, Optional, Protocol, TypedDict
 
 from orb.domain.base.ports import LoggingPort
 from orb.domain.request.aggregate import Request
@@ -17,16 +17,13 @@ from orb.providers.azure.infrastructure.handlers.azure_handler import (
 )
 from orb.providers.base.strategy import ProviderOperation, ProviderResult
 
-AzureProviderApiRef = AzureProviderApi | str
-
-
 @dataclass
 class AzureStatusQueryContext:
     """Parameters for an Azure instance status query."""
 
     instance_ids: list[str]
     resource_group: str
-    provider_api: Optional[AzureProviderApi | str]
+    provider_api: Optional[AzureProviderApi]
 
 
 @dataclass
@@ -38,7 +35,7 @@ class AzureReadOperationContext:
     template_id: str
     request_metadata: dict[str, Any]
     cyclecloud_request_context: CycleCloudRequestContext
-    provider_api: Optional[AzureProviderApiRef]
+    provider_api: Optional[AzureProviderApi]
     provider_api_key: str | None
     resource_group: str | None
     instance_ids: list[str] = field(default_factory=list)
@@ -195,15 +192,18 @@ def build_cyclecloud_request_metadata(
 def resolve_read_provider_api(
     operation: ProviderOperation,
     normalize_provider_api: Callable[[Any], Any],
-) -> Optional[AzureProviderApiRef]:
+) -> Optional[AzureProviderApi]:
     """Resolve and normalize the Azure provider API carried by an operation."""
     provider_api = operation.parameters.get("provider_api")
     if provider_api in (None, ""):
         return None
     normalized_provider_api = normalize_provider_api(provider_api)
-    if isinstance(normalized_provider_api, (AzureProviderApi, str)):
-        return cast(AzureProviderApiRef, normalized_provider_api)
-    return None
+    if isinstance(normalized_provider_api, AzureProviderApi):
+        return normalized_provider_api
+    raise AzureValidationError(
+        f"Invalid Azure provider_api: {provider_api!r}",
+        error_code="INVALID_PROVIDER_API",
+    )
 
 
 def collect_status_resource_ids(
@@ -232,11 +232,7 @@ def build_read_operation_context(
     metadata = request_metadata(operation)
     cyclecloud_request_context = CycleCloudRequestContext.from_mapping(metadata)
     provider_api = resolve_read_provider_api(operation, normalize_provider_api)
-    provider_api_key = None
-    if isinstance(provider_api, AzureProviderApi):
-        provider_api_key = provider_api.value
-    elif isinstance(provider_api, str):
-        provider_api_key = provider_api
+    provider_api_key = provider_api.value if provider_api is not None else None
 
     resource_group = resolve_operation_resource_group(operation, default_resource_group)
     request_id = operation_request_id(operation)

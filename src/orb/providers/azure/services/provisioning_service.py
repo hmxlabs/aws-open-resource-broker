@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Callable, Optional, cast
+from typing import Any, Callable, Optional
 
 from orb.domain.request.aggregate import Request
 from orb.providers.azure.domain.template.azure_template_aggregate import AzureTemplate
@@ -15,16 +15,12 @@ from orb.providers.azure.infrastructure.handlers.azure_handler import (
 )
 from orb.providers.base.strategy import ProviderOperation, ProviderResult
 
-
-AzureProviderApiRef = AzureProviderApi | str
-
-
 @dataclass
 class CreateOperationContext:
     """Context object encapsulating all necessary information for handling a create operation."""
     template_config: dict[str, Any]
     count: int
-    provider_api: AzureProviderApiRef
+    provider_api: AzureProviderApi
     provider_api_key: str
     handler: AzureHandler
     azure_template: AzureTemplate
@@ -49,19 +45,23 @@ def validate_create_template_config(
         error_code="MISSING_TEMPLATE_CONFIG",
     )
 
-def provider_api_key(provider_api: AzureProviderApiRef) -> str:
+def provider_api_key(provider_api: AzureProviderApi) -> str:
     """Get the string key for the provider API value."""
-    if isinstance(provider_api, AzureProviderApi):
-        return provider_api.value
-    return provider_api
+    return provider_api.value
 
 def resolve_create_provider_api(
     template_config: dict[str, Any],
     normalize_provider_api: Callable[[Any], Any],
-) -> AzureProviderApiRef:
+) -> AzureProviderApi:
     """Resolve the provider API from the template config, normalizing as needed."""
     provider_api = template_config.get("provider_api", AzureProviderApi.VMSS)
-    return cast(AzureProviderApiRef, normalize_provider_api(provider_api))
+    normalized_provider_api = normalize_provider_api(provider_api)
+    if isinstance(normalized_provider_api, AzureProviderApi):
+        return normalized_provider_api
+    raise AzureValidationError(
+        f"Invalid Azure provider_api: {provider_api!r}",
+        error_code="INVALID_PROVIDER_API",
+    )
 
 def create_instances_dry_run_result(
     create_context: CreateOperationContext,
@@ -93,7 +93,7 @@ class AzureProvisioningService:
         *,
         operation: ProviderOperation,
         normalize_provider_api: Callable[[Any], Any],
-        resolve_handler: Callable[[AzureProviderApiRef], Optional[AzureHandler]],
+        resolve_handler: Callable[[AzureProviderApi], Optional[AzureHandler]],
         build_template: Callable[[dict[str, Any]], AzureTemplate],
     ) -> CreateOperationContext:
         """Build and validate the context required for a create operation."""
@@ -125,7 +125,7 @@ class AzureProvisioningService:
         operation: ProviderOperation,
         azure_template: AzureTemplate,
         count: int,
-        provider_api: AzureProviderApiRef,
+        provider_api: AzureProviderApi,
         provider_instance_name: str,
     ) -> Request:
         """Build a request object for the create operation handler."""
@@ -152,7 +152,7 @@ class AzureProvisioningService:
         handler_result: AzureAcquireHostsResult,
         *,
         template_config: dict[str, Any],
-        provider_api: AzureProviderApiRef,
+        provider_api: AzureProviderApi,
         count: int,
         template_id: str,
     ) -> ProviderResult:

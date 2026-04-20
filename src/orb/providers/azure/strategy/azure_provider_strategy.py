@@ -51,7 +51,6 @@ from orb.providers.azure.services.machine_conversion_service import (
 from orb.providers.azure.services.provisioning_service import (
     AzureProvisioningService,
     create_instances_dry_run_result,
-    provider_api_key,
 )
 from orb.providers.azure.services.resource_metadata_service import (
     AzureResourceMetadataService,
@@ -83,8 +82,6 @@ if TYPE_CHECKING:
     from orb.providers.azure.infrastructure.services.azure_native_spec_service import (
         AzureNativeSpecService,
     )
-
-AzureProviderApiRef = AzureProviderApi | str
 
 @injectable
 class AzureProviderStrategy(ProviderStrategy):
@@ -216,12 +213,12 @@ class AzureProviderStrategy(ProviderStrategy):
 
     def _resolve_handler(
         self,
-        provider_api: AzureProviderApiRef,
+        provider_api: AzureProviderApi,
         *,
         allow_vmss_uniform_fallback: bool = False,
     ) -> Optional[AzureHandler]:
         """Resolve one handler from explicit overrides or the canonical factory."""
-        provider_api_value = self._provider_api_key(provider_api)
+        provider_api_value = provider_api.value
         handler = self._handlers.get(provider_api_value)
         if handler is not None:
             return handler
@@ -623,20 +620,19 @@ class AzureProviderStrategy(ProviderStrategy):
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _provider_api_key(provider_api: AzureProviderApiRef) -> str:
-        return provider_api_key(provider_api)
-
-    @staticmethod
     def _resolve_operation_provider_api(
         operation: ProviderOperation,
-    ) -> Optional[AzureProviderApiRef]:
+    ) -> Optional[AzureProviderApi]:
         provider_api = operation.parameters.get("provider_api")
         if provider_api in (None, ""):
             return None
         normalized_provider_api = AzureProviderStrategy._normalize_provider_api_value(provider_api)
-        if isinstance(normalized_provider_api, (AzureProviderApi, str)):
+        if isinstance(normalized_provider_api, AzureProviderApi):
             return normalized_provider_api
-        return None
+        raise AzureValidationError(
+            f"Invalid Azure provider_api: {provider_api!r}",
+            error_code="INVALID_PROVIDER_API",
+        )
 
     async def _handle_create_instances(
         self, operation: ProviderOperation
@@ -660,11 +656,10 @@ class AzureProviderStrategy(ProviderStrategy):
                 return create_instances_dry_run_result(create_context)
 
             if self._spot_launch_service.should_use_spot_placement(create_context.azure_template):
-                api_key = self._provider_api_key(create_context.provider_api)
                 return self._spot_launch_service.execute_planned_spot_launches(
                     azure_template=create_context.azure_template,
                     provider_api=create_context.provider_api,
-                    provider_api_key=api_key,
+                    provider_api_key=create_context.provider_api.value,
                     count=create_context.count,
                     template_config=template_config,
                     operation=operation,
@@ -729,7 +724,6 @@ class AzureProviderStrategy(ProviderStrategy):
                 operation=operation,
                 is_dry_run=is_dry_run,
                 resolve_operation_provider_api=self._resolve_operation_provider_api,
-                provider_api_key=self._provider_api_key,
                 resolve_handler=self._resolve_handler,
                 group_instance_ids_by_resource=group_instance_ids_by_resource,
                 resolve_operation_resource_group=lambda op: resolve_operation_resource_group(

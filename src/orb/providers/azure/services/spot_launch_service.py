@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from typing import Any, Callable, Mapping, Optional, Protocol
 
 from orb.application.services.spot_placement_execution import (
@@ -11,6 +11,7 @@ from orb.application.services.spot_placement_execution import (
     create_acquire_request,
 )
 from orb.application.services.spot_placement_planner import (
+    PlacementCandidate,
     PlacementPlanEntry,
     PlacementScore,
     SpotPlacementPlanner,
@@ -18,17 +19,17 @@ from orb.application.services.spot_placement_planner import (
 from orb.domain.base.ports import LoggingPort
 from orb.providers.azure.configuration.config import AzureProviderConfig
 from orb.providers.azure.domain.template.azure_template_aggregate import AzureTemplate
-from orb.providers.azure.domain.template.value_objects import AzureProviderApi
+from orb.providers.azure.domain.template.value_objects import (
+    AzureLocationName,
+    AzureProviderApi,
+)
 from orb.providers.azure.infrastructure.azure_client import AzureClient
 from orb.providers.azure.infrastructure.handlers.azure_handler import AzureHandler
 from orb.providers.azure.infrastructure.services.spot_placement_score_adapter import (
     AzureSpotPlacementScoreAdapter,
 )
+from orb.domain.request.aggregate import Request
 from orb.providers.base.strategy import ProviderOperation, ProviderResult
-
-
-AzureProviderApiRef = AzureProviderApi | str
-
 
 class SpotPlacementExecutionPort(Protocol):
     """Structural subset of SpotPlacementExecutionService used by Azure spot launches."""
@@ -37,13 +38,25 @@ class SpotPlacementExecutionPort(Protocol):
         self,
         plan: list[PlacementPlanEntry],
         total_count: int,
-        build_child_template: Callable[[PlacementPlanEntry], Any],
-        build_child_request: Callable[[int, int], object],
-        launch_child: Callable[[object, object], Mapping[str, Any]],
+        build_child_template: Callable[[PlacementPlanEntry], AzureTemplate],
+        build_child_request: Callable[[int, int], Request],
+        launch_child: Callable[[Request, AzureTemplate], Mapping[str, Any]],
         is_capacity_like_failure: Callable[[dict[str, Any]], bool],
     ) -> SpotPlacementExecutionSummary:
         """Execute a placement plan and return the aggregated execution summary."""
         ...
+
+
+@dataclass
+class AzureSpotPlacementTemplateView:
+    """Template view matching the adapter's structural spot-placement input."""
+
+    vm_size: str
+    location: AzureLocationName
+    placement_regions: list[str]
+    placement_zones: list[str]
+    zones: list[str]
+    candidate_vm_sizes: list[str]
 
 
 class AzureSpotLaunchService:
@@ -75,13 +88,30 @@ class AzureSpotLaunchService:
         azure_client: AzureClient | None,
     ) -> list[PlacementPlanEntry]:
         """Score candidate regions/zones and build a placement plan for spot launches."""
+        template_view = AzureSpotPlacementTemplateView(
+            vm_size=azure_template.vm_size,
+            location=azure_template.location,
+            placement_regions=list(azure_template.placement_regions or []),
+            placement_zones=list(azure_template.placement_zones or []),
+            zones=list(azure_template.zones or []),
+            candidate_vm_sizes=list(azure_template.candidate_vm_sizes),
+        )
+        if azure_client is None:
+            self._logger.warning(
+                "Azure client not available; falling back to template candidate order"
+            )
+            return self.build_fallback_spot_placement_plan(
+                self._build_approximate_template_scores(template_view),
+                count,
+            )
+
         adapter = AzureSpotPlacementScoreAdapter(
             azure_client=azure_client,
             logger=self._logger,
             subscription_id=azure_template.subscription_id or self._config.subscription_id,
             base_location=azure_template.location.value or self._config.region,
         )
-        scores = adapter.score_candidates(requested_count=count, template=azure_template)
+        scores = adapter.score_candidates(requested_count=count, template=template_view)
         plan = self._planner.create_plan(
             requested_count=count,
             scores=scores,
@@ -97,6 +127,35 @@ class AzureSpotLaunchService:
             )
             return self.build_fallback_spot_placement_plan(scores, count)
         return []
+
+    @staticmethod
+    def _build_approximate_template_scores(
+        template: AzureSpotPlacementTemplateView,
+    ) -> list[PlacementScore]:
+        """Build approximate scores in template order when live scoring cannot run."""
+        regions = template.placement_regions or [template.location.value]
+        zones = template.placement_zones or template.zones or [None]
+
+        return [
+            PlacementScore(
+                candidate=PlacementCandidate(
+                    candidate_id=f"azure:{region}:{zone or 'regional'}:{vm_size}",
+                    instance_type=vm_size,
+                    region=region,
+                    zone=zone,
+                ),
+                raw_score="DataNotFoundOrStale",
+                normalized_score=0.0,
+                approximate=True,
+                metadata={
+                    "fallback_reason": "azure_client_unavailable",
+                    "raw_entry": {"score": "DataNotFoundOrStale"},
+                },
+            )
+            for region in regions
+            for vm_size in template.candidate_vm_sizes
+            for zone in zones
+        ]
 
     @staticmethod
     def build_fallback_spot_placement_plan(
@@ -194,7 +253,7 @@ class AzureSpotLaunchService:
         self,
         *,
         azure_template: AzureTemplate,
-        provider_api: AzureProviderApiRef,
+        provider_api: AzureProviderApi,
         provider_api_key: str,
         count: int,
         template_config: dict[str, Any],
@@ -244,10 +303,11 @@ class AzureSpotLaunchService:
                 parent_request_id=base_request_id,
                 plan_entry_index=idx,
             ),
-            launch_child=lambda child_request, child_template: self._planned_child_result_with_fulfillment(
+            launch_child=lambda child_request, child_template: self._launch_planned_child(
+                handler=handler,
                 provider_api_key=provider_api_key,
-                requested_count=child_request.requested_count,
-                raw_result=handler.acquire_hosts(child_request, child_template),
+                child_request=child_request,
+                child_template=child_template,
             ),
             is_capacity_like_failure=capacity_like_failure_checker or self.is_capacity_like_failure,
         )
@@ -297,4 +357,19 @@ class AzureSpotLaunchService:
                 "method": "planned_handler",
                 "provider_data": provider_data,
             },
+        )
+
+    def _launch_planned_child(
+        self,
+        *,
+        handler: AzureHandler,
+        provider_api_key: str,
+        child_request: Request,
+        child_template: AzureTemplate,
+    ) -> dict[str, Any]:
+        """Launch one planned child request through the resolved handler."""
+        return self._planned_child_result_with_fulfillment(
+            provider_api_key=provider_api_key,
+            requested_count=child_request.requested_count,
+            raw_result=handler.acquire_hosts(child_request, child_template),
         )
