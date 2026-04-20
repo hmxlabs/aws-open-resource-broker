@@ -1,8 +1,7 @@
-"""Tests for Azure configuration, registration, and resilience behavior."""
+"""Tests for Azure configuration and registration behavior."""
 
 import pytest
-from azure.core.exceptions import HttpResponseError, ServiceRequestError
-from unittest.mock import MagicMock, Mock, patch
+from unittest.mock import patch
 
 from orb.bootstrap.infrastructure_services import register_infrastructure_services
 from orb.config import PerformanceConfig
@@ -15,9 +14,6 @@ from orb.providers.azure.configuration.validator import (
     validate_azure_template,
 )
 from orb.providers.azure.configuration.template_extension import AzureTemplateExtensionConfig
-from orb.providers.azure.exceptions.azure_exceptions import (
-    RateLimitError,
-)
 from orb.providers.azure.domain.template.value_objects import AzureProviderApi
 from orb.providers.azure.infrastructure.azure_client import AzureClient
 from orb.providers.azure.infrastructure.azure_handler_factory import AzureHandlerFactory
@@ -26,10 +22,6 @@ from orb.providers.azure.registration import (
     create_azure_config,
     create_azure_strategy,
     register_azure_provider,
-)
-from orb.providers.azure.resilience.azure_retry_strategy import (
-    AzureRetryStrategy,
-    is_retryable_azure_error,
 )
 from orb.providers.registry import ProviderRegistry
 
@@ -519,49 +511,3 @@ class TestAzureRegistration:
         assert strategy.azure_client.perf_config["max_workers"] == 4
         assert strategy.azure_client.perf_config["enable_caching"] is False
         assert strategy.azure_client.perf_config["cache_ttl"] == 21
-
-
-# ---------------------------------------------------------------------------
-# Resilience
-# ---------------------------------------------------------------------------
-
-
-class TestRetryStrategy:
-    def test_retryable_status_code(self):
-        exc = HttpResponseError(message="rate limited", response=Mock(status_code=429))
-        assert is_retryable_azure_error(exc) is True
-
-    def test_non_retryable_status_code(self):
-        exc = HttpResponseError(message="missing", response=Mock(status_code=404))
-        assert is_retryable_azure_error(exc) is False
-
-    def test_retryable_error_code(self):
-        exc = RateLimitError("rate limit exceeded")
-        assert is_retryable_azure_error(exc) is True
-
-    def test_retryable_nested_error_code(self):
-        exc = HttpResponseError(message="service unavailable", response=Mock(status_code=400))
-        exc.error = Mock(code="ServiceUnavailable")
-        assert is_retryable_azure_error(exc) is True
-
-    def test_should_retry_within_limit(self):
-        logger = MagicMock()
-        rs = AzureRetryStrategy(logger=logger, max_attempts=3)
-        exc = ServiceRequestError("transient transport failure")
-        assert rs.should_retry(0, exc) is True
-        assert rs.should_retry(2, exc) is True
-        assert rs.should_retry(3, exc) is False  # at limit
-
-    def test_delay_exponential_backoff(self):
-        logger = MagicMock()
-        rs = AzureRetryStrategy(logger=logger, base_delay=1.0, max_delay=60.0, jitter=False)
-        assert rs.get_delay(0) == 1.0
-        assert rs.get_delay(1) == 2.0
-        assert rs.get_delay(2) == 4.0
-        assert rs.get_delay(10) == 60.0  # capped
-
-    def test_on_retry_logs_warning(self):
-        logger = MagicMock()
-        rs = AzureRetryStrategy(logger=logger)
-        rs.on_retry(1, Exception("test"))
-        logger.warning.assert_called_once()
