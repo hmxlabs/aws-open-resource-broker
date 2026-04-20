@@ -15,9 +15,6 @@ from orb.providers.azure.infrastructure.handlers.azure_handler import (
 )
 from orb.providers.base.strategy import ProviderOperation, ProviderResult
 
-AzureProviderApiRef = AzureProviderApi | str
-
-
 @dataclass
 class TerminationOperationContext:
     """Resolved parameters needed to execute a termination dispatch."""
@@ -34,12 +31,11 @@ class AzureTerminationService:
 
     @staticmethod
     def build_termination_operation_context(
-            *,
+        *,
         operation: ProviderOperation,
         is_dry_run: bool,
-        resolve_operation_provider_api: Callable[[ProviderOperation], Optional[AzureProviderApiRef]],
-        provider_api_key: Callable[[AzureProviderApiRef], str],
-        resolve_handler: Callable[[AzureProviderApiRef], Optional[AzureHandler]],
+        resolve_operation_provider_api: Callable[[ProviderOperation], Optional[AzureProviderApi]],
+        resolve_handler: Callable[[AzureProviderApi], Optional[AzureHandler]],
         group_instance_ids_by_resource: Callable[[list[str], dict[str, Any]], dict[str, list[str]]],
         resolve_operation_resource_group: Callable[[ProviderOperation], Optional[str]],
     ) -> TerminationOperationContext:
@@ -52,13 +48,13 @@ class AzureTerminationService:
             )
 
         provider_api = resolve_operation_provider_api(operation)
-        if provider_api in (None, ""):
+        if provider_api is None:
             raise AzureValidationError(
                 "provider_api is required for Azure termination",
                 error_code="MISSING_PROVIDER_API",
             )
 
-        provider_api_value = provider_api_key(provider_api)
+        provider_api_value = provider_api.value
         handler = resolve_handler(provider_api)
         if handler is None:
             raise AzureValidationError(

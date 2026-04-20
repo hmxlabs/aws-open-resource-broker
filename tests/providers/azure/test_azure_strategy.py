@@ -3,10 +3,12 @@
 import asyncio
 import threading
 import time
+from typing import Any, cast
 from unittest.mock import MagicMock
 
 import pytest
 from orb.providers.azure.domain.template.azure_template_aggregate import AzureTemplate
+from orb.providers.azure.domain.template.value_objects import AzureProviderApi
 from orb.providers.azure.infrastructure.services.spot_placement_score_adapter import (
     AzureSpotPlacementScoreAdapter,
 )
@@ -22,7 +24,7 @@ class TestInitialization:
     def test_requires_azure_config(self, logger):
         with pytest.raises(ValueError, match="AzureProviderConfig"):
             AzureProviderStrategy(
-                config={"region": "x"},
+                config=cast(Any, {"region": "x"}),
                 logger=logger,
                 provider_instance_name="azure-default",
             )
@@ -465,7 +467,7 @@ class TestGetAvailableTemplates:
 class TestUnsupportedOperation:
     def test_unsupported_operation(self, strategy):
         op = ProviderOperation(
-            operation_type="totally_unknown",
+            operation_type=cast(Any, "totally_unknown"),
             parameters={},
         )
         result = run_operation(strategy.execute_operation(op))
@@ -498,7 +500,10 @@ class TestSpotPlacementScoreAdapter:
 
         adapter._fetch_scores = MagicMock(return_value={})
 
-        scores = adapter.score_candidates(requested_count=2, template=template)
+        scores = adapter.score_candidates(
+            requested_count=2,
+            template=cast(Any, template),
+        )
 
         assert [score.candidate.region for score in scores] == ["eastus2"]
         adapter._fetch_scores.assert_called_once_with(
@@ -677,14 +682,14 @@ class TestCleanup:
         )
         strategy.initialize()
 
-        first_handler = strategy._resolve_handler("VMSS")
+        first_handler = strategy._resolve_handler(AzureProviderApi.VMSS)
         assert first_handler is not None
         assert strategy.azure_client is client_one
 
         strategy.cleanup()
         strategy.initialize()
 
-        second_handler = strategy._resolve_handler("VMSS")
+        second_handler = strategy._resolve_handler(AzureProviderApi.VMSS)
         assert second_handler is not None
         assert strategy.azure_client is client_two
         assert second_handler is not first_handler

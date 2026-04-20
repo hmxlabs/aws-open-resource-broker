@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Callable, Optional, Protocol
+from typing import Any, Optional, Protocol
 
 from orb.domain.base.ports import LoggingPort
 from orb.providers.azure.domain.template.value_objects import AzureProviderApi
@@ -64,7 +64,17 @@ class AzureResourceMetadataServiceProtocol(Protocol):
         ...
 
 
-ResolveAzureHandler = Callable[..., Optional[AzureHandler]]
+class ResolveAzureHandler(Protocol):
+    """Callable protocol for resolving one Azure handler from a provider API."""
+
+    def __call__(
+        self,
+        provider_api: AzureProviderApi,
+        *,
+        allow_vmss_uniform_fallback: bool = False,
+    ) -> Optional[AzureHandler]:
+        """Resolve a handler for the given Azure provider API."""
+        ...
 
 
 class AzureInventoryQueryService:
@@ -288,7 +298,13 @@ class AzureInventoryQueryService:
         provider_api_key = read_context.provider_api_key or ""
         resource_group = read_context.resource_group
 
-        handler = resolve_handler(provider_api_key)
+        if provider_api is None:
+            return ProviderResult.error_result(
+                "provider_api is required for Azure resource discovery",
+                "MISSING_PROVIDER_API",
+            )
+
+        handler = resolve_handler(provider_api)
         if not handler:
             return ProviderResult.error_result(
                 f"No handler available for provider_api: {provider_api_key}",
