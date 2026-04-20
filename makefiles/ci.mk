@@ -18,7 +18,7 @@ ci-quality-radon:  ## Run radon complexity analysis
 
 ci-quality-pyright:  ## Run pyright type checking
 	@echo "Running pyright type check..."
-	$(call run-tool,pyright,src/)
+	$(call run-tool,pyright,)
 
 # Composite target (for local convenience)
 ci-quality: ci-quality-ruff ci-quality-pyright  ## Run all enforced code quality checks
@@ -84,11 +84,15 @@ ci-tests-unit:  ## Run unit tests only (matches ci.yml unit-tests job)
 
 ci-tests-integration:  ## Run integration tests only (matches ci.yml integration-tests job)
 	@echo "Running integration tests..."
-	$(call run-tool,pytest,$(TESTS_INTEGRATION) $(PYTEST_ARGS) --junitxml=junit-integration.xml)
+	$(call run-tool,pytest,$(TESTS_INTEGRATION) $(PYTEST_ARGS) $(PYTEST_COV_ARGS) --cov-report=xml:coverage-integration.xml --junitxml=junit-integration.xml)
 
 ci-tests-e2e:  ## Run end-to-end tests only (matches ci.yml e2e-tests job)
 	@echo "Running end-to-end tests..."
-	$(call run-tool,pytest,$(TESTS_E2E) $(PYTEST_ARGS) --junitxml=junit-e2e.xml)
+	$(call run-tool,pytest,$(TESTS_E2E) $(PYTEST_ARGS) $(PYTEST_COV_ARGS) --cov-report=xml:coverage-e2e.xml --junitxml=junit-e2e.xml)
+
+ci-tests-onmoto:  ## Run onmoto (mocked AWS) tests only (matches ci.yml onmoto-tests job)
+	@echo "Running onmoto tests..."
+	$(call run-tool,pytest,$(TESTS_ONMOTO) $(PYTEST_ARGS) $(PYTEST_COV_ARGS) --cov-report=xml:coverage-onmoto.xml --junitxml=junit-onmoto.xml)
 
 ci-tests-matrix:  ## Run comprehensive test matrix (matches test-matrix.yml workflow)
 	@echo "Running comprehensive test matrix..."
@@ -96,7 +100,15 @@ ci-tests-matrix:  ## Run comprehensive test matrix (matches test-matrix.yml work
 
 ci-tests-performance:  ## Run performance tests only (matches ci.yml performance-tests job)
 	@echo "Running performance tests..."
-	$(call run-tool,pytest,$(TESTS_PERFORMANCE) $(PYTEST_ARGS) --junitxml=junit-performance.xml)
+	$(call run-tool,pytest,$(TESTS_PERFORMANCE) $(PYTEST_ARGS) $(PYTEST_COV_ARGS) --cov-report=xml:coverage-performance.xml --junitxml=junit-performance.xml)
+
+ci-tests-providers:  ## Run providers tests only (matches ci.yml providers-tests job)
+	@echo "Running providers tests..."
+	$(call run-tool,pytest,$(TESTS_PROVIDERS) $(PYTEST_ARGS) $(PYTEST_COV_ARGS) --cov-report=xml:coverage-providers.xml --junitxml=junit-providers.xml)
+
+ci-tests-infrastructure:  ## Run infrastructure tests only (matches ci.yml infrastructure-tests job)
+	@echo "Running infrastructure tests..."
+	$(call run-tool,pytest,$(TESTS_INFRASTRUCTURE) $(PYTEST_ARGS) $(PYTEST_COV_ARGS) --cov-report=xml:coverage-infrastructure.xml --junitxml=junit-infrastructure.xml)
 
 ci-check:  ## Run comprehensive CI checks (matches GitHub Actions exactly)
 	@echo "Running comprehensive CI checks that match GitHub Actions pipeline..."
@@ -202,6 +214,34 @@ local-ci: ; @$(MAKE) local-workflow ci
 local-security: ; @$(MAKE) local-workflow security
 local-test-matrix: ; @$(MAKE) local-workflow test-matrix
 local-clean: ; @$(MAKE) local-workflow clean
+
+# @SECTION Go SDK
+sdk-go-test:  ## Run Go SDK tests
+	go test ./sdk/go/...
+
+sdk-go-build:  ## Build Go SDK
+	go build ./sdk/go/...
+
+sdk-go-generate:  ## Regenerate Go SDK from OpenAPI spec
+	go generate ./sdk/go/...
+
+sdk-go-update-version:  ## Update Go SDK version file and commit (usage: make sdk-go-update-version VERSION=1.6.0)
+	sed -i "s/MinCompatibleVersion = \".*\"/MinCompatibleVersion = \"$(VERSION)\"/" sdk/go/orb/version.go
+	git add sdk/go/openapi.json sdk/go/orb/version.go
+	git diff --cached --quiet || git commit -m "chore(sdk/go): update for v$(VERSION) [skip ci]"
+	git push
+
+sdk-go-export-spec:  ## Export OpenAPI spec from running ORB server into sdk/go/openapi.json
+	orb system serve --socket-path /tmp/orb-spec.sock &
+	@for i in $$(seq 1 30); do \
+		if curl -sf --unix-socket /tmp/orb-spec.sock http://localhost/health | python3 -c "import sys,json; d=json.load(sys.stdin); sys.exit(0 if d.get('status') in ('healthy','degraded') else 1)" 2>/dev/null; then \
+			break; \
+		fi; \
+		sleep 1; \
+	done
+	curl --fail --unix-socket /tmp/orb-spec.sock http://localhost/openapi.json > sdk/go/openapi.json
+	python3 -c "import json,sys; d=json.load(open('sdk/go/openapi.json')); assert d.get('openapi'), 'Invalid OpenAPI spec'"
+	kill %1 || true
 
 ci-git-setup:  ## Setup git configuration for CI automated commits
 	git config --local user.name "github-actions[bot]"

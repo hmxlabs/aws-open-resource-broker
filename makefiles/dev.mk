@@ -4,7 +4,7 @@
 install: venv-setup  ## Install dependencies (auto-detects UV/pip, environment-aware)
 	@if [ -n "$$CI" ]; then \
 		echo "CI detected: using frozen UV sync"; \
-		uv sync --frozen --all-groups --quiet; \
+		uv sync --frozen --all-groups --all-extras --quiet; \
 	elif command -v uv >/dev/null 2>&1; then \
 		echo "UV available"; \
 		if echo "$(MAKECMDGOALS)" | grep -q "_dev"; then \

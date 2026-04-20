@@ -1,5 +1,6 @@
 """Unit tests for RequestStatusManagementService._update_request_status logic."""
 
+import pytest
 from unittest.mock import MagicMock
 
 from orb.application.services.provisioning_orchestration_service import ProvisioningResult
@@ -143,15 +144,19 @@ class TestHandleProvisioningFailure:
         prov_result = MagicMock()
         prov_result.error_message = "Provider timeout"
         self.svc._handle_provisioning_failure(req, prov_result)
-        assert req.metadata["error_message"] == "Provider timeout"
-        assert req.metadata["error_type"] == "ProvisioningFailure"
+        req.update_metadata.assert_called_once()
+        call_kwargs = req.update_metadata.call_args[0][0]
+        assert call_kwargs["error_message"] == "Provider timeout"
+        assert call_kwargs["error_type"] == "ProvisioningFailure"
 
     def test_unknown_error_message_fallback(self):
         req = _make_request()
         prov_result = MagicMock()
         prov_result.error_message = None
         self.svc._handle_provisioning_failure(req, prov_result)
-        assert req.metadata["error_message"] == "Provisioning failed (no error details)"
+        req.update_metadata.assert_called_once()
+        call_kwargs = req.update_metadata.call_args[0][0]
+        assert call_kwargs["error_message"] == "Provisioning failed (no error details)"
 
 
 def _make_result(**kwargs) -> ProvisioningResult:
@@ -166,6 +171,33 @@ def _make_result(**kwargs) -> ProvisioningResult:
     )
     defaults.update(kwargs)
     return ProvisioningResult(**defaults)
+
+
+class TestUpdateRequestFromProvisioning:
+    @pytest.mark.asyncio
+    async def test_provider_data_is_persisted_via_follow_up_context(self):
+        svc = _make_service()
+        req = _make_request(requested_count=1)
+        req.set_provider_data = MagicMock(return_value=req)
+
+        result = _make_result(
+            resource_ids=["req-123"],
+            provider_data={
+                "cluster_name": "cc-cluster",
+                "cyclecloud_credential_path": "secret://cyclecloud",
+            },
+        )
+
+        updated = await svc.update_request_from_provisioning(req, result)
+
+        req.set_provider_data.assert_called_once()
+        provider_data = req.set_provider_data.call_args.args[0]
+        assert provider_data["follow_up_context"]["cluster_name"] == "cc-cluster"
+        assert (
+            provider_data["follow_up_context"]["cyclecloud_credential_path"]
+            == "secret://cyclecloud"
+        )
+        assert updated is req
 
 
 class TestExtractMachineIds:

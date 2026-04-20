@@ -11,6 +11,7 @@ from orb.config.platform_dirs import (
     get_logs_location,
     get_work_location,
 )
+from orb.domain.base.exceptions import ConfigurationError
 from orb.infrastructure.logging.logger import get_logger
 
 logger = get_logger(__name__)
@@ -67,6 +68,11 @@ class ConfigPathResolver:
         # Ensure directory exists
         try:
             os.makedirs(abs_path, exist_ok=True)
+        except PermissionError as e:
+            raise ConfigurationError(
+                f"Cannot create directory {abs_path!r}: permission denied. "
+                "Set the ORB_ROOT_DIR environment variable to a writable location."
+            ) from e
         except OSError as e:
             logger.warning("Could not create directory %s: %s", abs_path, e, exc_info=True)
 
