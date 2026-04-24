@@ -62,30 +62,41 @@ class GCPManagedInstanceGroupHandler(GCPHandler):
                 },
             ) from exc
 
-        if template.mig_scope == GCPMIGScope.REGIONAL:
-            region = str(template.region)
-            response = self._compute_client.create_regional_mig(
-                region=region,
-                mig_name=mig_name,
-                body=self._build_regional_mig_payload(
-                    template=template,
-                    template_name=template_name,
-                    target_size=request.requested_count,
-                ),
-            )
-            location_context = {"region": region, "scope": template.mig_scope.value}
-        else:
-            zone = str(template.zones[0])
-            response = self._compute_client.create_zonal_mig(
-                zone=zone,
-                mig_name=mig_name,
-                body=self._build_zonal_mig_payload(
-                    template=template,
-                    template_name=template_name,
-                    target_size=request.requested_count,
-                ),
-            )
-            location_context = {"zone": zone, "scope": template.mig_scope.value}
+        try:
+            if template.mig_scope == GCPMIGScope.REGIONAL:
+                region = str(template.region)
+                response = self._compute_client.create_regional_mig(
+                    region=region,
+                    mig_name=mig_name,
+                    body=self._build_regional_mig_payload(
+                        template=template,
+                        template_name=template_name,
+                        target_size=request.requested_count,
+                    ),
+                )
+                location_context = {"region": region, "scope": template.mig_scope.value}
+            else:
+                zone = str(template.zones[0])
+                response = self._compute_client.create_zonal_mig(
+                    zone=zone,
+                    mig_name=mig_name,
+                    body=self._build_zonal_mig_payload(
+                        template=template,
+                        template_name=template_name,
+                        target_size=request.requested_count,
+                    ),
+                )
+                location_context = {"zone": zone, "scope": template.mig_scope.value}
+        except Exception:
+            try:
+                self._compute_client.delete_instance_template(template_name=template_name)
+            except Exception as cleanup_exc:
+                self._logger.warning(
+                    "Failed to roll back orphaned instance template %s after MIG create failure: %s",
+                    template_name,
+                    cleanup_exc,
+                )
+            raise
 
         provider_data: GCPProviderData = {
             "mig_name": mig_name,

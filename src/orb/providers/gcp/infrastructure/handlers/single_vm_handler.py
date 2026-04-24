@@ -54,6 +54,12 @@ class GCPSingleVMHandler(GCPHandler):
                     operation="create_instance",
                     details={"instance_id": instance_name, "zone": zone},
                 )
+                self._logger.warning(
+                    "GCP create_instance failed for %s in %s: %s",
+                    instance_name,
+                    zone,
+                    translated,
+                )
                 failed_operations.append(
                     GCPFailedOperation(
                         target_id=instance_name,
@@ -219,6 +225,12 @@ class GCPSingleVMHandler(GCPHandler):
                     exc,
                     operation=operation_name,
                     details={"instance_id": instance_name},
+                )
+                self._logger.warning(
+                    "GCP %s failed for %s: %s",
+                    operation_name,
+                    instance_name,
+                    translated,
                 )
                 result.failed_operations.append(
                     GCPFailedOperation(

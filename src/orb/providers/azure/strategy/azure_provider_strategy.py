@@ -7,6 +7,7 @@ to the appropriate handlers via the VMSS / SingleVM infrastructure layer.
 from __future__ import annotations
 
 import asyncio
+import inspect
 import time
 from threading import Condition, RLock
 from typing import TYPE_CHECKING, Any, Callable, Optional
@@ -46,9 +47,6 @@ from orb.providers.azure.services.inventory_service import (
     resolve_operation_resource_group,
 )
 from orb.providers.azure.services.inventory_query_service import AzureInventoryQueryService
-from orb.providers.azure.services.machine_conversion_service import (
-    AzureMachineConversionService,
-)
 from orb.providers.azure.services.provisioning_service import (
     AzureProvisioningService,
     create_instances_dry_run_result,
@@ -122,7 +120,6 @@ class AzureProviderStrategy(ProviderStrategy):
         self._spot_placement_planner = SpotPlacementPlanner()
         self._spot_placement_execution = SpotPlacementExecutionService()
         self._health_check_service = AzureHealthCheckService(config=config, logger=logger)
-        self._machine_conversion_service = AzureMachineConversionService(logger=logger)
         self._provisioning_service = AzureProvisioningService()
         self._resource_metadata_service = AzureResourceMetadataService(
             default_resource_group=config.resource_group,
@@ -131,7 +128,6 @@ class AzureProviderStrategy(ProviderStrategy):
         self._inventory_query_service = AzureInventoryQueryService(
             logger=logger,
             provider_instance_name=provider_instance_name,
-            machine_conversion_service=self._machine_conversion_service,
             resource_metadata_service=self._resource_metadata_service,
         )
         self._spot_launch_service = AzureSpotLaunchService(
@@ -158,9 +154,9 @@ class AzureProviderStrategy(ProviderStrategy):
         self._cleanup_wait_timeout_seconds = 30.0
         self._vmss_cleanup_coordinator = vmss_cleanup_coordinator or VmssCleanupCoordinator(
             logger=self._logger,
-            get_vmss_member_count=self._current_vmss_member_count,
-            vmss_exists=self._vmss_exists,
-            begin_delete_vmss=self._begin_delete_vmss,
+            get_vmss_member_count=self._current_vmss_member_count_async,
+            vmss_exists=self._vmss_exists_async,
+            begin_delete_vmss=self._begin_delete_vmss_async,
         )
         self._cyclecloud_request_lookup = cyclecloud_request_lookup
         self._termination_dispatch_service = AzureTerminationDispatchService(
@@ -185,6 +181,8 @@ class AzureProviderStrategy(ProviderStrategy):
     @property
     def azure_client(self) -> Optional[AzureClient]:
         """Get the Azure client with lazy initialisation."""
+        if self._cleanup_requested:
+            return None
         return self._runtime.azure_client
 
     @property
@@ -284,6 +282,21 @@ class AzureProviderStrategy(ProviderStrategy):
             azure_client=self.azure_client,
         )
 
+    async def _build_spot_placement_plan_async(
+        self,
+        azure_template: AzureTemplate,
+        count: int,
+    ) -> list[Any]:
+        """Build the spot placement plan without blocking the async create flow."""
+        patched_sync_builder = self.__dict__.get("_build_spot_placement_plan")
+        if patched_sync_builder is not None:
+            return patched_sync_builder(azure_template, count)
+        return await self._spot_launch_service.build_spot_placement_plan_async(
+            azure_template=azure_template,
+            count=count,
+            azure_client=self.azure_client,
+        )
+
     def _is_capacity_like_failure(self, child_result: dict[str, Any]) -> bool:
         """Compatibility wrapper for tests and callers that patch this seam."""
         return self._spot_launch_service.is_capacity_like_failure(child_result)
@@ -319,12 +332,20 @@ class AzureProviderStrategy(ProviderStrategy):
                 self._lifecycle_condition.notify_all()
 
     async def execute_operation(self, operation: ProviderOperation) -> ProviderResult:
+        """Compatibility entrypoint that delegates to the native async override."""
+        return await self.execute_operation_async(operation)
+
+    async def execute_operation_async(self, operation: ProviderOperation) -> ProviderResult:
+        """Execute an Azure provider operation via the native async strategy path."""
         self._logger.debug(
             "azure_provider_strategy execute_operation [%s, %s, %s]",
             operation.operation_type,
             operation.parameters,
             operation.context,
         )
+        # Azure's primary SDK surface is already async-capable, so the strategy
+        # stays natively async here and only pushes specific sync-only helpers
+        # behind narrow service-level bridges where needed.
         if not self._initialized:
             return ProviderResult.error_result(
                 "Azure provider strategy not initialized", "NOT_INITIALIZED"
@@ -538,6 +559,20 @@ class AzureProviderStrategy(ProviderStrategy):
 
     def cleanup(self) -> None:
         """Release Azure client resources and reset all lazily initialised state."""
+        client = self._prepare_cleanup()
+        if client is not None:
+            client.close()
+        self._logger.debug("Azure provider cleaned up")
+
+    async def cleanup_async(self) -> None:
+        """Release Azure client resources through the native async close path."""
+        client = await asyncio.to_thread(self._prepare_cleanup)
+        if client is not None:
+            await client.aclose()
+        self._logger.debug("Azure provider cleaned up")
+
+    def _prepare_cleanup(self) -> Optional[AzureClient]:
+        """Wait for active work and clear strategy-owned runtime state."""
         with self._lifecycle_condition:
             self._cleanup_requested = True
             deadline = time.monotonic() + self._cleanup_wait_timeout_seconds
@@ -549,17 +584,14 @@ class AzureProviderStrategy(ProviderStrategy):
                         "leaving strategy in shutdown mode until cleanup is retried",
                         self._active_operations,
                     )
-                    return
+                    return None
                 self._lifecycle_condition.wait(timeout=remaining)
 
             client = self._runtime.clear_cached_runtime()
             self._handlers = {}
             self._vmss_cleanup_coordinator.clear()
             self._initialized = False
-
-        if client is not None:
-            client.close()
-        self._logger.debug("Azure provider cleaned up")
+            return client
 
     @staticmethod
     def _error_result(
@@ -587,17 +619,17 @@ class AzureProviderStrategy(ProviderStrategy):
         if operation.operation_type == ProviderOperationType.CREATE_INSTANCES:
             return await self._handle_create_instances(operation)
         elif operation.operation_type == ProviderOperationType.TERMINATE_INSTANCES:
-            return self._handle_terminate_instances(operation)
+            return await self._handle_terminate_instances(operation)
         elif operation.operation_type == ProviderOperationType.GET_INSTANCE_STATUS:
-            return self._handle_get_instance_status(operation)
+            return await self._handle_get_instance_status(operation)
         elif operation.operation_type == ProviderOperationType.DESCRIBE_RESOURCE_INSTANCES:
             return await self._handle_describe_resource_instances(operation)
         elif operation.operation_type == ProviderOperationType.VALIDATE_TEMPLATE:
-            return self._handle_validate_template(operation)
+            return await self._handle_validate_template(operation)
         elif operation.operation_type == ProviderOperationType.GET_AVAILABLE_TEMPLATES:
-            return self._handle_get_available_templates(operation)
+            return await self._handle_get_available_templates()
         elif operation.operation_type == ProviderOperationType.HEALTH_CHECK:
-            return self._handle_health_check(operation)
+            return await self._handle_health_check(operation)
         else:
             return ProviderResult.error_result(
                 f"Unsupported operation: {operation.operation_type}",
@@ -629,7 +661,12 @@ class AzureProviderStrategy(ProviderStrategy):
                 return create_instances_dry_run_result(create_context)
 
             if self._spot_launch_service.should_use_spot_placement(create_context.azure_template):
-                return self._spot_launch_service.execute_planned_spot_launches(
+                plan_result = self._build_spot_placement_plan_async(
+                    create_context.azure_template,
+                    create_context.count,
+                )
+                plan_override = await plan_result if inspect.isawaitable(plan_result) else plan_result
+                return await self._spot_launch_service.execute_planned_spot_launches_async(
                     azure_template=create_context.azure_template,
                     provider_api=create_context.provider_api,
                     provider_api_key=create_context.provider_api.value,
@@ -639,9 +676,7 @@ class AzureProviderStrategy(ProviderStrategy):
                     provider_instance_name=self.provider_instance_name,
                     handler=self._resolve_handler(create_context.provider_api),
                     azure_client=self.azure_client,
-                    plan_override=self._build_spot_placement_plan(
-                        create_context.azure_template, create_context.count
-                    ),
+                    plan_override=plan_override,
                     capacity_like_failure_checker=self._is_capacity_like_failure,
                 )
 
@@ -652,7 +687,7 @@ class AzureProviderStrategy(ProviderStrategy):
                 provider_api=create_context.provider_api,
                 provider_instance_name=self.provider_instance_name,
             )
-            return self._provisioning_service.execute_create_handler(
+            return await self._provisioning_service.execute_create_handler_async(
                 create_context=create_context,
                 request=request,
             )
@@ -688,7 +723,9 @@ class AzureProviderStrategy(ProviderStrategy):
     # TERMINATE_INSTANCES
     # ------------------------------------------------------------------
 
-    def _handle_terminate_instances(self, operation: ProviderOperation) -> ProviderResult:
+    async def _handle_terminate_instances(
+        self, operation: ProviderOperation
+    ) -> ProviderResult:
         self._logger.debug("_handle_terminate_instances")
         try:
             operation = self._resolve_cyclecloud_operation(operation)
@@ -709,7 +746,7 @@ class AzureProviderStrategy(ProviderStrategy):
                     termination_context
                 )
 
-            termination_provider_data = self._termination_dispatch_service.dispatch(
+            termination_provider_data = await self._termination_dispatch_service.dispatch_async(
                 handler=termination_context.handler,
                 instance_ids=termination_context.instance_ids,
                 grouped_resource_mapping=termination_context.grouped_resource_mapping,
@@ -756,7 +793,9 @@ class AzureProviderStrategy(ProviderStrategy):
     # GET_INSTANCE_STATUS
     # ------------------------------------------------------------------
 
-    def _handle_get_instance_status(self, operation: ProviderOperation) -> ProviderResult:
+    async def _handle_get_instance_status(
+        self, operation: ProviderOperation
+    ) -> ProviderResult:
         try:
             operation = self._resolve_cyclecloud_operation(operation)
             read_context = build_read_operation_context(
@@ -793,9 +832,8 @@ class AzureProviderStrategy(ProviderStrategy):
                     },
                 )
 
-            return self._inventory_query_service.get_instance_status(
+            return await self._inventory_query_service.get_instance_status_async(
                 read_context=read_context,
-                azure_client=self.azure_client,
                 resolve_handler=self._resolve_handler,
                 vmss_cleanup_coordinator=self._vmss_cleanup_coordinator,
             )
@@ -808,29 +846,45 @@ class AzureProviderStrategy(ProviderStrategy):
                 "GET_INSTANCE_STATUS_ERROR", exc,
             )
 
-    def _current_vmss_member_count(self, *, resource_group: str, vmss_name: str) -> Optional[int]:
+    async def _current_vmss_member_count_async(
+        self,
+        *,
+        resource_group: str,
+        vmss_name: str,
+    ) -> Optional[int]:
         if not self.resource_manager:
             return None
 
-        return self.resource_manager.get_vmss_member_count(
+        return await self.resource_manager.get_vmss_member_count_async(
             resource_group=resource_group,
             vmss_name=vmss_name,
         )
 
-    def _vmss_exists(self, *, resource_group: str, vmss_name: str) -> Optional[bool]:
+    async def _vmss_exists_async(
+        self,
+        *,
+        resource_group: str,
+        vmss_name: str,
+    ) -> Optional[bool]:
         if not self.resource_manager:
             return None
 
-        return self.resource_manager.vmss_exists(
+        return await self.resource_manager.vmss_exists_async(
             resource_group=resource_group,
             vmss_name=vmss_name,
         )
 
-    def _begin_delete_vmss(self, *, resource_group: str, vmss_name: str) -> None:
+    async def _begin_delete_vmss_async(
+        self,
+        *,
+        resource_group: str,
+        vmss_name: str,
+    ) -> None:
         azure_client = self.azure_client
         if not azure_client:
             raise RuntimeError("Azure client not available for VMSS cleanup delete")
-        azure_client.compute_client.virtual_machine_scale_sets.begin_delete(
+        compute = await azure_client.get_async_compute_client()
+        await compute.virtual_machine_scale_sets.begin_delete(
             resource_group_name=resource_group,
             vm_scale_set_name=vmss_name,
         )
@@ -860,7 +914,7 @@ class AzureProviderStrategy(ProviderStrategy):
                         "provider_data": {"dry_run": True},
                     },
                 )
-            return self._inventory_query_service.describe_resource_instances(
+            return await self._inventory_query_service.describe_resource_instances_async(
                 read_context=read_context,
                 resolve_handler=self._resolve_handler,
                 vmss_cleanup_coordinator=self._vmss_cleanup_coordinator,
@@ -880,7 +934,9 @@ class AzureProviderStrategy(ProviderStrategy):
     # VALIDATE_TEMPLATE
     # ------------------------------------------------------------------
 
-    def _handle_validate_template(self, operation: ProviderOperation) -> ProviderResult:
+    async def _handle_validate_template(
+        self, operation: ProviderOperation
+    ) -> ProviderResult:
         try:
             template_config = operation.parameters.get("template_config", {})
             if not template_config:
@@ -905,7 +961,7 @@ class AzureProviderStrategy(ProviderStrategy):
     # GET_AVAILABLE_TEMPLATES
     # ------------------------------------------------------------------
 
-    def _handle_get_available_templates(self, operation: ProviderOperation) -> ProviderResult:
+    async def _handle_get_available_templates(self) -> ProviderResult:
         try:
             templates = self._template_catalog_service.get_available_templates()
             return ProviderResult.success_result(
@@ -922,8 +978,11 @@ class AzureProviderStrategy(ProviderStrategy):
     # HEALTH_CHECK
     # ------------------------------------------------------------------
 
-    def _handle_health_check(self, operation: ProviderOperation) -> ProviderResult:
-        health_status = self.check_health()
+    async def _handle_health_check(
+        self, operation: ProviderOperation
+    ) -> ProviderResult:
+        _ = operation
+        health_status = await self._health_check_service.check_health_async(self.azure_client)
         return ProviderResult.success_result(
             {
                 "is_healthy": health_status.is_healthy,

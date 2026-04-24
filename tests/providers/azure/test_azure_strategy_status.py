@@ -1,5 +1,5 @@
 """Focused tests for Azure strategy status and discovery flows."""
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 from orb.providers.azure.configuration.config import AzureProviderConfig
 from orb.providers.azure.domain.template.value_objects import AzureProviderApi
@@ -43,7 +43,7 @@ class TestGetInstanceStatus:
     def test_get_instance_status_uses_request_metadata_resource_group(self, strategy_harness):
         strategy = strategy_harness.strategy
         handler = MagicMock()
-        handler.check_hosts_status.return_value = [
+        handler.check_hosts_status_async = AsyncMock(return_value=[
             {
                 "instance_id": "vm-1",
                 "status": "running",
@@ -59,7 +59,7 @@ class TestGetInstanceStatus:
                     "vm_name": "vm-1",
                 },
             }
-        ]
+        ])
         strategy_harness.handlers["SingleVM"] = handler
 
         op = ProviderOperation(
@@ -75,7 +75,7 @@ class TestGetInstanceStatus:
 
         assert result.success
         assert result.data["queried_count"] == 1
-        handler.check_hosts_status.assert_called_once()
+        handler.check_hosts_status_async.assert_awaited_once()
     def test_dry_run_short_circuits_status_lookup(self, azure_config, logger):
         strategy = AzureProviderStrategy(config=azure_config, logger=logger, provider_instance_name="azure-default")
         strategy.initialize()
@@ -97,7 +97,7 @@ class TestGetInstanceStatus:
         strategy_harness = build_strategy_harness(config=azure_config, logger=logger)
         strategy = strategy_harness.strategy
         handler = MagicMock()
-        handler.check_hosts_status.return_value = [
+        handler.check_hosts_status_async = AsyncMock(return_value=[
             {
                 "instance_id": "vm-1",
                 "status": "running",
@@ -110,7 +110,7 @@ class TestGetInstanceStatus:
                 "provider_type": "azure",
                 "provider_data": {"vm_name": "vm-1"},
             }
-        ]
+        ])
         strategy_harness.handlers["SingleVM"] = handler
 
         op = ProviderOperation(
@@ -126,14 +126,14 @@ class TestGetInstanceStatus:
 
         assert result.success
         assert result.metadata["method"] == "handler"
-        handler.check_hosts_status.assert_called_once()
+        handler.check_hosts_status_async.assert_awaited_once()
         assert result.data["instances"][0]["instance_id"] == "vm-1"
 
     def test_vmss_provider_api_routes_status_via_handler_with_resource_mapping(self, azure_config, logger):
         strategy_harness = build_strategy_harness(config=azure_config, logger=logger)
         strategy = strategy_harness.strategy
         handler = MagicMock()
-        handler.check_hosts_status.return_value = [
+        handler.check_hosts_status_async = AsyncMock(return_value=[
             {
                 "instance_id": "3",
                 "status": "running",
@@ -164,7 +164,7 @@ class TestGetInstanceStatus:
                     "vm_id": "vm-guid-9",
                 },
             },
-        ]
+        ])
         strategy_harness.handlers["VMSS"] = handler
 
         op = ProviderOperation(
@@ -181,14 +181,14 @@ class TestGetInstanceStatus:
 
         assert result.success
         assert result.metadata["method"] == "handler"
-        handler.check_hosts_status.assert_called_once()
+        handler.check_hosts_status_async.assert_awaited_once()
         assert [m["instance_id"] for m in result.data["instances"]] == ["3"]
 
     def test_vmss_resource_mapping_routes_status_via_handler_with_provider_api(self, azure_config, logger):
         strategy_harness = build_strategy_harness(config=azure_config, logger=logger)
         strategy = strategy_harness.strategy
         handler = MagicMock()
-        handler.check_hosts_status.return_value = [
+        handler.check_hosts_status_async = AsyncMock(return_value=[
             {
                 "instance_id": "3",
                 "status": "running",
@@ -204,7 +204,7 @@ class TestGetInstanceStatus:
                     "vm_id": "vm-guid-3",
                 },
             }
-        ]
+        ])
         strategy_harness.handlers["VMSS"] = handler
 
         op = ProviderOperation(
@@ -221,17 +221,17 @@ class TestGetInstanceStatus:
 
         assert result.success
         assert result.metadata["method"] == "handler"
-        handler.check_hosts_status.assert_called_once()
+        handler.check_hosts_status_async.assert_awaited_once()
         assert [m["instance_id"] for m in result.data["instances"]] == ["3"]
 
     def test_cyclecloud_status_handler_failure_surfaces_error(self, azure_config, logger):
         strategy_harness = build_strategy_harness(config=azure_config, logger=logger)
         strategy = strategy_harness.strategy
         handler = MagicMock()
-        handler.check_hosts_status.side_effect = CycleCloudConnectionError(
+        handler.check_hosts_status_async = AsyncMock(side_effect=CycleCloudConnectionError(
             "cyclecloud auth failed",
             url="https://cc.example.com",
-        )
+        ))
         strategy_harness.handlers["CycleCloud"] = handler
 
         op = ProviderOperation(
@@ -254,46 +254,35 @@ class TestGetInstanceStatus:
         assert "cyclecloud auth failed" in result.error_message
         assert result.metadata["error_class"] == "CycleCloudConnectionError"
 
-    def test_status_populates_network_identity(self, strategy_harness):
+    def test_status_preserves_handler_identity_fields(self, strategy_harness):
         strategy = strategy_harness.strategy
-        azure_client = MagicMock()
-        strategy_harness.azure_client = azure_client
-
-        nic_ref = MagicMock()
-        nic_ref.id = (
-            "/subscriptions/sub/resourceGroups/test-rg/providers/"
-            "Microsoft.Network/networkInterfaces/nic-vm-1"
-        )
-        nic_ref.properties.primary = True
-
-        vm = MagicMock()
-        vm.name = "vm-1"
-        vm.vm_id = "vm-guid-1"
-        vm.instance_view.statuses = []
-        vm.hardware_profile.vm_size = "Standard_D4s_v5"
-        vm.zones = ["1"]
-        vm.location = "eastus2"
-        vm.network_profile.network_interfaces = [nic_ref]
-        azure_client.compute_client.virtual_machines.get.return_value = vm
-        azure_client.resolve_network_identity_from_vm.return_value = {
-            "private_ip": "10.0.0.4",
-            "public_ip": None,
-            "subnet_id": (
-                "/subscriptions/sub/resourceGroups/test-rg/providers/"
-                "Microsoft.Network/virtualNetworks/test-vnet/subnets/default"
-            ),
-            "vnet_id": (
-                "/subscriptions/sub/resourceGroups/test-rg/providers/"
-                "Microsoft.Network/virtualNetworks/test-vnet"
-            ),
-            "nic_id": nic_ref.id,
-            "nic_name": "nic-vm-1",
-        }
+        handler = MagicMock()
+        handler.check_hosts_status_async = AsyncMock(return_value=[
+            {
+                "instance_id": "vm-1",
+                "status": "running",
+                "private_ip": "10.0.0.4",
+                "public_ip": None,
+                "instance_type": "Standard_D4s_v5",
+                "subnet_id": (
+                    "/subscriptions/sub/resourceGroups/test-rg/providers/"
+                    "Microsoft.Network/virtualNetworks/test-vnet/subnets/default"
+                ),
+                "vpc_id": (
+                    "/subscriptions/sub/resourceGroups/test-rg/providers/"
+                    "Microsoft.Network/virtualNetworks/test-vnet"
+                ),
+                "provider_type": "azure",
+                "provider_data": {"vm_name": "vm-1"},
+            }
+        ])
+        strategy_harness.handlers["SingleVM"] = handler
 
         op = ProviderOperation(
             operation_type=ProviderOperationType.GET_INSTANCE_STATUS,
             parameters={
                 "instance_ids": ["vm-1"],
+                "provider_api": "SingleVM",
                 "request_metadata": {"resource_group": "test-rg"},
             },
         )
@@ -301,14 +290,12 @@ class TestGetInstanceStatus:
         result = run_operation(strategy.execute_operation(op))
 
         assert result.success
-        assert result.data["instances"][0]["private_ip"] == "10.0.0.4"
-        assert result.data["instances"][0]["subnet_id"].endswith("/subnets/default")
-        assert result.data["instances"][0]["vpc_id"].endswith("/virtualNetworks/test-vnet")
+        assert result.data["instances"][0]["instance_id"] == "vm-1"
+        assert result.data["instances"][0]["provider_data"]["vm_name"] == "vm-1"
 
-    def test_sdk_status_fallback_requires_azure_client(self, azure_config, logger):
+    def test_status_query_without_provider_api_is_rejected(self, azure_config, logger):
         strategy_harness = build_strategy_harness(config=azure_config, logger=logger)
         strategy = strategy_harness.strategy
-        strategy_harness.azure_client = None
 
         op = ProviderOperation(
             operation_type=ProviderOperationType.GET_INSTANCE_STATUS,
@@ -321,20 +308,20 @@ class TestGetInstanceStatus:
         result = run_operation(strategy.execute_operation(op))
 
         assert not result.success
-        assert result.error_code == "AZURE_CLIENT_NOT_AVAILABLE"
+        assert result.error_code == "MISSING_PROVIDER_API"
 
     def test_get_instance_status_accepts_enum_provider_api(self, azure_config, logger):
         strategy_harness = build_strategy_harness(config=azure_config, logger=logger)
         strategy = strategy_harness.strategy
         handler = MagicMock()
-        handler.check_hosts_status.return_value = [
+        handler.check_hosts_status_async = AsyncMock(return_value=[
             {
                 "instance_id": "3",
                 "status": "running",
                 "provider_type": "azure",
                 "provider_data": {"vmss_instance_id": "3"},
             }
-        ]
+        ])
         strategy_harness.handlers["VMSS"] = handler
 
         op = ProviderOperation(
@@ -351,7 +338,7 @@ class TestGetInstanceStatus:
 
         assert result.success
         assert [m["instance_id"] for m in result.data["instances"]] == ["3"]
-        handler.check_hosts_status.assert_called_once()
+        handler.check_hosts_status_async.assert_awaited_once()
 
 
 # ---------------------------------------------------------------------------
@@ -383,13 +370,16 @@ class TestDescribeResourceInstances:
     ):
         strategy = strategy_harness.strategy
         handler = MagicMock()
-        handler.check_hosts_status.return_value = []
-        handler.get_vmss_resource_errors.return_value = []
+        handler.check_hosts_status_async = AsyncMock(return_value=[])
+        handler.get_vmss_resource_errors_async = AsyncMock(return_value=[])
         strategy_harness.handlers["VMSS"] = handler
         resource_manager = MagicMock()
-        resource_manager.get_vmss_member_count.return_value = 0
+        resource_manager.get_vmss_member_count_async = AsyncMock(return_value=0)
         strategy_harness.resource_manager = resource_manager
+        compute_client = MagicMock()
+        compute_client.virtual_machine_scale_sets.begin_delete = AsyncMock()
         azure_client = MagicMock()
+        azure_client.get_async_compute_client = AsyncMock(return_value=compute_client)
         strategy_harness.azure_client = azure_client
 
         op = ProviderOperation(
@@ -417,7 +407,7 @@ class TestDescribeResourceInstances:
         result = run_operation(strategy.execute_operation(op))
 
         assert result.success
-        azure_client.compute_client.virtual_machine_scale_sets.begin_delete.assert_called_once_with(
+        compute_client.virtual_machine_scale_sets.begin_delete.assert_awaited_once_with(
             resource_group_name="test-rg",
             vm_scale_set_name="vmss-demo",
         )
@@ -440,13 +430,16 @@ class TestDescribeResourceInstances:
     ):
         strategy = strategy_harness.strategy
         handler = MagicMock()
-        handler.check_hosts_status.return_value = []
-        handler.get_vmss_resource_errors.return_value = []
+        handler.check_hosts_status_async = AsyncMock(return_value=[])
+        handler.get_vmss_resource_errors_async = AsyncMock(return_value=[])
         strategy_harness.handlers["VMSS"] = handler
         resource_manager = MagicMock()
-        resource_manager.vmss_exists.return_value = False
+        resource_manager.vmss_exists_async = AsyncMock(return_value=False)
         strategy_harness.resource_manager = resource_manager
+        compute_client = MagicMock()
+        compute_client.virtual_machine_scale_sets.begin_delete = AsyncMock()
         azure_client = MagicMock()
+        azure_client.get_async_compute_client = AsyncMock(return_value=compute_client)
         strategy_harness.azure_client = azure_client
 
         op = ProviderOperation(
@@ -475,11 +468,11 @@ class TestDescribeResourceInstances:
         result = run_operation(strategy.execute_operation(op))
 
         assert result.success
-        resource_manager.vmss_exists.assert_called_once_with(
+        resource_manager.vmss_exists_async.assert_awaited_once_with(
             resource_group="test-rg",
             vmss_name="vmss-demo",
         )
-        azure_client.compute_client.virtual_machine_scale_sets.begin_delete.assert_not_called()
+        compute_client.virtual_machine_scale_sets.begin_delete.assert_not_awaited()
         assert result.metadata["termination_follow_up_pending"] is False
 
     def test_describe_resource_instances_does_not_cleanup_when_strict_vmss_status_fails(
@@ -487,9 +480,9 @@ class TestDescribeResourceInstances:
     ):
         strategy = strategy_harness.strategy
         handler = MagicMock()
-        handler.check_hosts_status.side_effect = RuntimeError(
+        handler.check_hosts_status_async = AsyncMock(side_effect=RuntimeError(
             "Failed to list instances for VMSS 'vmss-demo': transient ARM failure"
-        )
+        ))
         strategy_harness.handlers["VMSS"] = handler
         strategy_harness.resource_manager = MagicMock()
 
@@ -519,8 +512,8 @@ class TestDescribeResourceInstances:
 
         assert not result.success
         assert result.error_code == "DESCRIBE_RESOURCE_INSTANCES_ERROR"
-        strategy_harness.resource_manager.get_vmss_member_count.assert_not_called()
-        forwarded_request = handler.check_hosts_status.call_args.args[0]
+        strategy_harness.resource_manager.get_vmss_member_count_async.assert_not_called()
+        forwarded_request = handler.check_hosts_status_async.await_args.args[0]
         assert forwarded_request.metadata["fail_on_partial_status_error"] is True
 
     def test_describe_resource_instances_leaves_cleanup_pending_when_other_members_remain(
@@ -528,13 +521,16 @@ class TestDescribeResourceInstances:
     ):
         strategy = strategy_harness.strategy
         handler = MagicMock()
-        handler.check_hosts_status.return_value = []
-        handler.get_vmss_resource_errors.return_value = []
+        handler.check_hosts_status_async = AsyncMock(return_value=[])
+        handler.get_vmss_resource_errors_async = AsyncMock(return_value=[])
         strategy_harness.handlers["VMSS"] = handler
         resource_manager = MagicMock()
-        resource_manager.get_vmss_member_count.return_value = 1
+        resource_manager.get_vmss_member_count_async = AsyncMock(return_value=1)
         strategy_harness.resource_manager = resource_manager
+        compute_client = MagicMock()
+        compute_client.virtual_machine_scale_sets.begin_delete = AsyncMock()
         azure_client = MagicMock()
+        azure_client.get_async_compute_client = AsyncMock(return_value=compute_client)
         strategy_harness.azure_client = azure_client
 
         op = ProviderOperation(
@@ -562,7 +558,7 @@ class TestDescribeResourceInstances:
         result = run_operation(strategy.execute_operation(op))
 
         assert result.success
-        resource_manager.get_vmss_member_count.assert_called_once_with(
+        resource_manager.get_vmss_member_count_async.assert_awaited_once_with(
             resource_group="test-rg",
             vmss_name="vmss-b",
         )
@@ -579,20 +575,23 @@ class TestDescribeResourceInstances:
                 "delete_submission_semantics": "best_effort_without_reverification",
             }
         ]
-        azure_client.compute_client.virtual_machine_scale_sets.begin_delete.assert_not_called()
+        compute_client.virtual_machine_scale_sets.begin_delete.assert_not_awaited()
 
     def test_describe_resource_instances_leaves_cleanup_pending_when_member_count_is_unknown(
         self, strategy_harness
     ):
         strategy = strategy_harness.strategy
         handler = MagicMock()
-        handler.check_hosts_status.return_value = []
-        handler.get_vmss_resource_errors.return_value = []
+        handler.check_hosts_status_async = AsyncMock(return_value=[])
+        handler.get_vmss_resource_errors_async = AsyncMock(return_value=[])
         strategy_harness.handlers["VMSS"] = handler
         resource_manager = MagicMock()
-        resource_manager.get_vmss_member_count.return_value = None
+        resource_manager.get_vmss_member_count_async = AsyncMock(return_value=None)
         strategy_harness.resource_manager = resource_manager
+        compute_client = MagicMock()
+        compute_client.virtual_machine_scale_sets.begin_delete = AsyncMock()
         azure_client = MagicMock()
+        azure_client.get_async_compute_client = AsyncMock(return_value=compute_client)
         strategy_harness.azure_client = azure_client
 
         op = ProviderOperation(
@@ -620,7 +619,7 @@ class TestDescribeResourceInstances:
         result = run_operation(strategy.execute_operation(op))
 
         assert result.success
-        resource_manager.get_vmss_member_count.assert_called_once_with(
+        resource_manager.get_vmss_member_count_async.assert_awaited_once_with(
             resource_group="test-rg",
             vmss_name="vmss-demo",
         )
@@ -637,23 +636,25 @@ class TestDescribeResourceInstances:
                 "delete_submission_semantics": "best_effort_without_reverification",
             }
         ]
-        azure_client.compute_client.virtual_machine_scale_sets.begin_delete.assert_not_called()
+        compute_client.virtual_machine_scale_sets.begin_delete.assert_not_awaited()
 
     def test_describe_resource_instances_surfaces_retry_pending_when_vmss_delete_retry_fails(
         self, strategy_harness
     ):
         strategy = strategy_harness.strategy
         handler = MagicMock()
-        handler.check_hosts_status.return_value = []
-        handler.get_vmss_resource_errors.return_value = []
+        handler.check_hosts_status_async = AsyncMock(return_value=[])
+        handler.get_vmss_resource_errors_async = AsyncMock(return_value=[])
         strategy_harness.handlers["VMSS"] = handler
         resource_manager = MagicMock()
-        resource_manager.get_vmss_member_count.return_value = 0
+        resource_manager.get_vmss_member_count_async = AsyncMock(return_value=0)
         strategy_harness.resource_manager = resource_manager
-        azure_client = MagicMock()
-        azure_client.compute_client.virtual_machine_scale_sets.begin_delete.side_effect = (
-            RuntimeError("delete still blocked")
+        compute_client = MagicMock()
+        compute_client.virtual_machine_scale_sets.begin_delete = AsyncMock(
+            side_effect=RuntimeError("delete still blocked")
         )
+        azure_client = MagicMock()
+        azure_client.get_async_compute_client = AsyncMock(return_value=compute_client)
         strategy_harness.azure_client = azure_client
 
         op = ProviderOperation(
@@ -701,8 +702,8 @@ class TestDescribeResourceInstances:
     ):
         strategy = strategy_harness.strategy
         handler = MagicMock()
-        handler.check_hosts_status.return_value = []
-        handler.get_vmss_resource_errors.return_value = []
+        handler.check_hosts_status_async = AsyncMock(return_value=[])
+        handler.get_vmss_resource_errors_async = AsyncMock(return_value=[])
         strategy_harness.handlers["VMSS"] = handler
         resource_manager = MagicMock()
         strategy_harness.resource_manager = resource_manager
@@ -738,15 +739,15 @@ class TestDescribeResourceInstances:
         assert first_result.metadata["termination_follow_up_pending"] is False
         assert second_result.success
         assert second_result.metadata["termination_follow_up_pending"] is False
-        resource_manager.get_vmss_member_count.assert_not_called()
-        azure_client.compute_client.virtual_machine_scale_sets.begin_delete.assert_not_called()
+        resource_manager.get_vmss_member_count_async.assert_not_called()
+        azure_client.get_async_compute_client.assert_not_called()
 
     def test_describe_resource_instances_forwards_cyclecloud_request_metadata(
         self, strategy_harness
     ):
         strategy = strategy_harness.strategy
         handler = MagicMock()
-        handler.check_hosts_status.return_value = []
+        handler.check_hosts_status_async = AsyncMock(return_value=[])
         strategy_harness.handlers["CycleCloud"] = handler
 
         op = ProviderOperation(
@@ -773,7 +774,7 @@ class TestDescribeResourceInstances:
         result = run_operation(strategy.execute_operation(op))
 
         assert result.success
-        forwarded_request = handler.check_hosts_status.call_args.args[0]
+        forwarded_request = handler.check_hosts_status_async.await_args.args[0]
         assert forwarded_request.resource_ids == ["req-12345678-1234-1234-1234-123456789012"]
         assert forwarded_request.metadata["cluster_name"] == "my-cluster"
         assert forwarded_request.metadata["node_array"] == "execute"
@@ -794,7 +795,7 @@ class TestDescribeResourceInstances:
     def test_get_instance_status_matches_cyclecloud_node_name_alias(self, strategy_harness):
         strategy = strategy_harness.strategy
         handler = MagicMock()
-        handler.check_hosts_status.return_value = [
+        handler.check_hosts_status_async = AsyncMock(return_value=[
             {
                 "instance_id": "6ecc44d4-417d-41e4-a729-3d504d651fd3",
                 "name": "dynamic-1",
@@ -806,7 +807,7 @@ class TestDescribeResourceInstances:
                     "node_name": "dynamic-1",
                 },
             }
-        ]
+        ])
         strategy_harness.handlers["CycleCloud"] = handler
 
         op = ProviderOperation(
@@ -840,7 +841,7 @@ class TestDescribeResourceInstances:
     ):
         strategy = strategy_harness.strategy
         handler = MagicMock()
-        handler.check_hosts_status.return_value = []
+        handler.check_hosts_status_async = AsyncMock(return_value=[])
         strategy_harness.handlers["CycleCloud"] = handler
 
         op = ProviderOperation(
@@ -863,7 +864,7 @@ class TestDescribeResourceInstances:
         result = run_operation(strategy.execute_operation(op))
 
         assert result.success
-        forwarded_request = handler.check_hosts_status.call_args.args[0]
+        forwarded_request = handler.check_hosts_status_async.await_args.args[0]
         assert forwarded_request.resource_ids == ["contoso-slurm-lab-cluster"]
 
     def test_get_instance_status_recovers_cyclecloud_context_from_origin_request(
@@ -889,7 +890,7 @@ class TestDescribeResourceInstances:
         )
         strategy = strategy_harness.strategy
         handler = MagicMock()
-        handler.check_hosts_status.return_value = []
+        handler.check_hosts_status_async = AsyncMock(return_value=[])
         strategy_harness.handlers["CycleCloud"] = handler
 
         op = ProviderOperation(
@@ -905,7 +906,7 @@ class TestDescribeResourceInstances:
         result = run_operation(strategy.execute_operation(op))
 
         assert result.success
-        forwarded_request = handler.check_hosts_status.call_args.args[0]
+        forwarded_request = handler.check_hosts_status_async.await_args.args[0]
         assert forwarded_request.resource_ids == ["contoso-slurm-lab-cluster"]
         assert forwarded_request.metadata["cluster_name"] == "contoso-slurm-lab-cluster"
         lookup.assert_called_once_with("req-11111111-1111-4111-8111-111111111111")
@@ -914,6 +915,7 @@ class TestDescribeResourceInstances:
         strategy_harness = build_strategy_harness(config=azure_config, logger=logger)
         strategy = strategy_harness.strategy
         handler = MagicMock()
+        handler.check_hosts_status_async = AsyncMock()
         strategy_harness.handlers["VMSS"] = handler
 
         op = ProviderOperation(
@@ -929,13 +931,13 @@ class TestDescribeResourceInstances:
 
         assert result.success
         assert result.metadata["method"] == "dry_run"
-        handler.check_hosts_status.assert_not_called()
+        handler.check_hosts_status_async.assert_not_awaited()
 
     def test_describe_resource_instances_accepts_enum_provider_api(self, strategy_harness):
         strategy = strategy_harness.strategy
         handler = MagicMock()
-        handler.check_hosts_status.return_value = []
-        handler.get_vmss_resource_errors.return_value = []
+        handler.check_hosts_status_async = AsyncMock(return_value=[])
+        handler.get_vmss_resource_errors_async = AsyncMock(return_value=[])
         strategy_harness.handlers["VMSS"] = handler
         strategy_harness.resource_manager = MagicMock()
 
@@ -953,7 +955,7 @@ class TestDescribeResourceInstances:
 
         assert result.success
         assert result.metadata["provider_api"] == "VMSS"
-        handler.check_hosts_status.assert_called_once()
+        handler.check_hosts_status_async.assert_awaited_once()
 
 
 # ---------------------------------------------------------------------------

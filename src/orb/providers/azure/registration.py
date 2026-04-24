@@ -39,20 +39,20 @@ def _resolve_performance_config(
     """Resolve shared performance config, falling back to defaults."""
     if config_port is None:
         logger.debug("No shared config port available; using default Azure performance config")
-        return PerformanceConfig()
+        return PerformanceConfig.model_validate({})
 
     try:
         perf_config = config_port.get_typed(PerformanceConfig)
     except Exception as exc:
         logger.debug("Could not load performance config from shared config port: %s", exc)
-        return PerformanceConfig()
+        return PerformanceConfig.model_validate({})
 
     if not isinstance(perf_config, PerformanceConfig):
         logger.debug(
             "Ignoring unexpected performance config type from shared config port: %s",
             type(perf_config).__name__,
         )
-        return PerformanceConfig()
+        return PerformanceConfig.model_validate({})
 
     return perf_config
 
@@ -494,7 +494,13 @@ def register_azure_template_factory(
 
 def get_azure_extension_defaults() -> dict[str, Any]:
     """Get default Azure extension configuration."""
-    return AzureTemplateExtensionConfig().to_template_defaults()
+    return AzureTemplateExtensionConfig(
+        vm_size="Standard_D4s_v5",
+        priority="Regular",
+        os_disk_type="Premium_LRS",
+        os_disk_size_gb=None,
+        admin_username="azureuser",
+    ).to_template_defaults()
 
 
 def initialize_azure_provider(

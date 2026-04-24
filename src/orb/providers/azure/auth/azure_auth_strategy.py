@@ -4,6 +4,7 @@ Uses the shared Azure infrastructure credential factory so auth and
 provider-runtime flows construct the same credential shape.
 """
 
+import asyncio
 from typing import Optional
 
 from orb.domain.base.dependency_injection import injectable
@@ -15,6 +16,8 @@ from orb.infrastructure.adapters.ports.auth import (
     AuthStatus,
 )
 from orb.providers.azure.infrastructure.credential_factory import (
+    AsyncAzureAccessTokenProviderProtocol,
+    AsyncDefaultAzureAccessTokenProvider,
     AzureAccessTokenProviderProtocol,
     DefaultAzureAccessTokenProvider,
 )
@@ -30,14 +33,38 @@ class AzureAuthStrategy(AuthPort):
         client_id: Optional[str] = None,
         enabled: bool = True,
         token_provider: Optional[AzureAccessTokenProviderProtocol] = None,
+        async_token_provider: Optional[AsyncAzureAccessTokenProviderProtocol] = None,
     ) -> None:
+        """Initialise Azure auth with async-first token acquisition."""
         self._logger = logger
         self.client_id = client_id
         self.enabled = enabled
-        self._token_provider = token_provider or DefaultAzureAccessTokenProvider(
-            client_id=client_id,
-            logger=logger,
-        )
+        self._token_provider = token_provider
+        self._async_token_provider = async_token_provider
+        if self._token_provider is None and self._async_token_provider is None:
+            self._async_token_provider = AsyncDefaultAzureAccessTokenProvider(
+                client_id=client_id,
+                logger=logger,
+            )
+
+    def _auth_error_types(self) -> tuple[type[Exception], ...]:
+        """Return the active provider's declared auth failure types."""
+        if self._async_token_provider is not None:
+            return self._async_token_provider.get_auth_error_types()
+        if self._token_provider is None:
+            return DefaultAzureAccessTokenProvider(
+                client_id=self.client_id,
+                logger=self._logger,
+            ).get_auth_error_types()
+        return self._token_provider.get_auth_error_types()
+
+    async def _get_access_token(self, scope: str) -> str:
+        """Resolve an ARM token without blocking the event loop."""
+        if self._async_token_provider is not None:
+            return await self._async_token_provider.get_access_token(scope)
+        if self._token_provider is None:
+            raise RuntimeError("Azure auth strategy has no token provider configured")
+        return await asyncio.to_thread(self._token_provider.get_access_token, scope)
 
     async def authenticate(self, context: AuthContext) -> AuthResult:
         if not self.enabled:
@@ -46,7 +73,7 @@ class AzureAuthStrategy(AuthPort):
                 error_message="Azure auth strategy disabled",
             )
         try:
-            token = self._token_provider.get_access_token(
+            token = await self._get_access_token(
                 "https://management.azure.com/.default"
             )
 
@@ -59,7 +86,7 @@ class AzureAuthStrategy(AuthPort):
                     "strategy": "azure_default_credential",
                 },
             )
-        except self._token_provider.get_auth_error_types() as exc:
+        except self._auth_error_types() as exc:
             self._logger.error("Azure authentication failed: %s", exc)
             return AuthResult(
                 status=AuthStatus.FAILED,
@@ -77,7 +104,7 @@ class AzureAuthStrategy(AuthPort):
     async def refresh_token(self, refresh_token: str) -> AuthResult:
         """DefaultAzureCredential handles token refresh automatically."""
         try:
-            token = self._token_provider.get_access_token(
+            token = await self._get_access_token(
                 "https://management.azure.com/.default"
             )
             return AuthResult(
@@ -85,7 +112,7 @@ class AzureAuthStrategy(AuthPort):
                 token=token,
                 metadata={"strategy": "azure_default_credential", "refreshed": True},
             )
-        except self._token_provider.get_auth_error_types() as exc:
+        except self._auth_error_types() as exc:
             return AuthResult(
                 status=AuthStatus.FAILED,
                 error_message=f"Token refresh failed: {exc}",

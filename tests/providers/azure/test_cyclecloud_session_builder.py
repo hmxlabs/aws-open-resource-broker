@@ -2,18 +2,18 @@
 
 import json
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
+import httpx
 import pytest
-import requests
 from azure.core.exceptions import ClientAuthenticationError
 from azure.identity import CredentialUnavailableError
 
 from orb.providers.azure.configuration.config import AzureProviderConfig
+from orb.providers.azure.exceptions.azure_exceptions import CycleCloudConnectionError
 from orb.providers.azure.infrastructure.cyclecloud_session import (
     CycleCloudCredentialData,
     CycleCloudRequestContext,
-    CycleCloudSessionContext,
 )
 from orb.providers.azure.infrastructure.cyclecloud_session_builder import (
     CycleCloudSessionBuilder,
@@ -21,11 +21,13 @@ from orb.providers.azure.infrastructure.cyclecloud_session_builder import (
 
 
 def _make_builder(*, provider_cfg=None, template=None, request_context=None, credential=None):
-    token_provider = None
+    async_token_provider = None
     if credential is not None:
-        token_provider = MagicMock()
-        token_provider.get_access_token.side_effect = lambda scope: credential.get_token(scope).token
-        token_provider.get_auth_error_types.return_value = (
+        async_token_provider = MagicMock()
+        async_token_provider.get_access_token = AsyncMock(
+            side_effect=lambda scope: credential.get_token(scope).token
+        )
+        async_token_provider.get_auth_error_types.return_value = (
             CredentialUnavailableError,
             ClientAuthenticationError,
         )
@@ -35,7 +37,7 @@ def _make_builder(*, provider_cfg=None, template=None, request_context=None, cre
         template=template,
         request_context=request_context or CycleCloudRequestContext(),
         provider_cfg=provider_cfg,
-        token_provider=token_provider,
+        async_token_provider=async_token_provider,
     )
 
 
@@ -71,7 +73,7 @@ def test_cyclecloud_request_context_round_trips_metadata():
     }
 
 
-def test_build_settings_returns_no_bearer_token_when_no_token_provider_is_available():
+def test_build_settings_returns_bearer_mode_when_no_token_provider_is_available():
     builder = CycleCloudSessionBuilder(
         cc_url="https://cc.example.com",
         verify_ssl=False,
@@ -87,7 +89,8 @@ def test_build_settings_returns_no_bearer_token_when_no_token_provider_is_availa
     assert settings.auth_mode == "bearer"
 
 
-def test_build_settings_skips_expected_auth_failures_before_returning_bearer_token():
+@pytest.mark.asyncio
+async def test_resolve_async_auth_skips_expected_auth_failures_before_returning_bearer_token():
     credential = MagicMock()
     credential.get_token.side_effect = [
         CredentialUnavailableError("missing"),
@@ -105,8 +108,8 @@ def test_build_settings_skips_expected_auth_failures_before_returning_bearer_tok
             }
         ),
         provider_cfg=None,
-        token_provider=MagicMock(
-            get_access_token=MagicMock(side_effect=lambda scope: credential.get_token(scope).token),
+        async_token_provider=MagicMock(
+            get_access_token=AsyncMock(side_effect=lambda scope: credential.get_token(scope).token),
             get_auth_error_types=MagicMock(
                 return_value=(CredentialUnavailableError, ClientAuthenticationError)
             ),
@@ -114,17 +117,15 @@ def test_build_settings_skips_expected_auth_failures_before_returning_bearer_tok
     )
 
     settings = builder.build_settings()
-
-    session = MagicMock()
-    session.headers = {}
-
-    resolved_auth_mode = builder.configure_session_auth(session=session, settings=settings)
+    headers, auth, resolved_auth_mode = await builder.resolve_async_auth(settings=settings)
 
     assert resolved_auth_mode == "bearer"
-    assert session.headers["Authorization"] == "Bearer tok-123"
+    assert auth is None
+    assert headers["Authorization"] == "Bearer tok-123"
 
 
-def test_build_settings_propagates_unexpected_token_errors():
+@pytest.mark.asyncio
+async def test_resolve_async_auth_propagates_unexpected_token_errors():
     credential = MagicMock()
     credential.get_token.side_effect = RuntimeError("boom")
     builder = CycleCloudSessionBuilder(
@@ -135,8 +136,8 @@ def test_build_settings_propagates_unexpected_token_errors():
             {"cyclecloud_auth_mode": "bearer"}
         ),
         provider_cfg=None,
-        token_provider=MagicMock(
-            get_access_token=MagicMock(side_effect=lambda scope: credential.get_token(scope).token),
+        async_token_provider=MagicMock(
+            get_access_token=AsyncMock(side_effect=lambda scope: credential.get_token(scope).token),
             get_auth_error_types=MagicMock(
                 return_value=(CredentialUnavailableError, ClientAuthenticationError)
             ),
@@ -145,7 +146,101 @@ def test_build_settings_propagates_unexpected_token_errors():
 
     with pytest.raises(RuntimeError, match="boom"):
         settings = builder.build_settings()
-        builder.configure_session_auth(session=MagicMock(headers={}), settings=settings)
+        await builder.resolve_async_auth(settings=settings)
+
+
+@pytest.mark.asyncio
+async def test_resolve_async_auth_uses_async_token_provider():
+    async_token_provider = MagicMock()
+    async_token_provider.get_access_token = AsyncMock(
+        side_effect=[
+            CredentialUnavailableError("missing"),
+            "tok-async-123",
+        ]
+    )
+    async_token_provider.get_auth_error_types.return_value = (
+        CredentialUnavailableError,
+        ClientAuthenticationError,
+    )
+    builder = CycleCloudSessionBuilder(
+        cc_url="https://cc.example.com",
+        verify_ssl=False,
+        template=None,
+        request_context=CycleCloudRequestContext.from_mapping(
+            {
+                "cyclecloud_auth_mode": "bearer",
+                "cyclecloud_aad_scope": "https://scope-1/.default",
+            }
+        ),
+        provider_cfg=None,
+        async_token_provider=async_token_provider,
+    )
+
+    settings = builder.build_settings()
+
+    headers, auth, resolved_auth_mode = await builder.resolve_async_auth(settings=settings)
+
+    assert resolved_auth_mode == "bearer"
+    assert auth is None
+    assert headers["Authorization"] == "Bearer tok-async-123"
+
+
+@pytest.mark.asyncio
+async def test_resolve_async_auth_rejects_ssh_mode():
+    builder = CycleCloudSessionBuilder(
+        cc_url="https://cc.example.com",
+        verify_ssl=False,
+        template=None,
+        request_context=CycleCloudRequestContext.from_mapping(
+            {"cyclecloud_auth_mode": "ssh"}
+        ),
+        provider_cfg=None,
+    )
+
+    with pytest.raises(CycleCloudConnectionError, match="not supported"):
+        settings = builder.build_settings()
+        await builder.resolve_async_auth(settings=settings)
+
+
+@pytest.mark.asyncio
+async def test_resolve_async_auth_errors_when_bearer_requested_but_unavailable():
+    async_token_provider = MagicMock()
+    async_token_provider.get_access_token = AsyncMock(
+        side_effect=CredentialUnavailableError("missing")
+    )
+    async_token_provider.get_auth_error_types.return_value = (
+        CredentialUnavailableError,
+        ClientAuthenticationError,
+    )
+    builder = CycleCloudSessionBuilder(
+        cc_url="https://cc.example.com",
+        verify_ssl=False,
+        template=None,
+        request_context=CycleCloudRequestContext.from_mapping(
+            {"cyclecloud_auth_mode": "bearer"}
+        ),
+        provider_cfg=None,
+        async_token_provider=async_token_provider,
+    )
+
+    with pytest.raises(CycleCloudConnectionError, match="no bearer token could be resolved"):
+        settings = builder.build_settings()
+        await builder.resolve_async_auth(settings=settings)
+
+
+@pytest.mark.asyncio
+async def test_resolve_async_auth_errors_when_no_auth_method_resolves():
+    builder = CycleCloudSessionBuilder(
+        cc_url="https://cc.example.com",
+        verify_ssl=False,
+        template=None,
+        request_context=CycleCloudRequestContext(),
+        provider_cfg=None,
+    )
+
+    with pytest.raises(CycleCloudConnectionError, match="No CycleCloud auth method resolved"):
+        settings = builder.build_settings()
+        await builder.resolve_async_auth(settings=settings)
 
 
 def test_build_settings_loads_cyclecloud_config_from_provider():
@@ -173,12 +268,6 @@ def test_build_settings_loads_cyclecloud_config_from_provider():
     assert settings.auth_mode is None
     assert settings.credential_path == "config/cyclecloud-credentials.json"
 
-    session = MagicMock()
-    session.headers = {}
-    resolved_auth_mode = builder.configure_session_auth(session=session, settings=settings)
-    assert resolved_auth_mode == "basic"
-    assert session.auth == ("cc_admin", "changeme")
-
 
 def test_cyclecloud_credential_data_repr_masks_secret_fields():
     credential_data = CycleCloudCredentialData(
@@ -199,27 +288,8 @@ def test_cyclecloud_credential_data_repr_masks_secret_fields():
     assert "bearer" in credential_repr
 
 
-def test_cyclecloud_session_context_repr_does_not_expose_session_auth_material():
-    session = requests.Session()
-    session.auth = ("cc_admin", "changeme")
-    session.headers["Authorization"] = "Bearer tok-123"
-    session_context = CycleCloudSessionContext(
-        session=session,
-        base_url="https://cc.example.com",
-        auth_mode="bearer",
-        credential_path="/tmp/cyclecloud.json",
-    )
-
-    session_context_repr = repr(session_context)
-
-    assert "cc_admin" not in session_context_repr
-    assert "changeme" not in session_context_repr
-    assert "tok-123" not in session_context_repr
-    assert "https://cc.example.com" in session_context_repr
-    assert "/tmp/cyclecloud.json" in session_context_repr
-
-
-def test_build_settings_loads_credentials_from_file(tmp_path: Path):
+@pytest.mark.asyncio
+async def test_resolve_async_auth_loads_credentials_from_file(tmp_path: Path):
     credential_file = tmp_path / "cyclecloud-credentials.json"
     credential_file.write_text(
         json.dumps(
@@ -247,11 +317,10 @@ def test_build_settings_loads_credentials_from_file(tmp_path: Path):
     assert settings.verify_ssl is False
     assert settings.credential_path == str(credential_file)
 
-    session = MagicMock()
-    session.headers = {}
-    resolved_auth_mode = builder.configure_session_auth(session=session, settings=settings)
+    headers, auth, resolved_auth_mode = await builder.resolve_async_auth(settings=settings)
+    assert headers == {}
     assert resolved_auth_mode == "basic"
-    assert session.auth == ("file-admin", "file-secret")
+    assert isinstance(auth, httpx.BasicAuth)
 
 
 def test_build_settings_parses_verify_ssl_string_from_request_context():
@@ -268,16 +337,9 @@ def test_build_settings_parses_verify_ssl_string_from_request_context():
         ),
         provider_cfg=None,
     )
-    builder._get_azure_bearer_token = MagicMock(return_value="tok-123")  # type: ignore[method-assign]
-
     settings = builder.build_settings()
 
     assert settings.verify_ssl is False
-    session = MagicMock()
-    session.headers = {}
-    resolved_auth_mode = builder.configure_session_auth(session=session, settings=settings)
-    assert resolved_auth_mode == "bearer"
-    assert session.headers["Authorization"] == "Bearer tok-123"
 
 
 def test_build_settings_takes_verify_ssl_from_credential_file(tmp_path: Path):

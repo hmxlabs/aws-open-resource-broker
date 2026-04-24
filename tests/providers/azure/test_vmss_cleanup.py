@@ -1,4 +1,6 @@
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
 
 from orb.providers.azure.infrastructure.vmss_cleanup import (
     PendingVmssCleanup,
@@ -68,13 +70,14 @@ def test_pending_vmss_cleanup_merge_preserves_ids_and_retry_state():
     }
 
 
-def test_vmss_cleanup_coordinator_reconciles_delete_retry_state():
+@pytest.mark.asyncio
+async def test_vmss_cleanup_coordinator_reconciles_delete_retry_state():
     logger = MagicMock()
     coordinator = VmssCleanupCoordinator(
         logger=logger,
-        get_vmss_member_count=lambda **_: 0,
-        vmss_exists=lambda **_: True,
-        begin_delete_vmss=lambda **_: (_ for _ in ()).throw(RuntimeError("delete blocked")),
+        get_vmss_member_count=AsyncMock(return_value=0),
+        vmss_exists=AsyncMock(return_value=True),
+        begin_delete_vmss=AsyncMock(side_effect=RuntimeError("delete blocked")),
     )
 
     coordinator.record(
@@ -90,7 +93,7 @@ def test_vmss_cleanup_coordinator_reconciles_delete_retry_state():
         }
     )
 
-    coordinator.reconcile(
+    await coordinator.reconcile(
         resource_group="test-rg",
         resource_ids=["vmss-demo"],
         observed_ids=set(),
@@ -118,10 +121,11 @@ def test_vmss_cleanup_coordinator_reconciles_delete_retry_state():
     logger.warning.assert_called_once()
 
 
-def test_vmss_cleanup_coordinator_recovers_delete_retry_state_after_record_replaces_entry():
+@pytest.mark.asyncio
+async def test_vmss_cleanup_coordinator_recovers_delete_retry_state_after_record_replaces_entry():
     logger = MagicMock()
 
-    def begin_delete_vmss(**_: object) -> None:
+    async def begin_delete_vmss(**_: object) -> None:
         coordinator.record(
             {
                 "provider_data": {
@@ -138,8 +142,8 @@ def test_vmss_cleanup_coordinator_recovers_delete_retry_state_after_record_repla
 
     coordinator = VmssCleanupCoordinator(
         logger=logger,
-        get_vmss_member_count=lambda **_: 0,
-        vmss_exists=lambda **_: True,
+        get_vmss_member_count=AsyncMock(return_value=0),
+        vmss_exists=AsyncMock(return_value=True),
         begin_delete_vmss=begin_delete_vmss,
     )
 
@@ -156,7 +160,7 @@ def test_vmss_cleanup_coordinator_recovers_delete_retry_state_after_record_repla
         }
     )
 
-    coordinator.reconcile(
+    await coordinator.reconcile(
         resource_group="test-rg",
         resource_ids=["vmss-demo"],
         observed_ids=set(),
@@ -188,9 +192,9 @@ def test_vmss_cleanup_coordinator_restores_pending_state_from_request_metadata()
     logger = MagicMock()
     coordinator = VmssCleanupCoordinator(
         logger=logger,
-        get_vmss_member_count=lambda **_: 1,
-        vmss_exists=lambda **_: True,
-        begin_delete_vmss=lambda **_: None,
+        get_vmss_member_count=AsyncMock(return_value=1),
+        vmss_exists=AsyncMock(return_value=True),
+        begin_delete_vmss=AsyncMock(),
     )
 
     coordinator.restore_from_request_metadata(
@@ -229,9 +233,9 @@ def test_vmss_cleanup_coordinator_restores_pending_state_from_request_metadata()
 def test_vmss_cleanup_coordinator_clears_pending_state():
     coordinator = VmssCleanupCoordinator(
         logger=MagicMock(),
-        get_vmss_member_count=lambda **_: 1,
-        vmss_exists=lambda **_: True,
-        begin_delete_vmss=lambda **_: None,
+        get_vmss_member_count=AsyncMock(return_value=1),
+        vmss_exists=AsyncMock(return_value=True),
+        begin_delete_vmss=AsyncMock(),
     )
     coordinator.record(
         {
@@ -251,12 +255,13 @@ def test_vmss_cleanup_coordinator_clears_pending_state():
     assert coordinator.has_pending(resource_group="test-rg", resource_ids=["vmss-demo"]) is False
 
 
-def test_vmss_cleanup_coordinator_submits_delete_when_vmss_is_empty():
-    begin_delete_vmss = MagicMock()
+@pytest.mark.asyncio
+async def test_vmss_cleanup_coordinator_submits_delete_when_vmss_is_empty():
+    begin_delete_vmss = AsyncMock()
     coordinator = VmssCleanupCoordinator(
         logger=MagicMock(),
-        get_vmss_member_count=lambda **_: 0,
-        vmss_exists=lambda **_: True,
+        get_vmss_member_count=AsyncMock(return_value=0),
+        vmss_exists=AsyncMock(return_value=True),
         begin_delete_vmss=begin_delete_vmss,
     )
     coordinator.record(
@@ -272,7 +277,7 @@ def test_vmss_cleanup_coordinator_submits_delete_when_vmss_is_empty():
         }
     )
 
-    coordinator.reconcile(
+    await coordinator.reconcile(
         resource_group="test-rg",
         resource_ids=["vmss-demo"],
         observed_ids=set(),

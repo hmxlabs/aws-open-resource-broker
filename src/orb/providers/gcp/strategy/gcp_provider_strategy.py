@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
 from typing import Any, Mapping, Optional
 
@@ -153,13 +154,14 @@ class GCPProviderStrategy(ProviderStrategy):
         start_time = time.time()
         is_dry_run = bool(operation.context and operation.context.get("dry_run", False))
         try:
-            if is_dry_run:
-                from orb.providers.gcp.infrastructure.dry_run_adapter import gcp_dry_run_context
-
-                with gcp_dry_run_context():
-                    result = await self._execute_operation_internal(operation)
-            else:
-                result = await self._execute_operation_internal(operation)
+            # google-cloud-compute exposes only synchronous REST clients in the
+            # supported v1 SDK, so the async provider contract is bridged here by
+            # isolating the full sync execution path on a worker thread.
+            result = await asyncio.to_thread(
+                self._execute_operation_internal,
+                operation,
+                is_dry_run,
+            )
             if result.metadata is None:
                 result.metadata = {}
             result.metadata.update(
@@ -199,7 +201,19 @@ class GCPProviderStrategy(ProviderStrategy):
                 },
             )
 
-    async def _execute_operation_internal(self, operation: ProviderOperation) -> ProviderResult:
+    def _execute_operation_internal(
+        self,
+        operation: ProviderOperation,
+        is_dry_run: bool,
+    ) -> ProviderResult:
+        if is_dry_run:
+            from orb.providers.gcp.infrastructure.dry_run_adapter import gcp_dry_run_context
+
+            with gcp_dry_run_context():
+                return self._execute_operation_internal_sync(operation)
+        return self._execute_operation_internal_sync(operation)
+
+    def _execute_operation_internal_sync(self, operation: ProviderOperation) -> ProviderResult:
         op = operation.operation_type
         if op == ProviderOperationType.CREATE_INSTANCES:
             return self._handle_create_instances(operation)

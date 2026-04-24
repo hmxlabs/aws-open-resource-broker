@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any, Callable, Optional, Protocol, cast
+from dataclasses import dataclass
+from typing import Any, Awaitable, Callable, Optional, Protocol, TypedDict, cast
 
 from orb.domain.base.ports import LoggingPort
 
@@ -68,24 +69,44 @@ class AzureVmNetworkIdentityProtocol(Protocol):
     network_profile: Optional[AzureNetworkProfileProtocol]
 
 
+class AzureNetworkIdentity(TypedDict):
+    """Resolved network identity fields used by Azure status normalization."""
+
+    private_ip: str | None
+    public_ip: str | None
+    subnet_id: str | None
+    vnet_id: str | None
+    nic_id: str | None
+    nic_name: str | None
+
+
+@dataclass(frozen=True)
+class _AzureResourceLookup:
+    """Parsed ARM lookup fields needed for Azure SDK get calls."""
+
+    resource_id: str
+    resource_group: str
+    name: str
+
+
 class AzureNetworkIdentityResolver:
     """Resolve private/public IP and subnet/VNet identity from Azure NIC references."""
 
     def __init__(
         self,
         *,
-        network_client_getter: Callable[[], Any],
+        async_network_client_getter: Callable[[], Awaitable[Any]],
         logger: LoggingPort,
         arm_resource_id_parser: ArmResourceIdParser,
         network_lookup_error_types: Callable[[], tuple[type[BaseException], ...]],
     ) -> None:
-        self._network_client_getter = network_client_getter
+        self._async_network_client_getter = async_network_client_getter
         self._logger = logger
         self._arm_resource_id_parser = arm_resource_id_parser
         self._network_lookup_error_types = network_lookup_error_types
 
     @staticmethod
-    def empty_network_identity() -> dict[str, Any]:
+    def empty_network_identity() -> AzureNetworkIdentity:
         """Return the empty network identity shape used when enrichment fails."""
         return {
             "private_ip": None,
@@ -137,88 +158,165 @@ class AzureNetworkIdentityResolver:
     def _public_ip_address_from_resource(public_ip_resource: Any) -> Optional[str]:
         return cast(AzurePublicIpProtocol, public_ip_resource).ip_address
 
-    @property
-    def _network_client(self) -> Any:
-        return self._network_client_getter()
-
-    def resolve_from_vm(self, vm: Any) -> dict[str, Any]:
-        """Resolve network identity fields from a VM or VMSS VM object."""
-        net_profile = cast(AzureVmNetworkIdentityProtocol, vm).network_profile
-        nic_refs = self._network_interface_refs_from_profile(net_profile)
-        return self.resolve_from_nic_refs(nic_refs)
-
-    def resolve_from_nic_refs(
+    def _ordered_nic_refs(
         self,
         nic_refs: list[AzureNicReferenceProtocol],
-    ) -> dict[str, Any]:
-        """Resolve private/public IP and subnet/VNet identity from NIC refs."""
-        network_identity = self.empty_network_identity()
-        if not nic_refs:
-            return network_identity
-
-        ordered_refs = sorted(
+    ) -> list[AzureNicReferenceProtocol]:
+        """Return NIC refs ordered with the primary NIC first."""
+        return sorted(
             nic_refs,
             key=lambda ref: not self._is_primary_nic_ref(ref),
         )
 
-        for nic_ref in ordered_refs:
-            nic_id = nic_ref.id
-            if not nic_id:
-                continue
+    def _nic_lookup_from_ref(
+        self,
+        nic_ref: AzureNicReferenceProtocol,
+    ) -> _AzureResourceLookup | None:
+        """Extract the NIC ARM ID, resource group, and resource name from a ref."""
+        nic_id = nic_ref.id
+        if not nic_id:
+            return None
 
-            nic_lookup = self._arm_resource_id_parser.extract_resource_group_and_name(
-                str(nic_id)
+        nic_lookup = self._arm_resource_id_parser.extract_resource_group_and_name(
+            str(nic_id)
+        )
+        if not nic_lookup:
+            return None
+
+        nic_rg, nic_name = nic_lookup
+        return _AzureResourceLookup(
+            resource_id=str(nic_id),
+            resource_group=nic_rg,
+            name=nic_name,
+        )
+
+    @staticmethod
+    def _private_ip_from_ip_config(ip_config: AzureIpConfigurationProtocol) -> Optional[str]:
+        """Resolve the private IP from direct fields or nested property bags."""
+        private_ip = ip_config.private_ip_address
+        if not private_ip and ip_config.properties is not None:
+            private_ip = ip_config.properties.private_ip_address
+        return private_ip
+
+    def _build_network_identity(
+        self,
+        *,
+        nic_id: str,
+        nic_name: str,
+        ip_config: AzureIpConfigurationProtocol,
+        public_ip: Optional[str],
+    ) -> AzureNetworkIdentity:
+        """Build the resolved network identity payload for one NIC IP configuration."""
+        subnet = self._subnet_from_ip_config(ip_config)
+        subnet_id = subnet.id if subnet is not None else None
+        return {
+            "private_ip": self._private_ip_from_ip_config(ip_config),
+            "public_ip": public_ip,
+            "subnet_id": subnet_id,
+            "vnet_id": self._arm_resource_id_parser.subnet_id_to_vnet_id(subnet_id),
+            "nic_id": nic_id,
+            "nic_name": nic_name,
+        }
+
+    def _public_ip_lookup_from_ip_config(
+        self,
+        ip_config: AzureIpConfigurationProtocol,
+    ) -> _AzureResourceLookup | None:
+        """Extract the public IP ARM ID, resource group, and resource name from an IP config."""
+        public_ip_ref = self._public_ip_ref_from_ip_config(ip_config)
+        public_ip_id = public_ip_ref.id if public_ip_ref is not None else None
+        if not public_ip_id:
+            return None
+
+        public_ip_lookup = self._arm_resource_id_parser.extract_resource_group_and_name(
+            str(public_ip_id)
+        )
+        if not public_ip_lookup:
+            return None
+
+        pip_rg, pip_name = public_ip_lookup
+        return _AzureResourceLookup(
+            resource_id=str(public_ip_id),
+            resource_group=pip_rg,
+            name=pip_name,
+        )
+
+    async def _resolve_public_ip_with_client_async(
+        self,
+        *,
+        network_client: Any,
+        ip_config: AzureIpConfigurationProtocol,
+    ) -> Optional[str]:
+        """Resolve a public IP address using the async Azure network client."""
+        public_ip_lookup = self._public_ip_lookup_from_ip_config(ip_config)
+        if public_ip_lookup is None:
+            return None
+
+        try:
+            pip = await network_client.public_ip_addresses.get(
+                resource_group_name=public_ip_lookup.resource_group,
+                public_ip_address_name=public_ip_lookup.name,
             )
-            if not nic_lookup:
+            return self._public_ip_address_from_resource(pip)
+        except self._network_lookup_error_types() as exc:
+            self._logger.debug(
+                "Failed to resolve public IP %s: %s",
+                public_ip_lookup.resource_id,
+                exc,
+            )
+            return None
+
+    async def _get_async_network_client(self) -> Any:
+        return await self._async_network_client_getter()
+
+    async def resolve_from_vm_async(self, vm: Any) -> AzureNetworkIdentity:
+        """Async variant of ``resolve_from_vm`` using the async Network SDK."""
+        net_profile = cast(AzureVmNetworkIdentityProtocol, vm).network_profile
+        nic_refs = self._network_interface_refs_from_profile(net_profile)
+        return await self.resolve_from_nic_refs_async(nic_refs)
+
+    async def resolve_from_nic_refs_async(
+        self,
+        nic_refs: list[AzureNicReferenceProtocol],
+    ) -> AzureNetworkIdentity:
+        """Async variant of ``resolve_from_nic_refs`` using the async Network SDK."""
+        network_identity = self.empty_network_identity()
+        if not nic_refs:
+            return network_identity
+
+        ordered_refs = self._ordered_nic_refs(nic_refs)
+        network_client = await self._get_async_network_client()
+
+        for nic_ref in ordered_refs:
+            nic_lookup = self._nic_lookup_from_ref(nic_ref)
+            if nic_lookup is None:
                 continue
 
-            nic_rg, nic_name = nic_lookup
             try:
-                nic = self._network_client.network_interfaces.get(
-                    resource_group_name=nic_rg,
-                    network_interface_name=nic_name,
+                nic = await network_client.network_interfaces.get(
+                    resource_group_name=nic_lookup.resource_group,
+                    network_interface_name=nic_lookup.name,
                 )
             except self._network_lookup_error_types() as exc:
-                self._logger.debug("Failed to resolve NIC %s: %s", nic_id, exc)
+                self._logger.debug(
+                    "Failed to resolve NIC %s: %s",
+                    nic_lookup.resource_id,
+                    exc,
+                )
                 continue
 
             ip_configs = list(cast(AzureNicProtocol, nic).ip_configurations or [])
             for ip_cfg in ip_configs:
-                private_ip = ip_cfg.private_ip_address
-                if not private_ip and ip_cfg.properties is not None:
-                    private_ip = ip_cfg.properties.private_ip_address
-                subnet = self._subnet_from_ip_config(ip_cfg)
-                subnet_id = subnet.id if subnet is not None else None
-                public_ip_ref = self._public_ip_ref_from_ip_config(ip_cfg)
-
-                public_ip = None
-                public_ip_id = public_ip_ref.id if public_ip_ref is not None else None
-                if public_ip_id:
-                    public_ip_lookup = self._arm_resource_id_parser.extract_resource_group_and_name(
-                        str(public_ip_id)
-                    )
-                    if public_ip_lookup:
-                        pip_rg, pip_name = public_ip_lookup
-                        try:
-                            pip = self._network_client.public_ip_addresses.get(
-                                resource_group_name=pip_rg,
-                                public_ip_address_name=pip_name,
-                            )
-                            public_ip = self._public_ip_address_from_resource(pip)
-                        except self._network_lookup_error_types() as exc:
-                            self._logger.debug(
-                                "Failed to resolve public IP %s: %s", public_ip_id, exc
-                            )
-
                 network_identity.update(
-                    {
-                        "private_ip": private_ip,
-                        "public_ip": public_ip,
-                        "subnet_id": subnet_id,
-                        "vnet_id": self._arm_resource_id_parser.subnet_id_to_vnet_id(subnet_id),
-                        "nic_id": nic_id,
-                        "nic_name": nic_name,
-                    }
+                    self._build_network_identity(
+                        nic_id=nic_lookup.resource_id,
+                        nic_name=nic_lookup.name,
+                        ip_config=ip_cfg,
+                        public_ip=await self._resolve_public_ip_with_client_async(
+                            network_client=network_client,
+                            ip_config=ip_cfg,
+                        ),
+                    )
                 )
                 return network_identity
 

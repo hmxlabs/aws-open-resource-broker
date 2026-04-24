@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-import json
+import asyncio
 from typing import Any, Protocol
-from urllib import request as urllib_request
+
+import httpx
 
 from orb.application.services.spot_placement_planner import (
     PlacementCandidate,
@@ -53,11 +54,49 @@ class AzureSpotPlacementScoreAdapter(SpotPlacementScoreAdapter):
     def score_candidates(
         self, requested_count: int, template: AzureSpotPlacementTemplate
     ) -> list[PlacementScore]:
-        """Fetch and return spot placement scores for all candidate region/zone/VM-size combinations."""
-        vm_sizes = template.candidate_vm_sizes
-        regions = template.placement_regions or [template.location.value or self._base_location]
-        zones = template.placement_zones or template.zones or []
+        """Fetch spot placement scores from sync code only."""
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            return asyncio.run(
+                self.score_candidates_async(
+                    requested_count=requested_count,
+                    template=template,
+                )
+            )
+        raise TypeError(
+            "score_candidates cannot run inside an active event loop; "
+            "use score_candidates_async instead"
+        )
 
+    async def score_candidates_async(
+        self, requested_count: int, template: AzureSpotPlacementTemplate
+    ) -> list[PlacementScore]:
+        """Fetch and return spot placement scores using async HTTP transport."""
+        vm_sizes, regions, zones, candidates = self._candidate_inputs(template)
+
+        if not candidates:
+            return []
+
+        raw_scores = await self._fetch_scores_async(
+            requested_count=requested_count,
+            regions=regions,
+            vm_sizes=vm_sizes,
+            zones=zones,
+        )
+
+        return self._build_scores(candidates=candidates, raw_scores=raw_scores)
+
+    def _candidate_inputs(
+        self,
+        template: AzureSpotPlacementTemplate,
+    ) -> tuple[list[str], list[str], list[str], list[PlacementCandidate]]:
+        """Build spot-placement API inputs and matching planner candidates."""
+        vm_sizes = template.candidate_vm_sizes
+        regions = template.placement_regions or [
+            template.location.value or self._base_location
+        ]
+        zones = template.placement_zones or template.zones or []
         candidates = [
             PlacementCandidate(
                 candidate_id=f"azure:{region}:{zone or 'regional'}:{vm_size}",
@@ -69,36 +108,9 @@ class AzureSpotPlacementScoreAdapter(SpotPlacementScoreAdapter):
             for vm_size in vm_sizes
             for zone in (zones or [None])
         ]
+        return vm_sizes, regions, zones, candidates
 
-        if not candidates:
-            return []
-
-        raw_scores = self._fetch_scores(
-            requested_count=requested_count,
-            regions=regions,
-            vm_sizes=vm_sizes,
-            zones=zones,
-        )
-
-        scores: list[PlacementScore] = []
-        for candidate in candidates:
-            entry = raw_scores.get((candidate.region, candidate.zone, candidate.instance_type), {})
-            raw_score = entry.get("score", "Low")
-            scores.append(
-                PlacementScore(
-                    candidate=candidate,
-                    raw_score=raw_score,
-                    normalized_score=self._normalize_score(raw_score),
-                    approximate=False,
-                    metadata={
-                        "is_quota_available": entry.get("isQuotaAvailable"),
-                        "raw_entry": entry,
-                    },
-                )
-            )
-        return scores
-
-    def _fetch_scores(
+    async def _fetch_scores_async(
         self,
         requested_count: int,
         regions: list[str],
@@ -106,7 +118,9 @@ class AzureSpotPlacementScoreAdapter(SpotPlacementScoreAdapter):
         zones: list[str],
     ) -> dict[tuple[str | None, str | None, str], dict[str, Any]]:
         if not self._subscription_id:
-            self._logger.warning("Azure subscription_id not available; skipping spot placement scoring")
+            self._logger.warning(
+                "Azure subscription_id not available; skipping spot placement scoring"
+            )
             return {}
 
         payload = {
@@ -124,23 +138,23 @@ class AzureSpotPlacementScoreAdapter(SpotPlacementScoreAdapter):
         )
 
         try:
-            token = self._azure_client.credential.get_token(
-                "https://management.azure.com/.default"
-            )
-            body = json.dumps(payload).encode("utf-8")
-            req = urllib_request.Request(
-                url=url,
-                data=body,
-                method="POST",
-                headers={
-                    "Authorization": f"Bearer {token.token}",
-                    "Content-Type": "application/json",
-                },
-            )
-            with urllib_request.urlopen(req, timeout=30) as response:
-                response_payload = json.loads(response.read().decode("utf-8"))
+            credential = await self._azure_client.get_async_credential()
+            token = await credential.get_token("https://management.azure.com/.default")
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(
+                    url,
+                    json=payload,
+                    headers={
+                        "Authorization": f"Bearer {token.token}",
+                        "Content-Type": "application/json",
+                    },
+                )
+                response.raise_for_status()
+                response_payload = response.json()
         except Exception as exc:
-            self._logger.warning("Azure spot placement score lookup failed: %s", exc, exc_info=True)
+            self._logger.warning(
+                "Azure spot placement score lookup failed: %s", exc, exc_info=True
+            )
             return {}
 
         placement_scores = response_payload.get("placementScores", [])
@@ -152,6 +166,31 @@ class AzureSpotPlacementScoreAdapter(SpotPlacementScoreAdapter):
             ): entry
             for entry in placement_scores
         }
+
+    def _build_scores(
+        self,
+        *,
+        candidates: list[PlacementCandidate],
+        raw_scores: dict[tuple[str | None, str | None, str], dict[str, Any]],
+    ) -> list[PlacementScore]:
+        scores: list[PlacementScore] = []
+        for candidate in candidates:
+            lookup_key = (candidate.region, candidate.zone, candidate.instance_type)
+            entry = raw_scores.get(lookup_key, {})
+            raw_score = entry.get("score", "Low")
+            scores.append(
+                PlacementScore(
+                    candidate=candidate,
+                    raw_score=raw_score,
+                    normalized_score=self._normalize_score(raw_score),
+                    approximate=False,
+                    metadata={
+                        "is_quota_available": entry.get("isQuotaAvailable"),
+                        "raw_entry": entry,
+                    },
+                )
+            )
+        return scores
 
     @classmethod
     def _normalize_score(cls, raw_score: str) -> float:

@@ -1,29 +1,19 @@
-"""Azure read/query utilities and SDK status fallback."""
+"""Azure read/query utilities."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Optional, Protocol, TypedDict
+from typing import Any, Optional, TypedDict
 
-from orb.domain.base.ports import LoggingPort
 from orb.domain.request.aggregate import Request
 from orb.domain.request.value_objects import RequestType
 from orb.providers.azure.domain.template.value_objects import AzureProviderApi
 from orb.providers.azure.exceptions.azure_exceptions import AzureValidationError
-from orb.providers.azure.infrastructure.azure_client import AzureClient
 from orb.providers.azure.infrastructure.cyclecloud_session import CycleCloudRequestContext
 from orb.providers.azure.infrastructure.handlers.azure_handler import (
     AzureHandlerStatusResult,
 )
-from orb.providers.base.strategy import ProviderOperation, ProviderResult
-
-@dataclass
-class AzureStatusQueryContext:
-    """Parameters for an Azure instance status query."""
-
-    instance_ids: list[str]
-    resource_group: str
-    provider_api: Optional[AzureProviderApi]
+from orb.providers.base.strategy import ProviderOperation
 
 
 @dataclass
@@ -61,14 +51,6 @@ class AzureStatusResult(TypedDict, total=False):
     instance_id: str
     name: str
     provider_data: AzureStatusProviderData
-
-
-class AzureMachineConversionServiceProtocol(Protocol):
-    """Structural subset of AzureMachineConversionService used by SDK fallback."""
-
-    def convert_sdk_vm(self, vm: object, azure_client: AzureClient) -> dict[str, Any]:
-        """Convert an SDK VM object into the normalized machine/result shape."""
-        ...
 
 
 def normalize_status_result(result: AzureHandlerStatusResult) -> AzureStatusResult:
@@ -386,44 +368,4 @@ def status_resource_ids(
     return collect_status_resource_ids(
         grouped_resource_mapping,
         operation.parameters.get("resource_id"),
-    )
-
-def sdk_status_result(
-    *,
-    status_context: AzureStatusQueryContext,
-    azure_client: Optional[AzureClient],
-    machine_conversion_service: AzureMachineConversionServiceProtocol,
-    logger: LoggingPort,
-) -> ProviderResult:
-    """Query VM status directly via the Azure SDK as a fallback."""
-    if not azure_client:
-        return ProviderResult.error_result(
-            "Azure client not available", "AZURE_CLIENT_NOT_AVAILABLE"
-        )
-
-    machines: list[dict[str, Any]] = []
-    compute = azure_client.compute_client
-
-    for vm_id in status_context.instance_ids:
-        try:
-            vm = compute.virtual_machines.get(
-                resource_group_name=status_context.resource_group,
-                vm_name=vm_id,
-                expand="instanceView",
-            )
-            machines.append(machine_conversion_service.convert_sdk_vm(vm, azure_client))
-        except Exception as exc:
-            logger.error("Failed to get status for VM '%s': %s", vm_id, exc)
-            machines.append(
-                {
-                    "instance_id": vm_id,
-                    "status": "unknown",
-                    "provider_type": "azure",
-                    "error": str(exc),
-                }
-            )
-
-    return ProviderResult.success_result(
-        {"instances": machines, "queried_count": len(status_context.instance_ids)},
-        {"operation": "get_instance_status", "instance_ids": status_context.instance_ids},
     )

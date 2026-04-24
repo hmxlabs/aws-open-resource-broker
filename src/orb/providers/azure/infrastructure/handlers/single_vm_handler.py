@@ -6,8 +6,8 @@ is suitable for long-lived singleton workloads.
 """
 
 from __future__ import annotations
-
 import uuid
+from collections.abc import Iterable
 from typing import TYPE_CHECKING, Any, Optional
 
 from orb.domain.base.dependency_injection import injectable
@@ -24,16 +24,21 @@ from orb.providers.azure.infrastructure.error_utils import (
 )
 from orb.providers.azure.infrastructure.sdk_shapes import instance_view_statuses
 from orb.providers.azure.infrastructure.handlers._network_identity import (
-    empty_network_identity,
-    network_identity_soft_failure_types,
+    resolve_network_identity_or_empty_async,
 )
 from orb.providers.azure.infrastructure.handlers.azure_status import resolve_power_state
 from orb.providers.azure.infrastructure.handlers.azure_handler import (
     AzureAcquireHostsResult,
     AzureHandler,
     AzureReleaseContext,
+    AzureSubmittedDeletion,
     AzureHandlerStatusResult,
     AzureReleaseHostsResult,
+    AzureSingleVmReleaseProviderData,
+    AzureStatusProviderData,
+)
+from orb.providers.azure.infrastructure.services.azure_network_identity_resolver import (
+    AzureNetworkIdentity,
 )
 
 if TYPE_CHECKING:
@@ -57,6 +62,22 @@ def _looks_like_uuid(value: str) -> bool:
         return True
     except (ValueError, AttributeError, TypeError):
         return False
+
+
+def _build_vm_name_lookup(vms: Iterable[Any]) -> dict[str, str]:
+    """Build a lookup that resolves VM names and VM IDs to VM names."""
+    lookup: dict[str, str] = {}
+    for vm in vms:
+        vm_name = vm.name
+        if not vm_name:
+            continue
+        resolved_name = str(vm_name)
+        lookup[resolved_name] = resolved_name
+
+        vm_id = vm.vm_id
+        if vm_id:
+            lookup[str(vm_id)] = resolved_name
+    return lookup
 
 
 @injectable
@@ -85,19 +106,51 @@ class SingleVMHandler(AzureHandler):
         )
         self.azure_native_spec_service = azure_native_spec_service
 
-    def acquire_hosts(
+    @staticmethod
+    def _build_status_result(
+        *,
+        vm: Any,
+        resource_group: str,
+        status: str,
+        network_identity: AzureNetworkIdentity,
+    ) -> AzureHandlerStatusResult:
+        """Build a typed status result for one Azure VM."""
+        hw = vm.hardware_profile
+        provider_data: AzureStatusProviderData = {
+            "resource_id": str(vm.name),
+            "vm_name": str(vm.name),
+            "vm_id": str(vm.vm_id),
+            "resource_group": resource_group,
+            "location": str(vm.location),
+            "nic_id": network_identity["nic_id"],
+            "nic_name": network_identity["nic_name"],
+            "vnet_id": network_identity["vnet_id"],
+        }
+        return {
+            "instance_id": str(vm.name),
+            "name": str(vm.name),
+            "status": status,
+            "private_ip": network_identity["private_ip"],
+            "public_ip": network_identity["public_ip"],
+            "launch_time": None,
+            "instance_type": str(hw.vm_size) if hw and hw.vm_size else None,
+            "subnet_id": network_identity["subnet_id"],
+            "vpc_id": network_identity["vnet_id"],
+            "availability_zone": (
+                str((vm.zones or [None])[0]) if (vm.zones or [None])[0] else None
+            ),
+            "provider_type": "azure",
+            "provider_data": provider_data,
+        }
+
+    async def acquire_hosts_async(
         self, request: Request, template: AzureTemplate
     ) -> AzureAcquireHostsResult:
-        """Create one or more individual VMs.
-
-        VM create operations are submitted and tracked via later status checks,
-        rather than blocking here until each LRO completes.
-        """
+        """Async create for individual VMs using async ARM deployment submission."""
         resource_group = template.resource_group.value
         location = template.location.value
         count = request.requested_count
 
-        # Resolve subnet for NIC creation
         subnet_id = self._resolve_subnet_id(template)
         if not subnet_id:
             raise LaunchError(
@@ -110,52 +163,24 @@ class SingleVMHandler(AzureHandler):
                 template_id=template.template_id,
             )
 
-        self._logger.info(
-            "Creating %d individual VM(s) in resource group '%s' (location=%s)",
-            count,
-            resource_group,
-            location,
-        )
+        nsg_id = template.network_config.network_security_group_id if template.network_config else None
+        accel_net = bool(template.network_config.accelerated_networking if template.network_config else False)
+        backend_pool_ids = template.network_config.load_balancer_backend_pool_ids if template.network_config else []
+        inbound_nat_pool_ids = template.network_config.load_balancer_inbound_nat_pool_ids if template.network_config else []
+        app_gateway_pool_ids = template.network_config.application_gateway_backend_pool_ids if template.network_config else []
+        public_ip_enabled = bool(template.network_config.public_ip_enabled if template.network_config else False)
 
-        nsg_id = (
-            template.network_config.network_security_group_id
-            if template.network_config else None
-        )
-        accel_net = bool(
-            template.network_config.accelerated_networking
-            if template.network_config else False
-        )
-        backend_pool_ids = (
-            template.network_config.load_balancer_backend_pool_ids
-            if template.network_config else []
-        )
-        inbound_nat_pool_ids = (
-            template.network_config.load_balancer_inbound_nat_pool_ids
-            if template.network_config else []
-        )
-        app_gateway_pool_ids = (
-            template.network_config.application_gateway_backend_pool_ids
-            if template.network_config else []
-        )
-        public_ip_enabled = bool(
-            template.network_config.public_ip_enabled
-            if template.network_config else False
-        )
-
-        # Resolve ssh_key_name → actual key data once before the loop.
-        # Build a local template copy with resolved keys so the mapper
-        # can read them without mutating the original aggregate.
         resolved_ssh_keys = list(template.ssh_public_keys)
         if template.ssh_key_name and not resolved_ssh_keys:
             from orb.providers.azure.infrastructure.services.ssh_key_resolver import (
-                resolve_ssh_keys,
+                resolve_ssh_keys_async,
             )
 
-            resolved_ssh_keys = resolve_ssh_keys(
+            resolved_ssh_keys = await resolve_ssh_keys_async(
                 ssh_key_name=template.ssh_key_name,
                 ssh_public_keys=template.ssh_public_keys,
                 resource_group=template.resource_group.value,
-                compute_client=self.azure_client.compute_client,
+                compute_client=await self.azure_client.get_async_compute_client(),
             )
         if resolved_ssh_keys != list(template.ssh_public_keys):
             template = template.model_copy(update={"ssh_public_keys": resolved_ssh_keys})
@@ -173,7 +198,6 @@ class SingleVMHandler(AzureHandler):
         selected_vm_size: Optional[str] = None
         submitted_deployment_name: Optional[str] = None
         last_error_details: dict[str, Any] = {}
-
         for candidate_vm_size in candidate_vm_sizes:
             try:
                 resolved_vm_definitions: list[dict[str, Any]] = []
@@ -207,11 +231,7 @@ class SingleVMHandler(AzureHandler):
                         )
                         if merged_params:
                             vm_params = merged_params
-
-                    resolved_vm_definitions.append({
-                        **vm_definition,
-                        "vm_payload": vm_params,
-                    })
+                    resolved_vm_definitions.append({**vm_definition, "vm_payload": vm_params})
 
                 deployment_name = self.azure_deployment_service.build_deployment_name(
                     "vm",
@@ -219,19 +239,17 @@ class SingleVMHandler(AzureHandler):
                     template.template_id,
                     candidate_vm_size,
                 )
-                deployment_template = (
-                    self.azure_deployment_service.build_single_vm_deployment_template(
-                        location=location,
-                        subnet_id=subnet_id,
-                        vm_definitions=resolved_vm_definitions,
-                        enable_accelerated_networking=accel_net,
-                        nsg_id=nsg_id,
-                        load_balancer_backend_pool_ids=backend_pool_ids,
-                        load_balancer_inbound_nat_pool_ids=inbound_nat_pool_ids,
-                        application_gateway_backend_pool_ids=app_gateway_pool_ids,
-                    )
+                deployment_template = self.azure_deployment_service.build_single_vm_deployment_template(
+                    location=location,
+                    subnet_id=subnet_id,
+                    vm_definitions=resolved_vm_definitions,
+                    enable_accelerated_networking=accel_net,
+                    nsg_id=nsg_id,
+                    load_balancer_backend_pool_ids=backend_pool_ids,
+                    load_balancer_inbound_nat_pool_ids=inbound_nat_pool_ids,
+                    application_gateway_backend_pool_ids=app_gateway_pool_ids,
                 )
-                submitted_deployment_name = self.azure_deployment_service.submit_template_deployment(
+                submitted_deployment_name = await self.azure_deployment_service.submit_template_deployment_async(
                     resource_group=resource_group,
                     deployment_name=deployment_name,
                     template=deployment_template,
@@ -253,10 +271,7 @@ class SingleVMHandler(AzureHandler):
 
         if submitted_deployment_name is None or selected_vm_size is None:
             raise LaunchError(
-                message=(
-                    last_error_details.get("error_message")
-                    or "Failed to submit SingleVM deployment"
-                ),
+                message=(last_error_details.get("error_message") or "Failed to submit SingleVM deployment"),
                 template_id=template.template_id,
                 error_code=last_error_details.get("error_code"),
             )
@@ -276,7 +291,6 @@ class SingleVMHandler(AzureHandler):
             submitted_deployment_name,
             len(created_ids),
         )
-
         return {
             "success": True,
             "resource_ids": created_ids,
@@ -287,9 +301,6 @@ class SingleVMHandler(AzureHandler):
                 "location": location,
                 "submitted_count": len(created_ids),
                 "operation_status": "submitted",
-                # Azure async create returns resource tracking first and instances later.
-                # Mark the submit attempt as final so generic top-up retry logic does not
-                # resubmit the deployment and create duplicate VMs.
                 "fulfillment_final": True,
                 "deployment_name": submitted_deployment_name,
                 "error_codes": [],
@@ -298,155 +309,167 @@ class SingleVMHandler(AzureHandler):
             },
         }
 
-    def check_hosts_status(self, request: Request) -> list[AzureHandlerStatusResult]:
-        """Return status for individual VM IDs."""
-        resource_ids: list[str] = request.resource_ids or []
-        resource_group = (
+    def _resolve_status_resource_group(self, request: Request) -> Optional[str]:
+        """Resolve the resource group for status checks."""
+        return (
             (request.metadata or {}).get("resource_group")
             or self.azure_client.resource_group
         )
+
+    async def check_hosts_status_async(self, request: Request) -> list[AzureHandlerStatusResult]:
+        """Async status query for individual VM IDs using the Azure async Compute SDK."""
+        resource_ids: list[str] = request.resource_ids or []
+        resource_group = self._resolve_status_resource_group(request)
         if not resource_group:
             self._logger.error("Cannot resolve resource_group for status check")
             return []
 
         results: list[AzureHandlerStatusResult] = []
-        compute = self.azure_client.compute_client
-        resolved_vm_names = self._resolve_vm_names(resource_group, resource_ids)
+        compute = await self.azure_client.get_async_compute_client()
+        resolved_vm_names = await self._resolve_vm_names_async(resource_group, resource_ids)
 
-        for original_id, vm_name in zip(resource_ids, resolved_vm_names):
+        for vm_name in resolved_vm_names:
             try:
-                vm = compute.virtual_machines.get(
+                vm = await compute.virtual_machines.get(
                     resource_group_name=resource_group,
                     vm_name=vm_name,
                     expand="instanceView",
                 )
-                status = "unknown"
+                network_identity = await resolve_network_identity_or_empty_async(
+                    logger=self._logger,
+                    target_label=f"VM '{vm_name}'",
+                    resolver=lambda: self.azure_client.resolve_network_identity_from_vm_async(vm),
+                )
                 statuses = instance_view_statuses(vm.instance_view)
-                if statuses is not None:
-                    status = resolve_power_state(statuses)
-
-                hw = vm.hardware_profile
-                network_identity = empty_network_identity()
-                try:
-                    network_identity = self.azure_client.resolve_network_identity_from_vm(vm)
-                except network_identity_soft_failure_types() as exc:
-                    # Optional NIC/IP enrichment must not hide an otherwise visible VM.
-                    self._logger.warning(
-                        "Failed to resolve network identity for VM '%s': %s",
-                        vm_name,
-                        exc,
+                results.append(
+                    self._build_status_result(
+                        vm=vm,
+                        resource_group=resource_group,
+                        status=(
+                            resolve_power_state(statuses)
+                            if statuses is not None
+                            else "unknown"
+                        ),
+                        network_identity=network_identity,
                     )
-                results.append({
-                    "instance_id": vm.name,
-                    "status": status,
-                    "private_ip": network_identity["private_ip"],
-                    "public_ip": network_identity["public_ip"],
-                    "launch_time": None,
-                    "instance_type": hw.vm_size if hw else None,
-                    "subnet_id": network_identity["subnet_id"],
-                    "vpc_id": network_identity["vnet_id"],
-                    "availability_zone": (vm.zones or [None])[0],
-                    "provider_type": "azure",
-                    "provider_data": {
-                        "resource_id": vm.name,
-                        "vm_name": vm.name,
-                        "vm_id": vm.vm_id,
-                        "resource_group": resource_group,
-                        "location": vm.location,
-                        "nic_id": network_identity["nic_id"],
-                        "nic_name": network_identity["nic_name"],
-                        "vnet_id": network_identity["vnet_id"],
-                    },
-                })
+                )
             except Exception as exc:
                 self._logger.error("Failed to get status for VM '%s': %s", vm_name, exc)
-
         return results
 
-    def release_hosts(
+    @staticmethod
+    def _raise_release_failures(
+        *,
+        machine_ids: list[str],
+        resource_group: str,
+        submitted_deletions: list[AzureSubmittedDeletion],
+        failed_deletions: list[AzureSubmittedDeletion],
+    ) -> None:
+        """Raise an aggregated termination error when any delete submissions fail."""
+        if not failed_deletions:
+            return
+
+        failed_requested_ids = [
+            requested_id
+            for deletion in failed_deletions
+            if (requested_id := deletion.get("requested_id")) is not None
+        ]
+        raise TerminationError(
+            (
+                f"Failed to submit deletion for {len(failed_deletions)} of "
+                f"{len(machine_ids)} VM(s)"
+            ),
+            resource_ids=failed_requested_ids,
+            details={
+                "resource_group": resource_group,
+                "submitted_deletions": submitted_deletions,
+                "failed_deletions": failed_deletions,
+            },
+        )
+
+    @staticmethod
+    def _build_release_result(
+        resource_group: str,
+        submitted_deletions: list[AzureSubmittedDeletion],
+    ) -> AzureReleaseHostsResult:
+        """Build the typed release result payload for SingleVM deletes."""
+        provider_data: AzureSingleVmReleaseProviderData = {
+            "resource_group": resource_group,
+            "operation_status": "submitted",
+            "submitted_deletions": submitted_deletions,
+        }
+        return {"provider_data": provider_data}
+
+    async def release_hosts_async(
         self,
         machine_ids: list[str],
         resource_id: str,
         context: Optional[AzureReleaseContext] = None,
     ) -> Optional[AzureReleaseHostsResult]:
-        """Submit deletion for individual VMs.
-
-        Azure-native delete options are set on attached resources during
-        provisioning, so termination can remain submit-and-return without ORB
-        performing dependent-resource cleanup.
-        """
-        release_context = context or AzureReleaseContext()
-        resource_group = release_context.resource_group or self.azure_client.resource_group
-        if not resource_group:
-            raise TerminationError(
-                "resource_group is required for release_hosts",
-                resource_ids=machine_ids,
-            )
-
-        compute = self.azure_client.compute_client
-        vm_names = self._resolve_vm_names(resource_group, machine_ids)
-        submitted_deletions: list[dict[str, Any]] = []
-        failed_deletions: list[dict[str, Any]] = []
+        """Async delete submission for individual VMs using the Azure async Compute SDK."""
+        resource_group = self._resolve_release_resource_group(
+            context=context,
+            machine_ids=machine_ids,
+        )
+        compute = await self.azure_client.get_async_compute_client()
+        vm_names = await self._resolve_vm_names_async(resource_group, machine_ids)
+        submitted_deletions: list[AzureSubmittedDeletion] = []
+        failed_deletions: list[AzureSubmittedDeletion] = []
         for original_id, vm_name in zip(machine_ids, vm_names):
             try:
-                self._logger.info(
-                    "Deleting VM '%s' (requested id='%s')", vm_name, original_id
-                )
-                compute.virtual_machines.begin_delete(
+                self._logger.info("Deleting VM '%s' (requested id='%s')", vm_name, original_id)
+                await compute.virtual_machines.begin_delete(
                     resource_group_name=resource_group,
                     vm_name=vm_name,
                 )
-                submitted_deletions.append(
-                    {
-                        "requested_id": str(original_id),
-                        "vm_name": vm_name,
-                    }
-                )
+                submitted_deletions.append({"requested_id": str(original_id), "vm_name": vm_name})
             except Exception as exc:
                 self._logger.error("Failed to delete VM '%s': %s", vm_name, exc)
                 failed_deletions.append(
-                    {
-                        "requested_id": str(original_id),
-                        "vm_name": vm_name,
-                        "error": str(exc),
-                    }
+                    {"requested_id": str(original_id), "vm_name": vm_name, "error": str(exc)}
                 )
 
-        if failed_deletions:
-            raise TerminationError(
-                (
-                    f"Failed to submit deletion for {len(failed_deletions)} of "
-                    f"{len(machine_ids)} VM(s)"
-                ),
-                resource_ids=[
-                    deletion["requested_id"] for deletion in failed_deletions
-                ],
-                details={
-                    "resource_group": resource_group,
-                    "submitted_deletions": submitted_deletions,
-                    "failed_deletions": failed_deletions,
-                },
-            )
-
-        return {
-            "provider_data": {
-                "resource_group": resource_group,
-                "operation_status": "submitted",
-                "submitted_deletions": submitted_deletions,
-            }
-        }
+        self._raise_release_failures(
+            machine_ids=machine_ids,
+            resource_group=resource_group,
+            submitted_deletions=submitted_deletions,
+            failed_deletions=failed_deletions,
+        )
+        return self._build_release_result(resource_group, submitted_deletions)
 
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _resolve_vm_names(self, resource_group: str, machine_ids: list[str]) -> list[str]:
-        """Resolve mixed IDs (vm_name or Azure vm_id GUID) to VM names."""
+    @staticmethod
+    def _finalize_resolved_vm_names(
+        *,
+        resource_group: str,
+        machine_ids: list[str],
+        resolved: list[Optional[str]],
+        logger: Any,
+    ) -> list[str]:
+        """Apply unresolved lookups, preserve input order, and log any remapping."""
+        ordered_resolved = [
+            resolved_name if resolved_name is not None else str(machine_id)
+            for machine_id, resolved_name in zip(machine_ids, resolved)
+        ]
+        if ordered_resolved != [str(mid) for mid in machine_ids]:
+            logger.debug(
+                "Resolved SingleVM IDs in resource_group '%s': %s -> %s",
+                resource_group,
+                machine_ids,
+                ordered_resolved,
+            )
+        return ordered_resolved
+
+    async def _resolve_vm_names_async(self, resource_group: str, machine_ids: list[str]) -> list[str]:
+        """Async resolve mixed IDs (vm_name or Azure vm_id GUID) to VM names."""
         if not machine_ids:
             return []
 
         try:
-            compute = self.azure_client.compute_client
+            compute = await self.azure_client.get_async_compute_client()
             resolved: list[Optional[str]] = [None] * len(machine_ids)
             unresolved_indices: list[int] = []
 
@@ -457,7 +480,7 @@ class SingleVMHandler(AzureHandler):
                     continue
 
                 try:
-                    vm = compute.virtual_machines.get(
+                    vm = await compute.virtual_machines.get(
                         resource_group_name=resource_group,
                         vm_name=machine_id_str,
                     )
@@ -466,54 +489,25 @@ class SingleVMHandler(AzureHandler):
                     unresolved_indices.append(index)
 
             if unresolved_indices:
-                vms = compute.virtual_machines.list(resource_group_name=resource_group)
-
-                lookup: dict[str, str] = {}
-                for vm in vms:
-                    vm_name = vm.name
-                    if not vm_name:
-                        continue
-                    lookup[str(vm_name)] = str(vm_name)
-
-                    vm_id = vm.vm_id
-                    if vm_id:
-                        lookup[str(vm_id)] = str(vm_name)
+                pager = compute.virtual_machines.list(resource_group_name=resource_group)
+                lookup = _build_vm_name_lookup([vm async for vm in pager])
 
                 for index in unresolved_indices:
                     machine_id = str(machine_ids[index])
                     resolved[index] = lookup.get(machine_id, machine_id)
 
-            ordered_resolved = [
-                resolved_name if resolved_name is not None else str(machine_id)
-                for machine_id, resolved_name in zip(machine_ids, resolved)
-            ]
-
-            if ordered_resolved != [str(mid) for mid in machine_ids]:
-                self._logger.debug(
-                    "Resolved SingleVM IDs in resource_group '%s': %s -> %s",
-                    resource_group,
-                    machine_ids,
-                    ordered_resolved,
-                )
-            return ordered_resolved
+            return self._finalize_resolved_vm_names(
+                resource_group=resource_group,
+                machine_ids=machine_ids,
+                resolved=resolved,
+                logger=self._logger,
+            )
         except Exception as exc:
             self._logger.warning(
                 "Failed to resolve VM names, using provided IDs directly: %s",
                 exc,
             )
             return [str(machine_id) for machine_id in machine_ids]
-
-    @staticmethod
-    def _resolve_subnet_id(template: AzureTemplate) -> Optional[str]:
-        """Return the subnet ARM ID from network_config or subnet_ids."""
-        if template.network_config and template.network_config.subnet_id:
-            return template.network_config.subnet_id
-        # subnet_ids is the base Template field; subnet_id is a @property returning [0]
-        if template.subnet_ids:
-            candidate = template.subnet_ids[0]
-            if candidate and candidate != "default-subnet":
-                return candidate
-        return None
 
     @staticmethod
     def _classify_provisioning_error(exc: Exception) -> str:

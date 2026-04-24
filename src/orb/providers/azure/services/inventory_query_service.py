@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
-from typing import Any, Optional, Protocol
+from typing import Any, Optional, Protocol, runtime_checkable
 
 from orb.domain.base.ports import LoggingPort
 from orb.providers.azure.domain.template.value_objects import AzureProviderApi
-from orb.providers.azure.infrastructure.azure_client import AzureClient
-from orb.providers.azure.infrastructure.handlers.azure_handler import AzureHandler
+from orb.providers.azure.exceptions.azure_exceptions import AzureValidationError
+from orb.providers.azure.infrastructure.handlers.azure_handler import (
+    AzureHandler,
+    AzureHandlerStatusResult,
+)
 from orb.providers.azure.infrastructure.vmss_cleanup import VmssCleanupCoordinator
 from orb.providers.azure.managers.azure_resource_manager import AzureResourceManager
 from orb.providers.azure.services.resource_metadata_service import (
@@ -15,29 +18,19 @@ from orb.providers.azure.services.resource_metadata_service import (
 )
 from orb.providers.azure.services.inventory_service import (
     AzureReadOperationContext,
-    AzureStatusQueryContext,
     AzureStatusResult,
     build_read_handler_request,
     filter_status_results,
     normalize_status_results,
     observed_status_ids,
-    sdk_status_result,
 )
+from orb.providers.infrastructure.error_codes import ProviderErrorEntry
 from orb.providers.base.strategy import ProviderResult
-
-
-class AzureMachineConversionServiceProtocol(Protocol):
-    """Structural subset used by SDK status fallback."""
-
-    def convert_sdk_vm(self, vm: object, azure_client: AzureClient) -> dict[str, Any]:
-        """Convert an SDK VM object into the normalized machine/result shape."""
-        ...
-
 
 class AzureResourceMetadataServiceProtocol(Protocol):
     """Structural subset used to enrich Azure read metadata."""
 
-    def augment_vmss_capacity_metadata(
+    async def augment_vmss_capacity_metadata_async(
         self,
         metadata: dict[str, Any],
         resource_ids: list[str],
@@ -45,10 +38,10 @@ class AzureResourceMetadataServiceProtocol(Protocol):
         resource_manager: Optional[AzureResourceManager],
         resource_group: Optional[str],
     ) -> None:
-        """Attach VMSS capacity/provisioning metadata to the result."""
+        """Attach VMSS capacity/provisioning metadata to the result asynchronously."""
         ...
 
-    def augment_single_vm_deployment_metadata(
+    async def augment_single_vm_deployment_metadata_async(
         self,
         metadata: dict[str, Any],
         request_metadata: dict[str, Any],
@@ -56,7 +49,7 @@ class AzureResourceMetadataServiceProtocol(Protocol):
         resource_group: Optional[str],
         deployment_service: AzureDeploymentStatusServiceProtocol | None,
     ) -> None:
-        """Attach single-VM ARM deployment metadata to the result."""
+        """Attach single-VM ARM deployment metadata to the result asynchronously."""
         ...
 
     def augment_shortfall_metadata(self, metadata: dict[str, Any]) -> None:
@@ -74,7 +67,18 @@ class ResolveAzureHandler(Protocol):
         allow_vmss_uniform_fallback: bool = False,
     ) -> Optional[AzureHandler]:
         """Resolve a handler for the given Azure provider API."""
-        ...
+
+
+@runtime_checkable
+class VmssResourceErrorReader(Protocol):
+    """Capability interface for VMSS-level fleet error inspection."""
+
+    async def get_vmss_resource_errors_async(
+        self,
+        resource_group: str,
+        resource_id: str,
+    ) -> list[ProviderErrorEntry]:
+        """Return VMSS resource-level errors for one scale set."""
 
 
 class AzureInventoryQueryService:
@@ -85,72 +89,38 @@ class AzureInventoryQueryService:
         *,
         logger: LoggingPort,
         provider_instance_name: str,
-        machine_conversion_service: AzureMachineConversionServiceProtocol,
         resource_metadata_service: AzureResourceMetadataServiceProtocol,
     ) -> None:
         self._logger = logger
         self._provider_instance_name = provider_instance_name
-        self._machine_conversion_service = machine_conversion_service
         self._resource_metadata_service = resource_metadata_service
 
-    def get_instance_status(
+    async def get_instance_status_async(
         self,
         *,
         read_context: AzureReadOperationContext,
-        azure_client: Optional[AzureClient],
         resolve_handler: ResolveAzureHandler,
         vmss_cleanup_coordinator: VmssCleanupCoordinator,
     ) -> ProviderResult:
-        """Resolve instance status through handlers first, then SDK fallback."""
+        """Resolve instance status through the async Azure handler contract."""
         vmss_cleanup_coordinator.restore_from_request_metadata(read_context.request_metadata)
-
-        handler_machines = self._get_instance_status_via_handlers(
+        handler_machines = await self._get_instance_status_via_handlers_async(
             read_context=read_context,
             resolve_handler=resolve_handler,
         )
         if handler_machines is not None:
-            is_vmss = read_context.provider_api in (
-                AzureProviderApi.VMSS,
-                AzureProviderApi.VMSS_UNIFORM,
+            return await self._build_instance_status_result(
+                read_context=read_context,
+                handler_machines=handler_machines,
+                vmss_cleanup_coordinator=vmss_cleanup_coordinator,
             )
-            result = ProviderResult.success_result(
-                {
-                    "instances": handler_machines,
-                    "queried_count": len(read_context.instance_ids),
-                },
-                {
-                    "operation": "get_instance_status",
-                    "instance_ids": read_context.instance_ids,
-                    "method": "handler",
-                },
-            )
-            if is_vmss and read_context.resource_group and read_context.resource_ids:
-                vmss_cleanup_coordinator.reconcile(
-                    resource_group=read_context.resource_group,
-                    resource_ids=read_context.resource_ids,
-                    observed_ids=observed_status_ids(handler_machines),
-                )
-                result.metadata.update(
-                    vmss_cleanup_coordinator.status_metadata(
-                        resource_group=read_context.resource_group,
-                        resource_ids=read_context.resource_ids,
-                    )
-                )
-            return result
 
-        status_context = AzureStatusQueryContext(
-            instance_ids=read_context.instance_ids,
-            resource_group=read_context.resource_group or "",
-            provider_api=read_context.provider_api,
-        )
-        return sdk_status_result(
-            status_context=status_context,
-            azure_client=azure_client,
-            machine_conversion_service=self._machine_conversion_service,
-            logger=self._logger,
+        raise AzureValidationError(
+            "Azure get_instance_status requires provider_api-backed handler resolution.",
+            error_code="MISSING_PROVIDER_API",
         )
 
-    def describe_resource_instances(
+    async def describe_resource_instances_async(
         self,
         *,
         read_context: AzureReadOperationContext,
@@ -159,45 +129,38 @@ class AzureInventoryQueryService:
         resource_manager: Optional[AzureResourceManager],
         deployment_service: AzureDeploymentStatusServiceProtocol | None,
     ) -> ProviderResult:
-        """Describe Azure resource-backed instances and enrich the metadata."""
-        provider_api = read_context.provider_api
+        """Describe Azure resource-backed instances through the async handler contract."""
         resource_group = read_context.resource_group
-        is_vmss = provider_api in (AzureProviderApi.VMSS, AzureProviderApi.VMSS_UNIFORM)
-
-        vmss_cleanup_coordinator.restore_from_request_metadata(read_context.request_metadata)
-        read_context.fail_on_partial_status_error = bool(
-            is_vmss
-            and vmss_cleanup_coordinator.has_pending(
-                resource_group=resource_group,
-                resource_ids=read_context.resource_ids,
-            )
+        is_vmss = self._prepare_describe_context(
+            read_context=read_context,
+            vmss_cleanup_coordinator=vmss_cleanup_coordinator,
         )
-
-        result = self._describe_resource_instances_via_handler(
+        result = await self._describe_resource_instances_via_handler_async(
             read_context=read_context,
             resolve_handler=resolve_handler,
             resource_manager=resource_manager,
             deployment_service=deployment_service,
         )
 
-        if result.success and is_vmss and resource_group:
+        if result.success and is_vmss:
             instance_details = result.data.get("instances", []) if result.data else []
-            vmss_cleanup_coordinator.reconcile(
-                resource_group=resource_group,
-                resource_ids=read_context.resource_ids,
-                observed_ids=observed_status_ids(instance_details),
-            )
-            if result.metadata is not None:
-                result.metadata.update(
-                    vmss_cleanup_coordinator.status_metadata(
-                        resource_group=resource_group,
-                        resource_ids=read_context.resource_ids,
-                    )
+            if resource_group:
+                await vmss_cleanup_coordinator.reconcile(
+                    resource_group=resource_group,
+                    resource_ids=read_context.resource_ids,
+                    observed_ids=observed_status_ids(instance_details),
                 )
+                if result.metadata is not None:
+                    result.metadata.update(
+                        vmss_cleanup_coordinator.status_metadata(
+                            resource_group=resource_group,
+                            resource_ids=read_context.resource_ids,
+                        )
+                    )
 
         return result
 
-    def _get_instance_status_via_handlers(
+    async def _get_instance_status_via_handlers_async(
         self,
         *,
         read_context: AzureReadOperationContext,
@@ -209,54 +172,51 @@ class AzureInventoryQueryService:
         if not provider_api:
             return None
 
-        handler = resolve_handler(
-            provider_api,
-            allow_vmss_uniform_fallback=True,
+        handler = self._resolve_status_handler(
+            provider_api=provider_api,
+            resolve_handler=resolve_handler,
         )
         if not handler and not grouped_resource_mapping:
             return None
 
         if provider_api == AzureProviderApi.SINGLE_VM and handler:
+            request = build_read_handler_request(
+                read_context=read_context,
+                provider_name=self._provider_instance_name,
+                resource_ids=read_context.instance_ids,
+            )
             return normalize_status_results(
-                handler.check_hosts_status(
-                    build_read_handler_request(
-                        read_context=read_context,
-                        provider_name=self._provider_instance_name,
-                        resource_ids=read_context.instance_ids,
-                    )
-                ),
+                await handler.check_hosts_status_async(request)
             )
 
         if grouped_resource_mapping:
             all_results: list[AzureStatusResult] = []
             seen_instance_ids: set[str] = set()
             for resource_id, mapped_ids in grouped_resource_mapping.items():
-                group_handler = handler
-                if not group_handler and provider_api:
-                    group_handler = resolve_handler(
-                        provider_api,
-                        allow_vmss_uniform_fallback=True,
-                    )
+                group_handler = handler or self._resolve_status_handler(
+                    provider_api=provider_api,
+                    resolve_handler=resolve_handler,
+                )
                 if not group_handler:
                     continue
 
-                extra_metadata: dict[str, Any] = {}
-                if provider_api == AzureProviderApi.CYCLECLOUD:
-                    extra_metadata["node_ids"] = mapped_ids
                 request = build_read_handler_request(
                     read_context=read_context,
                     provider_name=self._provider_instance_name,
                     resource_ids=[resource_id],
-                    additional_metadata=extra_metadata,
+                    additional_metadata=self._handler_status_metadata(
+                        provider_api=provider_api,
+                        instance_ids=mapped_ids,
+                    ),
                 )
-                for machine in filter_status_results(
-                    normalize_status_results(group_handler.check_hosts_status(request)),
-                    mapped_ids,
-                ):
-                    machine_id = str(machine.get("instance_id"))
-                    if machine_id not in seen_instance_ids:
-                        all_results.append(machine)
-                        seen_instance_ids.add(machine_id)
+                machines = normalize_status_results(
+                    await group_handler.check_hosts_status_async(request)
+                )
+                self._append_unique_status_results(
+                    destination=all_results,
+                    seen_instance_ids=seen_instance_ids,
+                    machines=filter_status_results(machines, mapped_ids),
+                )
 
             if all_results:
                 return all_results
@@ -265,9 +225,6 @@ class AzureInventoryQueryService:
         if not handler or not resource_id:
             return None
 
-        extra_metadata: dict[str, Any] = {}
-        if provider_api == AzureProviderApi.CYCLECLOUD:
-            extra_metadata["node_ids"] = read_context.instance_ids
         request = build_read_handler_request(
             read_context=read_context,
             provider_name=self._provider_instance_name,
@@ -276,16 +233,19 @@ class AzureInventoryQueryService:
                 if provider_api == AzureProviderApi.SINGLE_VM
                 else [resource_id]
             ),
-            additional_metadata=extra_metadata,
+            additional_metadata=self._handler_status_metadata(
+                provider_api=provider_api,
+                instance_ids=read_context.instance_ids,
+            ),
+        )
+        machines = normalize_status_results(
+            await handler.check_hosts_status_async(request)
         )
         if provider_api == AzureProviderApi.SINGLE_VM:
-            return normalize_status_results(handler.check_hosts_status(request))
-        return filter_status_results(
-            normalize_status_results(handler.check_hosts_status(request)),
-            read_context.instance_ids,
-        )
+            return machines
+        return filter_status_results(machines, read_context.instance_ids)
 
-    def _describe_resource_instances_via_handler(
+    async def _describe_resource_instances_via_handler_async(
         self,
         *,
         read_context: AzureReadOperationContext,
@@ -293,11 +253,150 @@ class AzureInventoryQueryService:
         resource_manager: Optional[AzureResourceManager],
         deployment_service: AzureDeploymentStatusServiceProtocol | None,
     ) -> ProviderResult:
-        resource_ids = read_context.resource_ids
+        resolved = self._resolve_describe_handler(
+            read_context=read_context,
+            resolve_handler=resolve_handler,
+        )
+        if isinstance(resolved, ProviderResult):
+            return resolved
+        provider_api, handler = resolved
+
+        request = self._build_describe_handler_request(read_context=read_context)
+        instance_details = await handler.check_hosts_status_async(request)
+        return await self._build_describe_instances_result(
+            read_context=read_context,
+            handler=handler,
+            instance_details=instance_details,
+            resource_manager=resource_manager,
+            deployment_service=deployment_service,
+            include_shortfall_metadata=provider_api != AzureProviderApi.CYCLECLOUD,
+        )
+
+    async def _build_instance_status_result(
+        self,
+        *,
+        read_context: AzureReadOperationContext,
+        handler_machines: list[AzureStatusResult],
+        vmss_cleanup_coordinator: VmssCleanupCoordinator,
+    ) -> ProviderResult:
+        """Build the normalized handler-backed instance-status result."""
+        is_vmss = read_context.provider_api in (
+            AzureProviderApi.VMSS,
+            AzureProviderApi.VMSS_UNIFORM,
+        )
+        result = ProviderResult.success_result(
+            {
+                "instances": handler_machines,
+                "queried_count": len(read_context.instance_ids),
+            },
+            {
+                "operation": "get_instance_status",
+                "instance_ids": read_context.instance_ids,
+                "method": "handler",
+            },
+        )
+        if is_vmss and read_context.resource_group and read_context.resource_ids:
+            await vmss_cleanup_coordinator.reconcile(
+                resource_group=read_context.resource_group,
+                resource_ids=read_context.resource_ids,
+                observed_ids=observed_status_ids(handler_machines),
+            )
+            result.metadata.update(
+                vmss_cleanup_coordinator.status_metadata(
+                    resource_group=read_context.resource_group,
+                    resource_ids=read_context.resource_ids,
+                )
+            )
+        return result
+
+    @staticmethod
+    def _prepare_describe_context(
+        *,
+        read_context: AzureReadOperationContext,
+        vmss_cleanup_coordinator: VmssCleanupCoordinator,
+    ) -> bool:
+        """Restore VMSS cleanup state and mark whether describe should fail on partial status."""
+        is_vmss = read_context.provider_api in (
+            AzureProviderApi.VMSS,
+            AzureProviderApi.VMSS_UNIFORM,
+        )
+        vmss_cleanup_coordinator.restore_from_request_metadata(read_context.request_metadata)
+        read_context.fail_on_partial_status_error = bool(
+            is_vmss
+            and vmss_cleanup_coordinator.has_pending(
+                resource_group=read_context.resource_group,
+                resource_ids=read_context.resource_ids,
+            )
+        )
+        return is_vmss
+
+    def _build_describe_handler_request(
+        self,
+        *,
+        read_context: AzureReadOperationContext,
+    ) -> Any:
+        """Build the handler request used for Azure resource-instance discovery."""
+        extra_metadata: dict[str, Any] = {}
+        if read_context.provider_api == AzureProviderApi.SINGLE_VM:
+            deployment_name = read_context.request_metadata.get("deployment_name")
+            if deployment_name not in (None, ""):
+                extra_metadata["deployment_name"] = str(deployment_name)
+        if read_context.fail_on_partial_status_error:
+            extra_metadata["fail_on_partial_status_error"] = True
+        return build_read_handler_request(
+            read_context=read_context,
+            provider_name=self._provider_instance_name,
+            resource_ids=read_context.resource_ids,
+            additional_metadata=extra_metadata or None,
+        )
+
+    @staticmethod
+    def _append_unique_status_results(
+        *,
+        destination: list[AzureStatusResult],
+        seen_instance_ids: set[str],
+        machines: list[AzureStatusResult],
+    ) -> None:
+        """Append status results while preserving first-seen instance identities."""
+        for machine in machines:
+            machine_id = str(machine.get("instance_id"))
+            if machine_id in seen_instance_ids:
+                continue
+            destination.append(machine)
+            seen_instance_ids.add(machine_id)
+
+    @staticmethod
+    def _handler_status_metadata(
+        *,
+        provider_api: AzureProviderApi,
+        instance_ids: list[str],
+    ) -> dict[str, Any] | None:
+        """Return provider-specific handler metadata for status requests."""
+        if provider_api == AzureProviderApi.CYCLECLOUD:
+            return {"node_ids": instance_ids}
+        return None
+
+    @staticmethod
+    def _resolve_status_handler(
+        *,
+        provider_api: AzureProviderApi,
+        resolve_handler: ResolveAzureHandler,
+    ) -> Optional[AzureHandler]:
+        """Resolve a handler for status operations with VMSS uniform fallback enabled."""
+        return resolve_handler(
+            provider_api,
+            allow_vmss_uniform_fallback=True,
+        )
+
+    def _resolve_describe_handler(
+        self,
+        *,
+        read_context: AzureReadOperationContext,
+        resolve_handler: ResolveAzureHandler,
+    ) -> ProviderResult | tuple[AzureProviderApi, AzureHandler]:
+        """Resolve the concrete handler for describe operations or return a failure result."""
         provider_api = read_context.provider_api
         provider_api_key = read_context.provider_api_key or ""
-        resource_group = read_context.resource_group
-
         if provider_api is None:
             return ProviderResult.error_result(
                 "provider_api is required for Azure resource discovery",
@@ -310,69 +409,62 @@ class AzureInventoryQueryService:
                 f"No handler available for provider_api: {provider_api_key}",
                 "HANDLER_NOT_FOUND",
             )
+        return provider_api, handler
 
-        extra_metadata: dict[str, Any] = {}
-        if provider_api == AzureProviderApi.SINGLE_VM:
-            deployment_name = read_context.request_metadata.get("deployment_name")
-            if deployment_name not in (None, ""):
-                extra_metadata["deployment_name"] = str(deployment_name)
-        if read_context.fail_on_partial_status_error:
-            extra_metadata["fail_on_partial_status_error"] = True
-
-        request = build_read_handler_request(
-            read_context=read_context,
-            provider_name=self._provider_instance_name,
-            resource_ids=resource_ids,
-            additional_metadata=extra_metadata or None,
-        )
-
-        instance_details = handler.check_hosts_status(request)
-
-        if not instance_details:
-            metadata: dict[str, Any] = {
-                "operation": "describe_resource_instances",
-                "resource_ids": resource_ids,
-                "provider_api": provider_api_key,
-                "handler_used": provider_api_key,
-                "instance_count": 0,
-            }
-            if provider_api in (AzureProviderApi.VMSS, AzureProviderApi.VMSS_UNIFORM):
-                vmss_errors: list[dict[str, Any]] = []
-                # getattr: this VMSS-only helper is optional on the handler surface and
-                # may be provided by test doubles rather than the concrete VMSS class.
-                get_vmss_resource_errors = getattr(handler, "get_vmss_resource_errors", None)
-                if resource_group and callable(get_vmss_resource_errors):
-                    for resource_id in resource_ids:
-                        raw_errors = get_vmss_resource_errors(resource_group, resource_id)
-                        if isinstance(raw_errors, list):
-                            for error in raw_errors:
-                                if isinstance(error, dict) and error not in vmss_errors:
-                                    vmss_errors.append(error)
-                if vmss_errors:
-                    metadata["fleet_errors"] = vmss_errors
-                self._resource_metadata_service.augment_vmss_capacity_metadata(
-                    metadata,
-                    resource_ids,
-                    resource_manager=resource_manager,
-                    resource_group=resource_group,
-                )
-            elif provider_api == AzureProviderApi.SINGLE_VM:
-                self._resource_metadata_service.augment_single_vm_deployment_metadata(
-                    metadata,
-                    read_context.request_metadata,
-                    resource_group=resource_group,
-                    deployment_service=deployment_service,
-                )
-            return ProviderResult.success_result({"instances": []}, metadata)
-
+    @staticmethod
+    def _collect_instance_fleet_errors(instance_details: list[AzureHandlerStatusResult]) -> list[dict[str, Any]]:
+        """Collect distinct fleet errors embedded in handler provider data."""
         fleet_errors: list[dict[str, Any]] = []
         for inst in instance_details:
             provider_data = inst.get("provider_data") or {}
-            if isinstance(provider_data, dict):
-                for error in provider_data.get("fleet_errors") or []:
-                    if error not in fleet_errors:
-                        fleet_errors.append(error)
+            for error in provider_data.get("fleet_errors") or []:
+                if error not in fleet_errors:
+                    fleet_errors.append(error)
+        return fleet_errors
 
+    @staticmethod
+    async def _get_optional_vmss_resource_errors(
+        handler: AzureHandler,
+        logger: LoggingPort,
+        *,
+        resource_group: str | None,
+        resource_ids: list[str],
+    ) -> list[ProviderErrorEntry]:
+        """Read VMSS resource-level errors when the concrete handler exposes them."""
+        vmss_errors: list[ProviderErrorEntry] = []
+        if not resource_group:
+            return vmss_errors
+        if not isinstance(handler, VmssResourceErrorReader):
+            logger.warning(
+                "VMSS resource error lookup requested from handler '%s' without VMSS error support",
+                type(handler).__name__,
+            )
+            return vmss_errors
+        for resource_id in resource_ids:
+            raw_errors = await handler.get_vmss_resource_errors_async(
+                resource_group,
+                resource_id,
+            )
+            for error in raw_errors:
+                if error not in vmss_errors:
+                    vmss_errors.append(error)
+        return vmss_errors
+
+    async def _build_describe_instances_result(
+        self,
+        *,
+        read_context: AzureReadOperationContext,
+        handler: AzureHandler,
+        instance_details: list[AzureHandlerStatusResult],
+        resource_manager: Optional[AzureResourceManager],
+        deployment_service: AzureDeploymentStatusServiceProtocol | None,
+        include_shortfall_metadata: bool,
+    ) -> ProviderResult:
+        """Build the normalized describe-resource-instances result and metadata."""
+        provider_api = read_context.provider_api
+        provider_api_key = read_context.provider_api_key or ""
+        resource_ids = read_context.resource_ids
+        resource_group = read_context.resource_group
         metadata: dict[str, Any] = {
             "operation": "describe_resource_instances",
             "resource_ids": resource_ids,
@@ -380,19 +472,44 @@ class AzureInventoryQueryService:
             "handler_used": provider_api_key,
             "instance_count": len(instance_details),
         }
+
+        if not instance_details:
+            if provider_api in (AzureProviderApi.VMSS, AzureProviderApi.VMSS_UNIFORM):
+                vmss_errors = await self._get_optional_vmss_resource_errors(
+                    handler,
+                    self._logger,
+                    resource_group=resource_group,
+                    resource_ids=resource_ids,
+                )
+                if vmss_errors:
+                    metadata["fleet_errors"] = vmss_errors
+                await self._resource_metadata_service.augment_vmss_capacity_metadata_async(
+                    metadata,
+                    resource_ids,
+                    resource_manager=resource_manager,
+                    resource_group=resource_group,
+                )
+            elif provider_api == AzureProviderApi.SINGLE_VM:
+                await self._resource_metadata_service.augment_single_vm_deployment_metadata_async(
+                    metadata,
+                    read_context.request_metadata,
+                    resource_group=resource_group,
+                    deployment_service=deployment_service,
+                )
+            return ProviderResult.success_result({"instances": []}, metadata)
+
+        fleet_errors = self._collect_instance_fleet_errors(instance_details)
         if fleet_errors:
             metadata["fleet_errors"] = fleet_errors
-
         if provider_api in (AzureProviderApi.VMSS, AzureProviderApi.VMSS_UNIFORM):
-            self._resource_metadata_service.augment_vmss_capacity_metadata(
+            await self._resource_metadata_service.augment_vmss_capacity_metadata_async(
                 metadata,
                 resource_ids,
                 resource_manager=resource_manager,
                 resource_group=resource_group,
             )
-
-        self._resource_metadata_service.augment_shortfall_metadata(metadata)
-
+        if include_shortfall_metadata:
+            self._resource_metadata_service.augment_shortfall_metadata(metadata)
         return ProviderResult.success_result(
             data={"instances": instance_details},
             metadata=metadata,

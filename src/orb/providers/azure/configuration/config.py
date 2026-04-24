@@ -78,7 +78,7 @@ class AzureProviderConfig(BaseProviderConfig):
     # ------------------------------------------------------------------
     provider_type: str = Field("azure", description="Provider type identifier")
     region: str = Field(
-        "eastus2",
+        default="eastus2",
         description="Azure location slug",
         validation_alias=AliasChoices("location", "region"),
     )

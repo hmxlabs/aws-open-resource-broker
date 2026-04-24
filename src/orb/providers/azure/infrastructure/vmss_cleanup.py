@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from threading import RLock
-from typing import Callable, Mapping, Optional, Protocol, TypeAlias, Any
+from typing import Mapping, Optional, Protocol, TypeAlias, Any
 
 
 class _VmssCleanupLogger(Protocol):
@@ -13,9 +14,9 @@ class _VmssCleanupLogger(Protocol):
         """A minimal logger protocol for the VMSS cleanup coordinator, focused on warning messages."""
         ...
 
-GetVmssMemberCount: TypeAlias = Callable[..., Optional[int]]
-VmssExists: TypeAlias = Callable[..., Optional[bool]]
-BeginDeleteVmss: TypeAlias = Callable[..., None]
+GetVmssMemberCount: TypeAlias = Callable[..., Awaitable[Optional[int]]]
+VmssExists: TypeAlias = Callable[..., Awaitable[Optional[bool]]]
+BeginDeleteVmss: TypeAlias = Callable[..., Awaitable[None]]
 
 
 @dataclass
@@ -302,7 +303,7 @@ class VmssCleanupCoordinator:
             "termination_follow_up_details": follow_up_details,
         }
 
-    def reconcile(
+    async def reconcile(
         self,
         *,
         resource_group: Optional[str],
@@ -320,7 +321,7 @@ class VmssCleanupCoordinator:
             return
 
         for vmss_name in self._dedupe_resource_ids(resource_ids):
-            self._reconcile_one(
+            await self._reconcile_one(
                 resource_group=str(resource_group),
                 vmss_name=vmss_name,
                 observed_ids=observed_ids,
@@ -342,7 +343,7 @@ class VmssCleanupCoordinator:
                 deduped.append(vmss_name)
         return deduped
 
-    def _reconcile_one(
+    async def _reconcile_one(
         self,
         *,
         resource_group: str,
@@ -375,14 +376,17 @@ class VmssCleanupCoordinator:
             return
 
         if delete_submitted:
-            self._clear_if_vmss_is_gone(resource_group=resource_group, vmss_name=vmss_name)
+            await self._clear_if_vmss_is_gone(
+                resource_group=resource_group,
+                vmss_name=vmss_name,
+            )
             return
 
         if requested_ids & observed_ids:
             return
 
         try:
-            if self._submit_vmss_delete_if_empty(key=key, pending=pending):
+            if await self._submit_vmss_delete_if_empty(key=key, pending=pending):
                 return
             with self._lock:
                 if self._pending_cleanups.get(key) is pending:
@@ -398,18 +402,23 @@ class VmssCleanupCoordinator:
                 exc,
             )
 
-    def _clear_if_vmss_is_gone(self, *, resource_group: str, vmss_name: str) -> None:
+    async def _clear_if_vmss_is_gone(
+        self,
+        *,
+        resource_group: str,
+        vmss_name: str,
+    ) -> None:
         """Remove pending cleanup if the VMSS no longer exists in Azure.
 
         Args:
             resource_group (str): The Azure resource group name.
             vmss_name (str): The VMSS name.
         """
-        if self._vmss_exists(resource_group=resource_group, vmss_name=vmss_name) is False:
+        if await self._vmss_exists(resource_group=resource_group, vmss_name=vmss_name) is False:
             with self._lock:
                 self._pending_cleanups.pop((resource_group, vmss_name), None)
 
-    def _submit_vmss_delete_if_empty(
+    async def _submit_vmss_delete_if_empty(
         self,
         *,
         key: tuple[str, str],
@@ -426,7 +435,7 @@ class VmssCleanupCoordinator:
         if not pending.delete_vmss_when_empty:
             return False
 
-        member_count = self._get_vmss_member_count(
+        member_count = await self._get_vmss_member_count(
             resource_group=pending.resource_group,
             vmss_name=pending.vmss_name,
         )
@@ -442,7 +451,7 @@ class VmssCleanupCoordinator:
             current.mark_delete_submitted()
 
         try:
-            self._begin_delete_vmss(
+            await self._begin_delete_vmss(
                 resource_group=pending.resource_group,
                 vmss_name=pending.vmss_name,
             )

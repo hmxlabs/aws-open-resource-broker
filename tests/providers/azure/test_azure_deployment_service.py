@@ -1,6 +1,8 @@
 """Focused tests for Azure deployment helpers."""
 
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
+
+import pytest
 
 from orb.providers.azure.infrastructure.services.azure_deployment_service import (
     AzureDeploymentService,
@@ -28,13 +30,17 @@ def test_resource_id_expression_targets_sibling_resource():
     ) == "[resourceId('Microsoft.Network/networkInterfaces', 'nic-vm-1')]"
 
 
-def test_submit_template_deployment_uses_resources_api_without_waiting():
+@pytest.mark.asyncio
+async def test_submit_template_deployment_async_uses_resources_api_without_waiting():
     azure_client = MagicMock()
+    async_resource_client = MagicMock()
+    async_resource_client.resources.begin_create_or_update = AsyncMock()
+    azure_client.get_async_resource_client = AsyncMock(return_value=async_resource_client)
     logger = MagicMock()
     service = AzureDeploymentService(azure_client=azure_client, logger=logger)
     template = {"resources": []}
 
-    deployment_name = service.submit_template_deployment(
+    deployment_name = await service.submit_template_deployment_async(
         resource_group="test-rg",
         deployment_name="dep-1",
         template=template,
@@ -42,7 +48,7 @@ def test_submit_template_deployment_uses_resources_api_without_waiting():
     )
 
     assert deployment_name == "dep-1"
-    azure_client.resource_client.resources.begin_create_or_update.assert_called_once_with(
+    async_resource_client.resources.begin_create_or_update.assert_awaited_once_with(
         resource_group_name="test-rg",
         resource_provider_namespace="Microsoft.Resources",
         parent_resource_path="",
@@ -59,8 +65,12 @@ def test_submit_template_deployment_uses_resources_api_without_waiting():
     )
 
 
-def test_get_deployment_status_extracts_provisioning_and_error_fields():
+@pytest.mark.asyncio
+async def test_get_deployment_status_async_extracts_provisioning_and_error_fields():
     azure_client = MagicMock()
+    async_resource_client = MagicMock()
+    async_resource_client.resources.get = AsyncMock()
+    azure_client.get_async_resource_client = AsyncMock(return_value=async_resource_client)
     logger = MagicMock()
     service = AzureDeploymentService(azure_client=azure_client, logger=logger)
     deployment = MagicMock()
@@ -71,9 +81,9 @@ def test_get_deployment_status_extracts_provisioning_and_error_fields():
             "message": "template validation failed",
         },
     }
-    azure_client.resource_client.resources.get.return_value = deployment
+    async_resource_client.resources.get.return_value = deployment
 
-    status = service.get_deployment_status(
+    status = await service.get_deployment_status_async(
         resource_group="test-rg",
         deployment_name="dep-1",
     )
@@ -85,15 +95,19 @@ def test_get_deployment_status_extracts_provisioning_and_error_fields():
     }
 
 
-def test_get_deployment_status_tolerates_non_mapping_properties():
+@pytest.mark.asyncio
+async def test_get_deployment_status_async_tolerates_non_mapping_properties():
     azure_client = MagicMock()
+    async_resource_client = MagicMock()
+    async_resource_client.resources.get = AsyncMock()
+    azure_client.get_async_resource_client = AsyncMock(return_value=async_resource_client)
     logger = MagicMock()
     service = AzureDeploymentService(azure_client=azure_client, logger=logger)
     deployment = MagicMock()
     deployment.properties = None
-    azure_client.resource_client.resources.get.return_value = deployment
+    async_resource_client.resources.get.return_value = deployment
 
-    status = service.get_deployment_status(
+    status = await service.get_deployment_status_async(
         resource_group="test-rg",
         deployment_name="dep-1",
     )
@@ -175,4 +189,3 @@ def test_build_single_vm_deployment_template_attaches_public_ip_when_enabled():
     }
     assert vm_resource["properties"]["storageProfile"]["osDisk"]["deleteOption"] == "Delete"
     assert vm_resource["properties"]["storageProfile"]["dataDisks"][0]["deleteOption"] == "Delete"
-

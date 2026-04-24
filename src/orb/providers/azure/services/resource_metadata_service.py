@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
-from typing import Any, Optional, Protocol
+from typing import Any, Optional, Protocol, TypedDict
 
 from orb.domain.base.ports import LoggingPort
 
@@ -27,24 +28,37 @@ class VmssCapacitySnapshot:
         }
 
 
+class VmssCapacityInfo(TypedDict):
+    """VMSS capacity payload returned by Azure resource management."""
+
+    vmss_name: str
+    resource_group: str
+    capacity: int
+    vm_size: str | None
+    provisioning_state: str | None
+    provisioned_instance_count: int
+
+
 class AzureResourceManagerProtocol(Protocol):
     """Structural subset of AzureResourceManager used for metadata enrichment."""
 
-    def get_vmss_capacity(self, resource_group: str, vmss_name: str) -> dict[str, object]:
-        """Return VMSS capacity details for one scale set."""
+    async def get_vmss_capacity_async(
+        self, resource_group: str, vmss_name: str
+    ) -> VmssCapacityInfo:
+        """Return VMSS capacity details for one scale set via the async SDK."""
         ...
 
 
 class AzureDeploymentStatusServiceProtocol(Protocol):
     """Structural subset of AzureDeploymentService used for deployment status enrichment."""
 
-    def get_deployment_status(
+    async def get_deployment_status_async(
         self,
         *,
         resource_group: str,
         deployment_name: str,
     ) -> Optional[dict[str, object]]:
-        """Return deployment provisioning/error state for one ARM deployment."""
+        """Return deployment provisioning/error state for one ARM deployment via the async SDK."""
         ...
 
 
@@ -64,7 +78,7 @@ class AzureResourceMetadataService:
                 deduped.append(vmss_name)
         return deduped
 
-    def augment_vmss_capacity_metadata(
+    async def augment_vmss_capacity_metadata_async(
         self,
         metadata: dict[str, Any],
         resource_ids: list[str],
@@ -72,7 +86,7 @@ class AzureResourceMetadataService:
         resource_manager: AzureResourceManagerProtocol | None,
         resource_group: Optional[str] = None,
     ) -> None:
-        """Enrich metadata with aggregate VMSS capacity fulfilment from live scale sets."""
+        """Async enrich metadata with aggregate VMSS capacity fulfilment."""
         if not resource_ids or resource_manager is None:
             return
 
@@ -80,7 +94,7 @@ class AzureResourceMetadataService:
         if not resolved_resource_group:
             return
 
-        per_resource_capacity = self._collect_vmss_capacity(
+        per_resource_capacity = await self._collect_vmss_capacity_async(
             resource_group=resolved_resource_group,
             resource_ids=resource_ids,
             resource_manager=resource_manager,
@@ -96,25 +110,32 @@ class AzureResourceMetadataService:
                 for vmss_name, snapshot in per_resource_capacity.items()
             }
 
-    def _collect_vmss_capacity(
+    async def _collect_vmss_capacity_async(
         self,
         *,
         resource_group: str,
         resource_ids: list[str],
         resource_manager: AzureResourceManagerProtocol,
     ) -> dict[str, VmssCapacitySnapshot]:
+        vmss_names = self._dedupe_resource_ids(resource_ids)
+        snapshots = await asyncio.gather(
+            *[
+                self._get_vmss_capacity_snapshot_async(
+                    resource_group=resource_group,
+                    vmss_name=vmss_name,
+                    resource_manager=resource_manager,
+                )
+                for vmss_name in vmss_names
+            ]
+        )
+
         per_resource_capacity: dict[str, VmssCapacitySnapshot] = {}
-        for vmss_name in self._dedupe_resource_ids(resource_ids):
-            snapshot = self._get_vmss_capacity_snapshot(
-                resource_group=resource_group,
-                vmss_name=vmss_name,
-                resource_manager=resource_manager,
-            )
+        for vmss_name, snapshot in zip(vmss_names, snapshots):
             if snapshot is not None:
                 per_resource_capacity[vmss_name] = snapshot
         return per_resource_capacity
 
-    def _get_vmss_capacity_snapshot(
+    async def _get_vmss_capacity_snapshot_async(
         self,
         *,
         resource_group: str,
@@ -122,13 +143,21 @@ class AzureResourceMetadataService:
         resource_manager: AzureResourceManagerProtocol,
     ) -> Optional[VmssCapacitySnapshot]:
         try:
-            capacity_info = resource_manager.get_vmss_capacity(resource_group, vmss_name)
+            capacity_info = await resource_manager.get_vmss_capacity_async(
+                resource_group,
+                vmss_name,
+            )
         except Exception as exc:
-            self._logger.warning("Could not fetch VMSS capacity for %s: %s", vmss_name, exc, exc_info=True)
+            self._logger.warning(
+                "Could not fetch VMSS capacity for %s: %s",
+                vmss_name,
+                exc,
+                exc_info=True,
+            )
             return None
 
-        provisioned_instance_count = int(capacity_info.get("provisioned_instance_count", 0) or 0)
-        target_capacity = int(capacity_info.get("capacity", 0) or 0)
+        provisioned_instance_count = capacity_info["provisioned_instance_count"]
+        target_capacity = capacity_info["capacity"]
         provisioning_state = capacity_info.get("provisioning_state")
         return VmssCapacitySnapshot(
             target_capacity_units=target_capacity,
@@ -161,7 +190,7 @@ class AzureResourceMetadataService:
             state=aggregate_state,
         )
 
-    def augment_single_vm_deployment_metadata(
+    async def augment_single_vm_deployment_metadata_async(
         self,
         metadata: dict[str, Any],
         request_metadata: dict[str, Any],
@@ -169,13 +198,13 @@ class AzureResourceMetadataService:
         resource_group: Optional[str],
         deployment_service: AzureDeploymentStatusServiceProtocol | None,
     ) -> None:
-        """Enrich metadata with ARM deployment status for single-VM resources."""
+        """Async enrich metadata with ARM deployment status for single-VM resources."""
         deployment_name = request_metadata.get("deployment_name")
         if deployment_name in (None, "") or not resource_group or deployment_service is None:
             return
 
         try:
-            deployment_status = deployment_service.get_deployment_status(
+            deployment_status = await deployment_service.get_deployment_status_async(
                 resource_group=str(resource_group),
                 deployment_name=str(deployment_name),
             )

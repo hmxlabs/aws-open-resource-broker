@@ -10,9 +10,6 @@ Azure SDK clients wrapped:
 - ComputeManagementClient (VMs, VMSS, Disks, Images, Galleries)
 - NetworkManagementClient (VNets, Subnets, NICs, NSGs, Public IPs, LBs)
 - ResourceManagementClient (Resource groups, deployments)
-- ManagedServiceIdentityClient (User-assigned managed identities)
-- AuthorizationManagementClient (Role assignments)
-- MonitorManagementClient (Metrics, diagnostics)
 - SubscriptionClient (Subscriptions, locations)
 
 Note:
@@ -24,6 +21,7 @@ Note:
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
 from threading import RLock
 from typing import TYPE_CHECKING, Any, Callable, Optional
@@ -38,34 +36,36 @@ from orb.providers.azure.exceptions.azure_exceptions import (
     AzureConfigurationError,
 )
 from orb.providers.azure.infrastructure.credential_factory import (
-    AzureCredentialProtocol,
-    create_default_azure_credential,
+    AsyncAzureCredentialProtocol,
+    create_default_azure_credential_async,
+    format_import_error,
 )
 from orb.providers.azure.infrastructure.services.arm_resource_id_parser import (
     ArmResourceIdParser,
     ParsedArmResourceId,
 )
 from orb.providers.azure.infrastructure.services.azure_network_identity_resolver import (
+    AzureNetworkIdentity,
     AzureNetworkIdentityResolver,
 )
 
 
 if TYPE_CHECKING:
-    from azure.mgmt.authorization import AuthorizationManagementClient
-    from azure.mgmt.compute import ComputeManagementClient
-    from azure.mgmt.monitor import MonitorManagementClient
-    from azure.mgmt.msi import ManagedServiceIdentityClient
-    from azure.mgmt.network import NetworkManagementClient
-    from azure.mgmt.resource import ResourceManagementClient
-    from azure.mgmt.resource.subscriptions import SubscriptionClient
-
+    from azure.mgmt.compute.aio import ComputeManagementClient as AsyncComputeManagementClient
+    from azure.mgmt.network.aio import NetworkManagementClient as AsyncNetworkManagementClient
+    from azure.mgmt.resource.resources.aio import (
+        ResourceManagementClient as AsyncResourceManagementClient,
+    )
+    from azure.mgmt.resource.subscriptions.aio import SubscriptionClient as AsyncSubscriptionClient
 
 @dataclass(frozen=True)
 class AzureClientRuntimeConfig:
     """Infrastructure-owned config resolved before AzureClient construction."""
 
     azure_config: AzureProviderConfig
-    performance_config: PerformanceConfig = field(default_factory=PerformanceConfig)
+    performance_config: PerformanceConfig = field(
+        default_factory=lambda: PerformanceConfig.model_validate({})
+    )
 
 
 @injectable
@@ -131,20 +131,18 @@ class AzureClient:
         self.perf_config = self._map_performance_config(runtime_config.performance_config)
 
         # Lazy Azure SDK client slots
-        self._credential: Optional[AzureCredentialProtocol] = None
-        self._compute_client: Optional[ComputeManagementClient] = None
-        self._network_client: Optional[NetworkManagementClient] = None
-        self._resource_client: Optional[ResourceManagementClient] = None
-        self._msi_client: Optional[ManagedServiceIdentityClient] = None
-        self._authorization_client: Optional[AuthorizationManagementClient] = None
-        self._monitor_client: Optional[MonitorManagementClient] = None
-        self._subscription_client: Optional[SubscriptionClient] = None
+        self._async_credential: Optional[AsyncAzureCredentialProtocol] = None
+        self._async_compute_client: Optional[AsyncComputeManagementClient] = None
+        self._async_network_client: Optional[AsyncNetworkManagementClient] = None
+        self._async_resource_client: Optional[AsyncResourceManagementClient] = None
+        self._async_subscription_client: Optional[AsyncSubscriptionClient] = None
         self._credentials_validated = False
         self._closed = False
+        self._pending_async_close_task: asyncio.Task[None] | None = None
         self._lazy_init_lock = RLock()
         self._arm_resource_id_parser = ArmResourceIdParser()
         self._network_identity_resolver = AzureNetworkIdentityResolver(
-            network_client_getter=lambda: self.network_client,
+            async_network_client_getter=self.get_async_network_client,
             logger=logger,
             arm_resource_id_parser=self._arm_resource_id_parser,
             network_lookup_error_types=self._network_lookup_error_types,
@@ -186,31 +184,6 @@ class AzureClient:
             "read_timeout": self._read_timeout,
         }
 
-    def _management_client_credential(self) -> Any:
-        """Return the credential object to hand to Azure SDK client constructors.
-
-        Internally we type against the small credential interface this module
-        actually uses. The Azure SDK constructors are typed more nominally, so
-        keep that boundary typed as ``Any`` rather than pretending our internal
-        protocol is the SDK's class hierarchy.
-        """
-        return self.credential
-
-    def _management_client_init_kwargs(
-        self,
-        *,
-        requires_subscription_id: bool,
-    ) -> dict[str, Any]:
-        """Build constructor kwargs shared by Azure management clients."""
-        client_kwargs = {
-            "credential": self._management_client_credential(),
-            **self._management_client_kwargs(),
-        }
-        if requires_subscription_id:
-            self._ensure_subscription_id()
-            client_kwargs["subscription_id"] = self.subscription_id
-        return client_kwargs
-
     @staticmethod
     def _resolve_int_config_value(
             *,
@@ -242,7 +215,26 @@ class AzureClient:
         if self._closed:
             raise RuntimeError("AzureClient has been closed")
 
-    def _build_management_client(
+    async def _async_management_client_credential(self) -> Any:
+        """Return the async credential object to hand to async Azure SDK client constructors."""
+        return await self.get_async_credential()
+
+    async def _async_management_client_init_kwargs(
+        self,
+        *,
+        requires_subscription_id: bool,
+    ) -> dict[str, Any]:
+        """Build constructor kwargs shared by async Azure management clients."""
+        client_kwargs = {
+            "credential": await self._async_management_client_credential(),
+            **self._management_client_kwargs(),
+        }
+        if requires_subscription_id:
+            self._ensure_subscription_id()
+            client_kwargs["subscription_id"] = self.subscription_id
+        return client_kwargs
+
+    async def _build_management_client_async(
         self,
         *,
         loader: Callable[[], Any],
@@ -250,134 +242,42 @@ class AzureClient:
         missing_package_message: str,
         requires_subscription_id: bool,
     ) -> Any:
-        """Construct a lazily imported Azure SDK management client."""
+        """Construct a lazily imported async Azure SDK management client."""
         self._ensure_open()
-        self._logger.debug("Initialising %s on first use", client_name)
+        self._logger.debug("Initialising async %s on first use", client_name)
         try:
             client_class = loader()
         except ImportError as exc:
             raise AzureConfigurationError(missing_package_message) from exc
         return client_class(
-            **self._management_client_init_kwargs(
+            **await self._async_management_client_init_kwargs(
                 requires_subscription_id=requires_subscription_id
             )
         )
 
-    def _build_compute_client(self) -> ComputeManagementClient:
-        """Construct a Compute management client."""
-        return self._build_management_client(
-            loader=self._load_compute_management_client,
-            client_name="ComputeManagementClient",
-            missing_package_message="azure-mgmt-compute package is not installed",
-            requires_subscription_id=True,
-        )
-
-    def _build_network_client(self) -> NetworkManagementClient:
-        """Construct a Network management client."""
-        return self._build_management_client(
-            loader=self._load_network_management_client,
-            client_name="NetworkManagementClient",
-            missing_package_message="azure-mgmt-network package is not installed",
-            requires_subscription_id=True,
-        )
-
-    def _build_resource_client(self) -> ResourceManagementClient:
-        """Construct a Resource management client."""
-        return self._build_management_client(
-            loader=self._load_resource_management_client,
-            client_name="ResourceManagementClient",
-            missing_package_message="azure-mgmt-resource package is not installed",
-            requires_subscription_id=True,
-        )
-
-    def _build_msi_client(self) -> ManagedServiceIdentityClient:
-        """Construct a Managed Service Identity client."""
-        return self._build_management_client(
-            loader=self._load_managed_service_identity_client,
-            client_name="ManagedServiceIdentityClient",
-            missing_package_message="azure-mgmt-msi package is not installed",
-            requires_subscription_id=True,
-        )
-
-    def _build_authorization_client(self) -> AuthorizationManagementClient:
-        """Construct an Authorization management client."""
-        return self._build_management_client(
-            loader=self._load_authorization_management_client,
-            client_name="AuthorizationManagementClient",
-            missing_package_message="azure-mgmt-authorization package is not installed",
-            requires_subscription_id=True,
-        )
-
-    def _build_monitor_client(self) -> MonitorManagementClient:
-        """Construct a Monitor management client."""
-        return self._build_management_client(
-            loader=self._load_monitor_management_client,
-            client_name="MonitorManagementClient",
-            missing_package_message="azure-mgmt-monitor package is not installed",
-            requires_subscription_id=True,
-        )
-
-    def _build_subscription_client(self) -> SubscriptionClient:
-        """Construct a Subscription client."""
-        return self._build_management_client(
-            loader=self._load_subscription_client_class,
-            client_name="SubscriptionClient",
-            missing_package_message="azure-mgmt-resource package is not installed",
-            requires_subscription_id=False,
-        )
-
-    @property
-    def credential(self) -> AzureCredentialProtocol:
-        """Return an Azure ``TokenCredential``, creating it on first access.
-
-        Resolution order:
-
-        1. ``DefaultAzureCredential`` — covers managed identity, VS Code,
-           Azure CLI, environment variables, and workload identity federation
-           out of the box.
-
-        Raises:
-            AuthenticationError: If no valid credential can be obtained.
-        """
+    async def get_async_credential(self) -> AsyncAzureCredentialProtocol:
+        """Return an async Azure credential, creating it on first use."""
         with self._lazy_init_lock:
             self._ensure_open()
-            if self._credential is None:
-                self._logger.debug("Creating Azure credential on first use")
-                try:
-                    self._credential = create_default_azure_credential(
-                        client_id=self._azure_config.client_id if self._azure_config else None,
-                        logger=self._logger,
-                    )
-                except ImportError as exc:
-                    raise AuthenticationError(
-                        "azure-identity package is not installed"
-                    ) from exc
-            return self._credential
-
-    def _close_management_client(
-        self,
-        resource_name: str,
-        client: Any,
-    ) -> None:
-        """Close one concrete Azure SDK management client owned by this wrapper."""
-        if client is None:
-            return
-
-        client.close()
-
-        self._logger.debug("Closed Azure resource %s", resource_name)
-
-    def _close_credential(
-        self,
-        credential: Optional[AzureCredentialProtocol],
-    ) -> None:
-        """Close the owned Azure credential."""
-        if credential is None:
-            return
-
-        credential.close()
-
-        self._logger.debug("Closed Azure resource credential")
+            existing = self._async_credential
+        if existing is not None:
+            return existing
+        self._logger.debug("Creating async Azure credential on first use")
+        try:
+            created = create_default_azure_credential_async(
+                client_id=self._azure_config.client_id if self._azure_config else None,
+                logger=self._logger,
+            )
+        except ImportError as exc:
+            raise AuthenticationError(format_import_error("azure-identity", exc)) from exc
+        with self._lazy_init_lock:
+            self._ensure_open()
+            if self._async_credential is None:
+                self._async_credential = created
+                return created
+            existing = self._async_credential
+        await self._close_async_resource("async_credential", created)
+        return existing
 
     def close(self) -> None:
         """Close owned Azure SDK resources and prevent further use.
@@ -408,40 +308,83 @@ class AzureClient:
                         exc,
                     )
 
-            subscription_client = self._subscription_client
-            self._subscription_client = None
-            close_resource(self._close_management_client, "subscription_client", subscription_client)
-
-            monitor_client = self._monitor_client
-            self._monitor_client = None
-            close_resource(self._close_management_client, "monitor_client", monitor_client)
-
-            authorization_client = self._authorization_client
-            self._authorization_client = None
-            close_resource(self._close_management_client, "authorization_client", authorization_client)
-
-            msi_client = self._msi_client
-            self._msi_client = None
-            close_resource(self._close_management_client, "msi_client", msi_client)
-
-            resource_client = self._resource_client
-            self._resource_client = None
-            close_resource(self._close_management_client, "resource_client", resource_client)
-
-            network_client = self._network_client
-            self._network_client = None
-            close_resource(self._close_management_client, "network_client", network_client)
-
-            compute_client = self._compute_client
-            self._compute_client = None
-            close_resource(self._close_management_client, "compute_client", compute_client)
-
-            credential = self._credential
-            self._credential = None
-            close_resource(self._close_credential, credential)
+            async_resources_present = any(
+                resource is not None
+                for resource in (
+                    self._async_subscription_client,
+                    self._async_resource_client,
+                    self._async_network_client,
+                    self._async_compute_client,
+                    self._async_credential,
+                )
+            )
 
             self._credentials_validated = False
             self._closed = True
+
+        if async_resources_present:
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                asyncio.run(self.aclose())
+            else:
+                close_task = loop.create_task(self.aclose())
+                with self._lazy_init_lock:
+                    self._pending_async_close_task = close_task
+
+                def _log_async_close_completion(task: asyncio.Task[None]) -> None:
+                    with self._lazy_init_lock:
+                        if self._pending_async_close_task is task:
+                            self._pending_async_close_task = None
+                    try:
+                        task.result()
+                    except Exception as exc:
+                        self._logger.warning(
+                            "Failed closing async Azure resources after AzureClient.close(): %s",
+                            exc,
+                        )
+
+                close_task.add_done_callback(_log_async_close_completion)
+
+        if close_errors:
+            raise close_errors[0]
+
+    async def aclose(self) -> None:
+        """Close owned async Azure SDK resources."""
+        close_errors: list[Exception] = []
+
+        with self._lazy_init_lock:
+            self._credentials_validated = False
+            self._closed = True
+            async_subscription_client = self._async_subscription_client
+            self._async_subscription_client = None
+            async_resource_client = self._async_resource_client
+            self._async_resource_client = None
+            async_network_client = self._async_network_client
+            self._async_network_client = None
+            async_compute_client = self._async_compute_client
+            self._async_compute_client = None
+            async_credential = self._async_credential
+            self._async_credential = None
+
+        for resource_name, resource in (
+            ("async_subscription_client", async_subscription_client),
+            ("async_resource_client", async_resource_client),
+            ("async_network_client", async_network_client),
+            ("async_compute_client", async_compute_client),
+            ("async_credential", async_credential),
+        ):
+            if resource is None:
+                continue
+            try:
+                await self._close_async_resource(resource_name, resource)
+            except Exception as exc:
+                close_errors.append(exc)
+                self._logger.warning(
+                    "Failed closing Azure resource %s: %s",
+                    resource_name,
+                    exc,
+                )
 
         if close_errors:
             raise close_errors[0]
@@ -459,109 +402,118 @@ class AzureClient:
     # Lazy management-client properties
     # ------------------------------------------------------------------
 
-    @property
-    def compute_client(self) -> ComputeManagementClient:
-        """Lazy initialisation of Azure Compute management client.
-
-        Provides access to VMs, VMSS, Disks, Images, Availability Sets,
-        Proximity Placement Groups, and Galleries.
-        """
+    async def get_async_compute_client(self) -> AsyncComputeManagementClient:
+        """Lazy initialisation of the async Azure Compute management client."""
         with self._lazy_init_lock:
             self._ensure_open()
-            if self._compute_client is None:
-                self._compute_client = self._build_compute_client()
-            return self._compute_client
+            existing = self._async_compute_client
+        if existing is not None:
+            return existing
 
-    @property
-    def network_client(self) -> NetworkManagementClient:
-        """Lazy initialisation of Azure Network management client.
-
-        Provides access to VNets, Subnets, NICs, NSGs, Public IPs, and
-        Load Balancers.
-        """
+        created = await self._build_management_client_async(
+            loader=self._load_async_compute_management_client,
+            client_name="ComputeManagementClient",
+            missing_package_message="azure-mgmt-compute package is not installed",
+            requires_subscription_id=True,
+        )
         with self._lazy_init_lock:
             self._ensure_open()
-            if self._network_client is None:
-                self._network_client = self._build_network_client()
-            return self._network_client
+            if self._async_compute_client is None:
+                self._async_compute_client = created
+                return created
+            surviving_client = self._async_compute_client
+        await self._close_async_resource("async_compute_client", created)
+        if surviving_client is None:
+            raise RuntimeError("ComputeManagementClient disappeared during async initialization")
+        return surviving_client
 
-    @property
-    def resource_client(self) -> ResourceManagementClient:
-        """Lazy initialisation of Azure Resource management client.
-
-        Provides access to resource groups, deployments, and providers.
-        """
+    async def get_async_network_client(self) -> AsyncNetworkManagementClient:
+        """Lazy initialisation of the async Azure Network management client."""
         with self._lazy_init_lock:
             self._ensure_open()
-            if self._resource_client is None:
-                self._resource_client = self._build_resource_client()
-            return self._resource_client
+            existing = self._async_network_client
+        if existing is not None:
+            return existing
 
-    @property
-    def msi_client(self) -> ManagedServiceIdentityClient:
-        """Lazy initialisation of Azure Managed Service Identity client.
-
-        Provides access to user-assigned managed identities.
-        """
+        created = await self._build_management_client_async(
+            loader=self._load_async_network_management_client,
+            client_name="NetworkManagementClient",
+            missing_package_message="azure-mgmt-network package is not installed",
+            requires_subscription_id=True,
+        )
         with self._lazy_init_lock:
             self._ensure_open()
-            if self._msi_client is None:
-                self._msi_client = self._build_msi_client()
-            return self._msi_client
+            if self._async_network_client is None:
+                self._async_network_client = created
+                return created
+            surviving_client = self._async_network_client
+        await self._close_async_resource("async_network_client", created)
+        if surviving_client is None:
+            raise RuntimeError("NetworkManagementClient disappeared during async initialization")
+        return surviving_client
 
-    @property
-    def authorization_client(self) -> AuthorizationManagementClient:
-        """Lazy initialisation of Azure Authorization management client.
-
-        Provides access to role definitions and role assignments.
-        """
+    async def get_async_resource_client(self) -> AsyncResourceManagementClient:
+        """Lazy initialisation of the async Azure Resource management client."""
         with self._lazy_init_lock:
             self._ensure_open()
-            if self._authorization_client is None:
-                self._authorization_client = self._build_authorization_client()
-            return self._authorization_client
+            existing = self._async_resource_client
+        if existing is not None:
+            return existing
 
-    @property
-    def monitor_client(self) -> MonitorManagementClient:
-        """Lazy initialisation of Azure Monitor management client.
-
-        Provides access to metrics, diagnostic settings, and activity logs.
-        """
+        created = await self._build_management_client_async(
+            loader=self._load_async_resource_management_client,
+            client_name="ResourceManagementClient",
+            missing_package_message="azure-mgmt-resource package is not installed",
+            requires_subscription_id=True,
+        )
         with self._lazy_init_lock:
             self._ensure_open()
-            if self._monitor_client is None:
-                self._monitor_client = self._build_monitor_client()
-            return self._monitor_client
+            if self._async_resource_client is None:
+                self._async_resource_client = created
+                return created
+            surviving_client = self._async_resource_client
+        await self._close_async_resource("async_resource_client", created)
+        if surviving_client is None:
+            raise RuntimeError("ResourceManagementClient disappeared during async initialization")
+        return surviving_client
 
-    @property
-    def subscription_client(self) -> SubscriptionClient:
-        """Lazy initialisation of Azure Subscription client.
-
-        Provides access to subscription and location information.
-        Does **not** require ``subscription_id`` at construction time.
-        """
+    async def get_async_subscription_client(self) -> AsyncSubscriptionClient:
+        """Lazy initialisation of the async Azure Subscription client."""
         with self._lazy_init_lock:
             self._ensure_open()
-            if self._subscription_client is None:
-                self._subscription_client = self._build_subscription_client()
-            return self._subscription_client
+            existing = self._async_subscription_client
+        if existing is not None:
+            return existing
+
+        created = await self._build_management_client_async(
+            loader=self._load_async_subscription_client_class,
+            client_name="SubscriptionClient",
+            missing_package_message="azure-mgmt-resource package is not installed",
+            requires_subscription_id=False,
+        )
+        with self._lazy_init_lock:
+            self._ensure_open()
+            if self._async_subscription_client is None:
+                self._async_subscription_client = created
+                return created
+            surviving_client = self._async_subscription_client
+        await self._close_async_resource("async_subscription_client", created)
+        if surviving_client is None:
+            raise RuntimeError("SubscriptionClient disappeared during async initialization")
+        return surviving_client
 
     # ------------------------------------------------------------------
     # Validation helpers
     # ------------------------------------------------------------------
 
-    def validate_credentials(self) -> bool:
-        """Validate that the current credential can authenticate.
-
-        Returns:
-            ``True`` if credentials are valid, ``False`` otherwise.
-        """
+    async def validate_credentials_async(self) -> bool:
+        """Async variant of credential validation using the async Azure credential."""
         if self._credentials_validated:
             return True
 
         try:
-            # Lightweight call to verify token acquisition
-            self.credential.get_token("https://management.azure.com/.default")
+            credential = await self.get_async_credential()
+            await credential.get_token("https://management.azure.com/.default")
             self._credentials_validated = True
             self._logger.info("Azure credentials validated successfully")
             return True
@@ -569,18 +521,15 @@ class AzureClient:
             self._logger.error("Azure credential validation failed: %s", exc)
             return False
 
-    def validate_subscription(self) -> bool:
-        """Validate that the configured subscription is accessible.
-
-        Returns:
-            ``True`` if the subscription is accessible, ``False`` otherwise.
-        """
+    async def validate_subscription_async(self) -> bool:
+        """Async variant of subscription validation using the async Azure SDK client."""
         if not self.subscription_id:
             self._logger.error("No subscription_id configured")
             return False
 
         try:
-            sub = self.subscription_client.subscriptions.get(self.subscription_id)
+            subscription_client = await self.get_async_subscription_client()
+            sub = await subscription_client.subscriptions.get(self.subscription_id)
             self._logger.info(
                 "Azure subscription validated: %s (%s)",
                 sub.display_name,
@@ -686,58 +635,38 @@ class AzureClient:
         )
 
     def _get_network_identity_resolver(self) -> AzureNetworkIdentityResolver:
-        """Return the network identity resolver, creating it for partial test doubles."""
-        # getattr: partial test doubles bypass __init__, so the delegated helper may be absent.
-        resolver = getattr(self, "_network_identity_resolver", None)
-        if resolver is None:
-            resolver = AzureNetworkIdentityResolver(
-                network_client_getter=lambda: self.network_client,
-                logger=self._logger,
-                arm_resource_id_parser=ArmResourceIdParser(),
-                network_lookup_error_types=self._network_lookup_error_types,
-            )
-            self._network_identity_resolver = resolver
-        return resolver
+        """Return the initialized network identity resolver."""
+        return self._network_identity_resolver
+
+    async def _close_async_resource(self, resource_name: str, resource: Any) -> None:
+        """Close one async Azure SDK resource owned by this wrapper."""
+        try:
+            await resource.close()
+        except Exception:
+            raise
+        self._logger.debug("Closed Azure resource %s", resource_name)
 
     @staticmethod
-    def _load_compute_management_client() -> Any:
-        from azure.mgmt.compute import ComputeManagementClient
+    def _load_async_compute_management_client() -> Any:
+        from azure.mgmt.compute.aio import ComputeManagementClient
 
         return ComputeManagementClient
 
     @staticmethod
-    def _load_network_management_client() -> Any:
-        from azure.mgmt.network import NetworkManagementClient
+    def _load_async_network_management_client() -> Any:
+        from azure.mgmt.network.aio import NetworkManagementClient
 
         return NetworkManagementClient
 
     @staticmethod
-    def _load_resource_management_client() -> Any:
-        from azure.mgmt.resource import ResourceManagementClient
+    def _load_async_resource_management_client() -> Any:
+        from azure.mgmt.resource.resources.aio import ResourceManagementClient
 
         return ResourceManagementClient
 
     @staticmethod
-    def _load_managed_service_identity_client() -> Any:
-        from azure.mgmt.msi import ManagedServiceIdentityClient
-
-        return ManagedServiceIdentityClient
-
-    @staticmethod
-    def _load_authorization_management_client() -> Any:
-        from azure.mgmt.authorization import AuthorizationManagementClient
-
-        return AuthorizationManagementClient
-
-    @staticmethod
-    def _load_monitor_management_client() -> Any:
-        from azure.mgmt.monitor import MonitorManagementClient
-
-        return MonitorManagementClient
-
-    @staticmethod
-    def _load_subscription_client_class() -> Any:
-        from azure.mgmt.resource.subscriptions import SubscriptionClient
+    def _load_async_subscription_client_class() -> Any:
+        from azure.mgmt.resource.subscriptions.aio import SubscriptionClient
 
         return SubscriptionClient
 
@@ -774,16 +703,18 @@ class AzureClient:
         """Return the parent VNet ARM ID from a subnet ARM ID."""
         return ArmResourceIdParser().subnet_id_to_vnet_id(subnet_id)
 
-    def resolve_network_identity_from_vm(self, vm: Any) -> dict[str, Any]:
-        """Resolve network identity fields from a VM or VMSS VM object."""
-        return self._get_network_identity_resolver().resolve_from_vm(vm)
+    async def resolve_network_identity_from_vm_async(self, vm: Any) -> AzureNetworkIdentity:
+        """Async variant of VM network identity resolution."""
+        return await self._get_network_identity_resolver().resolve_from_vm_async(vm)
 
-    def resolve_network_identity_from_nic_refs(
+    async def resolve_network_identity_from_nic_refs_async(
         self,
         nic_refs: list[Any],
-    ) -> dict[str, Any]:
-        """Resolve private/public IP and subnet/VNet identity from NIC refs."""
-        return self._get_network_identity_resolver().resolve_from_nic_refs(nic_refs)
+    ) -> AzureNetworkIdentity:
+        """Async variant of NIC-ref network identity resolution."""
+        return await self._get_network_identity_resolver().resolve_from_nic_refs_async(
+            nic_refs
+        )
 
     # ------------------------------------------------------------------
     # Metrics / observability

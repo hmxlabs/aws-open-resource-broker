@@ -7,13 +7,13 @@ from pathlib import Path
 from typing import Optional
 from urllib.parse import urlparse
 
-import requests
+import httpx
 
 from orb.providers.azure.configuration.config import AzureProviderConfig
 from orb.providers.azure.domain.template.azure_template_aggregate import AzureTemplate
 from orb.providers.azure.exceptions.azure_exceptions import CycleCloudConnectionError
 from orb.providers.azure.infrastructure.credential_factory import (
-    AzureAccessTokenProviderProtocol,
+    AsyncAzureAccessTokenProviderProtocol,
 )
 from orb.providers.azure.infrastructure.cyclecloud_session import (
     CycleCloudCredentialData,
@@ -32,14 +32,14 @@ class CycleCloudSessionBuilder:
         template: Optional[AzureTemplate],
         request_context: Optional[CycleCloudRequestContext],
         provider_cfg: Optional[AzureProviderConfig],
-        token_provider: Optional[AzureAccessTokenProviderProtocol] = None,
+        async_token_provider: Optional[AsyncAzureAccessTokenProviderProtocol] = None,
     ):
         self._cc_url = cc_url
         self._verify_ssl = verify_ssl
         self._template = template
         self._request_context = request_context or CycleCloudRequestContext()
         self._provider_cfg = provider_cfg
-        self._token_provider = token_provider
+        self._async_token_provider = async_token_provider
 
     @classmethod
     def _load_credential_file(cls, credential_path: str) -> CycleCloudCredentialData:
@@ -87,17 +87,17 @@ class CycleCloudSessionBuilder:
                 return value
         return default
 
-    def _get_azure_bearer_token(self, scopes: list[str]) -> Optional[str]:
-        if self._token_provider is None:
+    async def _get_azure_bearer_token_async(self, scopes: list[str]) -> Optional[str]:
+        if self._async_token_provider is None:
             return None
         for scope in scopes:
             if not scope:
                 continue
             try:
-                token = self._token_provider.get_access_token(scope)
+                token = await self._async_token_provider.get_access_token(scope)
                 if token:
                     return token
-            except self._token_provider.get_auth_error_types():
+            except self._async_token_provider.get_auth_error_types():
                 continue
         return None
 
@@ -140,7 +140,7 @@ class CycleCloudSessionBuilder:
                 url=None,
             )
 
-        return str(resolved_url).rstrip("/"), verify_resolved
+        return str(resolved_url).rstrip("/"), bool(verify_resolved)
 
     def _resolve_auth_mode(
         self,
@@ -155,7 +155,7 @@ class CycleCloudSessionBuilder:
         )
         return str(auth_mode).strip().lower() if auth_mode else None
 
-    def _resolve_bearer_token(
+    async def _resolve_bearer_token_async(
         self,
         *,
         base_url: str,
@@ -180,7 +180,7 @@ class CycleCloudSessionBuilder:
         )
         scopes = [str(aad_scope)] if aad_scope else []
         scopes.extend([host_scope, "https://management.azure.com/.default"])
-        return self._get_azure_bearer_token(scopes)
+        return await self._get_azure_bearer_token_async(scopes)
 
     def build_settings(self) -> CycleCloudSessionSettings:
         """Resolve credential, transport, and auth settings into a session config."""
@@ -199,13 +199,12 @@ class CycleCloudSessionBuilder:
             credential_path=credential_path,
         )
 
-    def configure_session_auth(
+    async def resolve_async_auth(
         self,
         *,
-        session: requests.Session,
         settings: CycleCloudSessionSettings,
-    ) -> str:
-        """Resolve auth from the credential source and apply it to a session."""
+    ) -> tuple[dict[str, str], httpx.BasicAuth | None, str]:
+        """Resolve auth settings for an ``httpx.AsyncClient`` transport."""
         if settings.auth_mode == "ssh":
             raise CycleCloudConnectionError(
                 "cyclecloud_auth_mode=ssh is not supported. Configure CycleCloud API credentials instead.",
@@ -218,16 +217,14 @@ class CycleCloudSessionBuilder:
             else CycleCloudCredentialData()
         )
         if credential_data.username and credential_data.password and settings.auth_mode != "bearer":
-            session.auth = (credential_data.username, credential_data.password)
-            return "basic"
+            return {}, httpx.BasicAuth(credential_data.username, credential_data.password), "basic"
 
-        bearer_token = self._resolve_bearer_token(
+        bearer_token = await self._resolve_bearer_token_async(
             base_url=settings.base_url,
             credential_data=credential_data,
         )
         if bearer_token:
-            session.headers["Authorization"] = f"Bearer {bearer_token}"
-            return "bearer"
+            return {"Authorization": f"Bearer {bearer_token}"}, None, "bearer"
         if settings.auth_mode == "bearer":
             raise CycleCloudConnectionError(
                 "cyclecloud_auth_mode=bearer requested but no bearer token could be resolved.",

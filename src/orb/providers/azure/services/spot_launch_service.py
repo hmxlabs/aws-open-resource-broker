@@ -1,9 +1,8 @@
 """Azure spot-placement planning and execution helpers."""
 
 from __future__ import annotations
-
 from dataclasses import dataclass, replace
-from typing import Any, Callable, Mapping, Optional, Protocol
+from typing import Any, Awaitable, Callable, Mapping, Optional, Protocol
 
 from orb.application.services.spot_placement_execution import (
     SpotPlacementExecutionSummary,
@@ -34,16 +33,16 @@ from orb.providers.base.strategy import ProviderOperation, ProviderResult
 class SpotPlacementExecutionPort(Protocol):
     """Structural subset of SpotPlacementExecutionService used by Azure spot launches."""
 
-    def execute_plan(
+    async def execute_plan_async(
         self,
         plan: list[PlacementPlanEntry],
         total_count: int,
         build_child_template: Callable[[PlacementPlanEntry], AzureTemplate],
         build_child_request: Callable[[int, int], Request],
-        launch_child: Callable[[Request, AzureTemplate], Mapping[str, Any]],
+        launch_child: Callable[[Request, AzureTemplate], Awaitable[Mapping[str, Any]]],
         is_capacity_like_failure: Callable[[dict[str, Any]], bool],
     ) -> SpotPlacementExecutionSummary:
-        """Execute a placement plan and return the aggregated execution summary."""
+        """Execute a placement plan asynchronously and return the aggregated summary."""
         ...
 
 
@@ -88,22 +87,9 @@ class AzureSpotLaunchService:
         azure_client: AzureClient | None,
     ) -> list[PlacementPlanEntry]:
         """Score candidate regions/zones and build a placement plan for spot launches."""
-        template_view = AzureSpotPlacementTemplateView(
-            vm_size=azure_template.vm_size,
-            location=azure_template.location,
-            placement_regions=list(azure_template.placement_regions or []),
-            placement_zones=list(azure_template.placement_zones or []),
-            zones=list(azure_template.zones or []),
-            candidate_vm_sizes=list(azure_template.candidate_vm_sizes),
-        )
+        template_view = self._template_view(azure_template)
         if azure_client is None:
-            self._logger.warning(
-                "Azure client not available; falling back to template candidate order"
-            )
-            return self.build_fallback_spot_placement_plan(
-                self._build_approximate_template_scores(template_view),
-                count,
-            )
+            return self._fallback_plan_for_missing_client(template_view, count)
 
         adapter = AzureSpotPlacementScoreAdapter(
             azure_client=azure_client,
@@ -112,6 +98,63 @@ class AzureSpotLaunchService:
             base_location=azure_template.location.value or self._config.region,
         )
         scores = adapter.score_candidates(requested_count=count, template=template_view)
+        return self._plan_from_scores(azure_template=azure_template, count=count, scores=scores)
+
+    async def build_spot_placement_plan_async(
+        self,
+        *,
+        azure_template: AzureTemplate,
+        count: int,
+        azure_client: AzureClient | None,
+    ) -> list[PlacementPlanEntry]:
+        """Score candidate regions/zones without blocking the async create flow."""
+        template_view = self._template_view(azure_template)
+        if azure_client is None:
+            return self._fallback_plan_for_missing_client(template_view, count)
+
+        adapter = AzureSpotPlacementScoreAdapter(
+            azure_client=azure_client,
+            logger=self._logger,
+            subscription_id=azure_template.subscription_id or self._config.subscription_id,
+            base_location=azure_template.location.value or self._config.region,
+        )
+        scores = await adapter.score_candidates_async(requested_count=count, template=template_view)
+        return self._plan_from_scores(azure_template=azure_template, count=count, scores=scores)
+
+    @staticmethod
+    def _template_view(azure_template: AzureTemplate) -> AzureSpotPlacementTemplateView:
+        """Build the structural template view used by the scoring adapter."""
+        return AzureSpotPlacementTemplateView(
+            vm_size=azure_template.vm_size,
+            location=azure_template.location,
+            placement_regions=list(azure_template.placement_regions or []),
+            placement_zones=list(azure_template.placement_zones or []),
+            zones=list(azure_template.zones or []),
+            candidate_vm_sizes=list(azure_template.candidate_vm_sizes),
+        )
+
+    def _fallback_plan_for_missing_client(
+        self,
+        template_view: AzureSpotPlacementTemplateView,
+        count: int,
+    ) -> list[PlacementPlanEntry]:
+        """Build a deterministic fallback plan when live scoring cannot run."""
+        self._logger.warning(
+            "Azure client not available; falling back to template candidate order"
+        )
+        return self.build_fallback_spot_placement_plan(
+            self._build_approximate_template_scores(template_view),
+            count,
+        )
+
+    def _plan_from_scores(
+        self,
+        *,
+        azure_template: AzureTemplate,
+        count: int,
+        scores: list[PlacementScore],
+    ) -> list[PlacementPlanEntry]:
+        """Create a placement plan from scores with a deterministic fallback."""
         plan = self._planner.create_plan(
             requested_count=count,
             scores=scores,
@@ -249,7 +292,7 @@ class AzureSpotLaunchService:
         result["fulfilled_count"] = requested_count
         return result
 
-    def execute_planned_spot_launches(
+    async def execute_planned_spot_launches_async(
         self,
         *,
         azure_template: AzureTemplate,
@@ -264,17 +307,21 @@ class AzureSpotLaunchService:
         plan_override: Optional[list[PlacementPlanEntry]] = None,
         capacity_like_failure_checker: Optional[Callable[[dict[str, Any]], bool]] = None,
     ) -> ProviderResult:
-        """Execute a spot placement plan, dispatching per-entry launches to the handler."""
+        """Async variant of planned spot launches using the async handler contract."""
         if not handler:
             return ProviderResult.error_result(
                 f"No handler available for provider_api: {provider_api_key}",
                 "HANDLER_NOT_FOUND",
             )
 
-        plan = plan_override or self.build_spot_placement_plan(
-            azure_template=azure_template,
-            count=count,
-            azure_client=azure_client,
+        plan = (
+            plan_override
+            if plan_override is not None
+            else await self.build_spot_placement_plan_async(
+                azure_template=azure_template,
+                count=count,
+                azure_client=azure_client,
+            )
         )
         if not plan:
             return ProviderResult.error_result(
@@ -287,7 +334,7 @@ class AzureSpotLaunchService:
             operation.context.get("request_id") if operation.context else None
         )
 
-        summary = self._execution_service.execute_plan(
+        summary = await self._execution_service.execute_plan_async(
             plan=plan,
             total_count=count,
             build_child_template=lambda plan_entry: self.clone_template_for_plan_entry(
@@ -303,7 +350,7 @@ class AzureSpotLaunchService:
                 parent_request_id=base_request_id,
                 plan_entry_index=idx,
             ),
-            launch_child=lambda child_request, child_template: self._launch_planned_child(
+            launch_child=lambda child_request, child_template: self._launch_planned_child_async(
                 handler=handler,
                 provider_api_key=provider_api_key,
                 child_request=child_request,
@@ -311,7 +358,41 @@ class AzureSpotLaunchService:
             ),
             is_capacity_like_failure=capacity_like_failure_checker or self.is_capacity_like_failure,
         )
+        return self._planned_execution_result(
+            plan=plan,
+            summary=summary,
+            count=count,
+            template_config=template_config,
+            provider_api_key=provider_api_key,
+            template_id=azure_template.template_id,
+        )
 
+    async def _launch_planned_child_async(
+        self,
+        *,
+        handler: AzureHandler,
+        provider_api_key: str,
+        child_request: Request,
+        child_template: AzureTemplate,
+    ) -> dict[str, Any]:
+        """Launch one planned child request through the async Azure handler contract."""
+        return self._planned_child_result_with_fulfillment(
+            provider_api_key=provider_api_key,
+            requested_count=child_request.requested_count,
+            raw_result=await handler.acquire_hosts_async(child_request, child_template),
+        )
+
+    def _planned_execution_result(
+        self,
+        *,
+        plan: list[PlacementPlanEntry],
+        summary: SpotPlacementExecutionSummary,
+        count: int,
+        template_config: dict[str, Any],
+        provider_api_key: str,
+        template_id: str,
+    ) -> ProviderResult:
+        """Build the final ProviderResult for planned spot execution."""
         provider_data = build_planned_execution_metadata(plan, summary)
         provider_data["fulfillment_final"] = (
             bool(summary.resource_ids)
@@ -348,7 +429,7 @@ class AzureSpotLaunchService:
                 "instances": summary.instances,
                 "provider_api": provider_api_key,
                 "count": count,
-                "template_id": azure_template.template_id,
+                "template_id": template_id,
             },
             {
                 "operation": "create_instances",
@@ -357,19 +438,4 @@ class AzureSpotLaunchService:
                 "method": "planned_handler",
                 "provider_data": provider_data,
             },
-        )
-
-    def _launch_planned_child(
-        self,
-        *,
-        handler: AzureHandler,
-        provider_api_key: str,
-        child_request: Request,
-        child_template: AzureTemplate,
-    ) -> dict[str, Any]:
-        """Launch one planned child request through the resolved handler."""
-        return self._planned_child_result_with_fulfillment(
-            provider_api_key=provider_api_key,
-            requested_count=child_request.requested_count,
-            raw_result=handler.acquire_hosts(child_request, child_template),
         )

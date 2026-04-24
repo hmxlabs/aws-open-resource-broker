@@ -50,7 +50,7 @@ class AzureDeploymentService:
         """Return an ARM expression for a sibling resource ID."""
         return f"[resourceId('{resource_type}', '{resource_name}')]"
 
-    def submit_template_deployment(
+    async def submit_template_deployment_async(
         self,
         *,
         resource_group: str,
@@ -58,7 +58,7 @@ class AzureDeploymentService:
         template: dict[str, Any],
         parameters: Optional[dict[str, Any]] = None,
     ) -> str:
-        """Submit an ARM deployment without waiting for completion."""
+        """Submit an ARM deployment without waiting for completion via the async SDK."""
         deployment_payload = {
             "properties": {
                 "mode": self._DEPLOYMENT_MODE,
@@ -66,7 +66,9 @@ class AzureDeploymentService:
                 "parameters": parameters or {},
             }
         }
-        self.azure_client.resource_client.resources.begin_create_or_update(
+        resource_client = await self.azure_client.get_async_resource_client()
+        resource_operations: Any = resource_client.resources
+        await resource_operations.begin_create_or_update(
             resource_group_name=resource_group,
             resource_provider_namespace=self._DEPLOYMENT_PROVIDER_NAMESPACE,
             parent_resource_path="",
@@ -83,14 +85,15 @@ class AzureDeploymentService:
         )
         return deployment_name
 
-    def get_deployment_status(
+    async def get_deployment_status_async(
         self,
         *,
         resource_group: str,
         deployment_name: str,
     ) -> Optional[dict[str, Any]]:
-        """Return provisioning metadata for a submitted ARM deployment."""
-        deployment = self.azure_client.resource_client.resources.get(
+        """Return provisioning metadata for a submitted ARM deployment via the async SDK."""
+        resource_client = await self.azure_client.get_async_resource_client()
+        deployment = await resource_client.resources.get(
             resource_group_name=resource_group,
             resource_provider_namespace=self._DEPLOYMENT_PROVIDER_NAMESPACE,
             parent_resource_path="",

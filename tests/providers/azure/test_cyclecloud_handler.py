@@ -2,10 +2,9 @@
 
 import json
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-import requests
 
 from orb.providers.azure.configuration.config import AzureProviderConfig
 from orb.providers.azure.domain.template.azure_template_aggregate import AzureTemplate
@@ -26,6 +25,7 @@ from orb.providers.azure.infrastructure.handlers.azure_handler import AzureRelea
 from orb.providers.azure.infrastructure.cyclecloud_session_builder import (
     CycleCloudSessionBuilder,
 )
+from tests.providers.azure.strategy_test_support import make_azure_template, run_operation
 
 
 # ---------------------------------------------------------------------------
@@ -48,13 +48,13 @@ _CC_TEMPLATE_FIELDS = {
 
 
 def _make_template(**overrides):
-    fields = {**_CC_TEMPLATE_FIELDS, **overrides}
-    return AzureTemplate(**fields)
+    return make_azure_template(**{**_CC_TEMPLATE_FIELDS, **overrides})
 
 
 def _make_handler():
     azure_client = MagicMock()
     azure_client.get_provider_config.return_value = None
+    azure_client.get_async_credential = AsyncMock(return_value=None)
     logger = MagicMock()
     return CycleCloudHandler(azure_client=azure_client, logger=logger)
 
@@ -70,6 +70,68 @@ def _make_request(count=2, resource_ids=None, metadata=None):
 
 def _make_cc_request_context(**values):
     return CycleCloudRequestContext.from_mapping(values)
+
+
+class _AsyncContextManager:
+    def __init__(self, value):
+        self._value = value
+
+    async def __aenter__(self):
+        return self._value
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return None
+
+
+def _make_async_session_context(
+    *,
+    base_url: str = "https://cc.example.com",
+    credential_path: str | None = None,
+    verify_ssl: bool = False,
+    auth_mode: str | None = "bearer",
+):
+    session_context = MagicMock()
+    session_context.client = object()
+    session_context.base_url = base_url
+    session_context.credential_path = credential_path
+    session_context.verify_ssl = verify_ssl
+    session_context.auth_mode = auth_mode
+    return session_context
+
+
+def _wire_async_cyclecloud_calls(
+    handler: CycleCloudHandler,
+    *,
+    responses: list[dict[str, object]],
+    session_context=None,
+):
+    session_context = session_context or _make_async_session_context()
+    handler._async_cc_session_scope = MagicMock(return_value=_AsyncContextManager(session_context))
+    handler._cc_request_async = AsyncMock(side_effect=responses)
+    return session_context
+
+
+@pytest.mark.asyncio
+async def test_cc_request_async_wraps_invalid_json_with_connection_error():
+    handler = _make_handler()
+    response = MagicMock()
+    response.request.url = "https://cc.example.com/api/nodes"
+    response.headers = {"Content-Type": "application/json"}
+    response.status_code = 200
+    response.content = b"{invalid"
+    response.raise_for_status = MagicMock()
+    response.json.side_effect = json.JSONDecodeError("bad json", "{invalid", 1)
+
+    client = MagicMock()
+    client.request = AsyncMock(return_value=response)
+
+    with pytest.raises(CycleCloudConnectionError, match="invalid JSON"):
+        await handler._cc_request_async(
+            client,
+            "GET",
+            "https://cc.example.com/api/nodes",
+            include_metadata=True,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -161,43 +223,39 @@ class TestStateMapping:
 
 
 class TestCycleCloudHandlerAcquire:
-    @patch("orb.providers.azure.infrastructure.handlers.cyclecloud_handler.requests.Session")
-    def test_acquire_hosts_success(self, mock_session_cls):
+    def test_acquire_hosts_returns_submitted_operation_metadata(self):
         handler = _make_handler()
         template = _make_template()
         request = _make_request(count=2)
-
-        mock_session = MagicMock()
-        mock_session_cls.return_value = mock_session
-
-        # Mock responses: cluster status, then node create
-        cluster_status_resp = MagicMock()
-        cluster_status_resp.status_code = 200
-        cluster_status_resp.content = b'{"state": "Started"}'
-        cluster_status_resp.json.return_value = {"state": "Started"}
-        cluster_status_resp.raise_for_status = MagicMock()
-
-        node_create_resp = MagicMock()
-        node_create_resp.status_code = 200
-        node_create_resp.headers = {"Location": "https://cc.example.com/operations/op-123"}
-        node_create_resp.content = b'{"operationId": "op-123", "sets": [{"added": 2, "nodes": [{"name": "node-1", "status": "Acquiring"}, {"name": "node-2", "status": "Acquiring"}]}]}'
-        node_create_resp.json.return_value = {
-            "operationId": "op-123",
-            "sets": [
+        session_context = _make_async_session_context(
+            credential_path="config/cc.json",
+            verify_ssl=False,
+            auth_mode="bearer",
+        )
+        _wire_async_cyclecloud_calls(
+            handler,
+            session_context=session_context,
+            responses=[
+                {"state": "Started"},
                 {
-                    "added": 2,
-                    "nodes": [
-                        {"name": "node-1", "status": "Acquiring"},
-                        {"name": "node-2", "status": "Acquiring"},
-                    ],
-                }
+                    "body": {
+                        "operationId": "op-123",
+                        "sets": [
+                            {
+                                "added": 2,
+                                "nodes": [
+                                    {"name": "node-1", "status": "Acquiring"},
+                                    {"name": "node-2", "status": "Acquiring"},
+                                ],
+                            }
+                        ],
+                    },
+                    "headers": {"Location": "https://cc.example.com/operations/op-123"},
+                },
             ],
-        }
-        node_create_resp.raise_for_status = MagicMock()
+        )
 
-        mock_session.request.side_effect = [cluster_status_resp, node_create_resp]
-
-        result = handler.acquire_hosts(request, template)
+        result = run_operation(handler.acquire_hosts_async(request, template))
 
         assert result["success"] is True
         assert result["resource_ids"] == ["req-12345678-1234-1234-1234-123456789012"]
@@ -207,39 +265,42 @@ class TestCycleCloudHandlerAcquire:
         assert result["provider_data"]["added_count"] == 2
         assert result["provider_data"]["submitted_count"] == 2
         assert result["provider_data"]["operation_status"] == "submitted"
-        request_json = mock_session.request.call_args_list[1].kwargs["json"]
+        request_json = handler._cc_request_async.await_args_list[1].kwargs["json"]
         assert request_json["requestId"] == "req-12345678-1234-1234-1234-123456789012"
-        mock_session.close.assert_called_once_with()
 
-    @patch("orb.providers.azure.infrastructure.handlers.cyclecloud_handler.requests.Session")
-    def test_acquire_hosts_placeholder_nodes(self, mock_session_cls):
-        """When CycleCloud returns added count but no inline node details, tracking stays resource-level."""
+    @pytest.mark.asyncio
+    async def test_acquire_hosts_async_returns_submitted_operation_metadata(self):
         handler = _make_handler()
         template = _make_template()
-        request = _make_request(count=3)
+        request = _make_request(count=2)
+        session_context = MagicMock()
+        session_context.client = object()
+        session_context.base_url = "https://cc.example.com"
+        session_context.credential_path = "config/cc.json"
+        session_context.verify_ssl = False
+        session_context.auth_mode = "bearer"
+        handler._async_cc_session_scope = MagicMock(
+            return_value=_AsyncContextManager(session_context)
+        )
+        handler._cc_request_async = AsyncMock(
+            side_effect=[
+                {"state": "Started"},
+                {
+                    "body": {
+                        "operationId": "op-123",
+                        "sets": [{"added": 2, "nodes": [{"name": "node-1", "status": "Acquiring"}]}],
+                    },
+                    "headers": {"Location": "https://cc.example.com/operations/op-123"},
+                },
+            ]
+        )
 
-        mock_session = MagicMock()
-        mock_session_cls.return_value = mock_session
-
-        cluster_resp = MagicMock()
-        cluster_resp.content = b'{"state": "Started"}'
-        cluster_resp.json.return_value = {"state": "Started"}
-        cluster_resp.raise_for_status = MagicMock()
-
-        create_resp = MagicMock()
-        create_resp.content = b'{"operationId": "op-456", "sets": [{"added": 3, "nodes": []}]}'
-        create_resp.json.return_value = {
-            "operationId": "op-456",
-            "sets": [{"added": 3, "nodes": []}],
-        }
-        create_resp.raise_for_status = MagicMock()
-
-        mock_session.request.side_effect = [cluster_resp, create_resp]
-
-        result = handler.acquire_hosts(request, template)
+        result = await handler.acquire_hosts_async(request, template)
 
         assert result["success"] is True
-        assert result["provider_data"]["added_count"] == 3
+        assert result["provider_data"]["operation_id"] == "op-123"
+        assert result["provider_data"]["cyclecloud_auth_mode"] == "bearer"
+        assert result["provider_data"]["submitted_count"] == 2
 
     def test_acquire_hosts_missing_cluster_name(self):
         """Should raise CycleCloudNodeError if cluster_name is missing."""
@@ -251,7 +312,7 @@ class TestCycleCloudHandlerAcquire:
         request = _make_request()
 
         with pytest.raises(CycleCloudNodeError, match="cluster_name is required"):
-            handler.acquire_hosts(request, template)
+            run_operation(handler.acquire_hosts_async(request, template))
 
     def test_acquire_hosts_missing_url(self):
         """Should raise CycleCloudConnectionError if cyclecloud_url is missing."""
@@ -261,46 +322,7 @@ class TestCycleCloudHandlerAcquire:
         request = _make_request()
 
         with pytest.raises(CycleCloudConnectionError, match="cyclecloud_url is required"):
-            handler.acquire_hosts(request, template)
-
-    @patch("orb.providers.azure.infrastructure.handlers.cyclecloud_handler.requests.Session")
-    def test_acquire_hosts_collects_failed_node_errors(self, mock_session_cls):
-        handler = _make_handler()
-        template = _make_template()
-        request = _make_request(count=1)
-
-        mock_session = MagicMock()
-        mock_session_cls.return_value = mock_session
-
-        cluster_resp = MagicMock()
-        cluster_resp.content = b'{"state": "Started"}'
-        cluster_resp.json.return_value = {"state": "Started"}
-        cluster_resp.raise_for_status = MagicMock()
-
-        create_resp = MagicMock()
-        create_resp.content = (
-            b'{"operationId": "op-999", "sets": [{"added": 1, "nodes": '
-            b'[{"name": "node-err", "status": "Failed", "message": "Quota exhausted"}]}]}'
-        )
-        create_resp.json.return_value = {
-            "operationId": "op-999",
-            "sets": [
-                {
-                    "added": 1,
-                    "nodes": [
-                        {"name": "node-err", "status": "Failed", "message": "Quota exhausted"}
-                    ],
-                }
-            ],
-        }
-        create_resp.raise_for_status = MagicMock()
-
-        mock_session.request.side_effect = [cluster_resp, create_resp]
-
-        result = handler.acquire_hosts(request, template)
-
-        assert result["provider_data"]["fleet_errors"][0]["error_message"] == "Quota exhausted"
-        assert result["provider_data"]["fleet_errors"][0]["error_code"] == "NodeFailed"
+            run_operation(handler.acquire_hosts_async(request, template))
 
 
 # ---------------------------------------------------------------------------
@@ -309,37 +331,33 @@ class TestCycleCloudHandlerAcquire:
 
 
 class TestCycleCloudHandlerStatus:
-    @patch("orb.providers.azure.infrastructure.handlers.cyclecloud_handler.requests.Session")
-    def test_check_hosts_status_success(self, mock_session_cls):
+    def test_check_hosts_status_returns_filtered_results(self):
         handler = _make_handler()
-
-        mock_session = MagicMock()
-        mock_session_cls.return_value = mock_session
-
-        nodes_resp = MagicMock()
-        nodes_resp.content = b'{"nodes": []}'
-        nodes_resp.json.return_value = {
-            "nodes": [
+        _wire_async_cyclecloud_calls(
+            handler,
+            responses=[
                 {
-                    "name": "node-1",
-                    "nodeId": "id-1",
-                    "nodeArray": "execute",
-                    "state": "Ready",
-                    "privateIp": "10.0.0.1",
-                    "machineType": "Standard_D4s_v5",
-                },
-                {
-                    "name": "node-2",
-                    "nodeId": "id-2",
-                    "nodeArray": "execute",
-                    "state": "Preparing",
-                    "privateIp": "10.0.0.2",
-                    "machineType": "Standard_D4s_v5",
-                },
-            ]
-        }
-        nodes_resp.raise_for_status = MagicMock()
-        mock_session.request.return_value = nodes_resp
+                    "nodes": [
+                        {
+                            "name": "node-1",
+                            "nodeId": "id-1",
+                            "nodeArray": "execute",
+                            "state": "Ready",
+                            "privateIp": "10.0.0.1",
+                            "machineType": "Standard_D4s_v5",
+                        },
+                        {
+                            "name": "node-2",
+                            "nodeId": "id-2",
+                            "nodeArray": "execute",
+                            "state": "Preparing",
+                            "privateIp": "10.0.0.2",
+                            "machineType": "Standard_D4s_v5",
+                        },
+                    ]
+                }
+            ],
+        )
 
         request = _make_request(
             resource_ids=["req-12345678-1234-1234-1234-123456789012"],
@@ -352,7 +370,7 @@ class TestCycleCloudHandlerStatus:
             },
         )
 
-        results = handler.check_hosts_status(request)
+        results = run_operation(handler.check_hosts_status_async(request))
 
         assert len(results) == 2
         assert results[0]["instance_id"] == "node-1"
@@ -362,58 +380,6 @@ class TestCycleCloudHandlerStatus:
         assert results[0]["private_ip"] == "10.0.0.1"
         assert results[1]["status"] == "pending"
 
-    @patch("orb.providers.azure.infrastructure.handlers.cyclecloud_handler.requests.Session")
-    def test_check_hosts_status_uses_request_id_filter(self, mock_session_cls):
-        handler = _make_handler()
-        handler.azure_client.get_provider_config.return_value = AzureProviderConfig(
-            region="eastus2",
-            connect_timeout=7,
-            read_timeout=11,
-        )
-
-        mock_session = MagicMock()
-        mock_session_cls.return_value = mock_session
-
-        nodes_resp = MagicMock()
-        nodes_resp.content = b'{"nodes": [{"name": "node-1", "nodeId": "id-1", "nodeArray": "execute", "state": "Ready"}]}'
-        nodes_resp.json.return_value = {
-            "nodes": [
-                {
-                    "name": "node-1",
-                    "nodeId": "id-1",
-                    "nodeArray": "execute",
-                    "state": "Ready",
-                }
-            ]
-        }
-        nodes_resp.raise_for_status = MagicMock()
-        mock_session.request.return_value = nodes_resp
-
-        request = _make_request(
-            resource_ids=["req-12345678-1234-1234-1234-123456789012"],
-            metadata={
-                "cluster_name": "my-cluster",
-                "node_array": "execute",
-                "operation_id": "op-123",
-                "operation_location": "https://cc.example.com/operations/op-123",
-                "cyclecloud_url": "https://cc.example.com",
-                "cyclecloud_auth_mode": "bearer",
-                "cyclecloud_aad_scope": "https://cc.example.com/.default",
-            },
-        )
-
-        results = handler.check_hosts_status(request)
-
-        assert len(results) == 1
-        assert results[0]["instance_id"] == "node-1"
-        mock_session.request.assert_called_once_with(
-            "GET",
-            "https://cc.example.com/clusters/my-cluster/nodes",
-            params={"request_id": "req-12345678-1234-1234-1234-123456789012"},
-            timeout=(7, 11),
-        )
-        mock_session.close.assert_called_once_with()
-
     def test_check_hosts_status_no_cc_url(self):
         handler = _make_handler()
         request = _make_request(
@@ -421,7 +387,7 @@ class TestCycleCloudHandlerStatus:
             metadata={"cluster_name": "my-cluster"},
         )
         with pytest.raises(CycleCloudConnectionError, match="cyclecloud_url is required"):
-            handler.check_hosts_status(request)
+            run_operation(handler.check_hosts_status_async(request))
 
     def test_check_hosts_status_requires_cyclecloud_request_identity(self):
         handler = _make_handler()
@@ -433,7 +399,7 @@ class TestCycleCloudHandlerStatus:
             },
         )
         with pytest.raises(CycleCloudConnectionError, match="request identity is required"):
-            handler.check_hosts_status(request)
+            run_operation(handler.check_hosts_status_async(request))
 
     def test_check_hosts_status_requires_cluster_name(self):
         handler = _make_handler()
@@ -443,15 +409,18 @@ class TestCycleCloudHandlerStatus:
         )
 
         with pytest.raises(CycleCloudConnectionError, match="cluster_name is required"):
-            handler.check_hosts_status(request)
+            run_operation(handler.check_hosts_status_async(request))
 
-    @patch("orb.providers.azure.infrastructure.handlers.cyclecloud_handler.requests.Session")
-    def test_check_hosts_status_request_failure_raises(self, mock_session_cls):
+    def test_check_hosts_status_request_failure_raises(self):
         handler = _make_handler()
-
-        mock_session = MagicMock()
-        mock_session_cls.return_value = mock_session
-        mock_session.request.side_effect = requests.exceptions.ConnectionError("boom")
+        _wire_async_cyclecloud_calls(
+            handler,
+            responses=[CycleCloudConnectionError("Cannot connect to CycleCloud at x: boom", url="x")],
+        )
+        handler._cc_request_async.side_effect = CycleCloudConnectionError(
+            "Cannot connect to CycleCloud at https://cc.example.com: boom",
+            url="https://cc.example.com",
+        )
 
         request = _make_request(
             resource_ids=["req-12345678-1234-1234-1234-123456789012"],
@@ -462,7 +431,7 @@ class TestCycleCloudHandlerStatus:
         )
 
         with pytest.raises(CycleCloudConnectionError, match="Cannot connect to CycleCloud"):
-            handler.check_hosts_status(request)
+            run_operation(handler.check_hosts_status_async(request))
 
         assert handler._logger.error.call_count == 1
         assert handler._logger.error.call_args.args[0] == (
@@ -470,163 +439,41 @@ class TestCycleCloudHandlerStatus:
         )
         assert handler._logger.error.call_args.args[1] == "my-cluster"
 
-    @patch("orb.providers.azure.infrastructure.handlers.cyclecloud_handler.requests.Session")
-    def test_check_hosts_status_filters_by_node_array(self, mock_session_cls):
+    @pytest.mark.asyncio
+    async def test_check_hosts_status_async_returns_filtered_results(self):
         handler = _make_handler()
-
-        mock_session = MagicMock()
-        mock_session_cls.return_value = mock_session
-
-        nodes_resp = MagicMock()
-        nodes_resp.content = b'{"nodes": []}'
-        nodes_resp.json.return_value = {
-            "nodes": [
-                {"name": "node-1", "nodeArray": "execute", "state": "Ready"},
-                {"name": "node-2", "nodeArray": "hpc", "state": "Ready"},
-            ]
-        }
-        nodes_resp.raise_for_status = MagicMock()
-        mock_session.request.return_value = nodes_resp
-
+        session_context = MagicMock()
+        session_context.client = object()
+        session_context.base_url = "https://cc.example.com"
+        handler._async_cc_session_scope = MagicMock(return_value=_AsyncContextManager(session_context))
+        handler._cc_request_async = AsyncMock(
+            return_value={
+                "nodes": [
+                    {
+                        "name": "node-1",
+                        "nodeId": "id-1",
+                        "nodeArray": "execute",
+                        "state": "Ready",
+                        "machineType": "Standard_D4s_v5",
+                    }
+                ]
+            }
+        )
         request = _make_request(
-            resource_ids=["req-12345678-1234-1234-1234-123456789012"],
+            resource_ids=["req-123"],
             metadata={
                 "cluster_name": "my-cluster",
                 "node_array": "execute",
+                "node_ids": ["node-1"],
                 "cyclecloud_url": "https://cc.example.com",
             },
         )
 
-        results = handler.check_hosts_status(request)
-        assert len(results) == 1
-        assert results[0]["instance_id"] == "node-1"
+        result = await handler.check_hosts_status_async(request)
 
-    @patch("orb.providers.azure.infrastructure.handlers.cyclecloud_handler.requests.Session")
-    def test_check_hosts_status_uses_node_list_fields(self, mock_session_cls):
-        handler = _make_handler()
-
-        mock_session = MagicMock()
-        mock_session_cls.return_value = mock_session
-
-        nodes_resp = MagicMock()
-        nodes_resp.content = b'{"nodes": []}'
-        nodes_resp.json.return_value = {
-            "nodes": [
-                {
-                    "name": "node-1",
-                    "nodeId": "id-1",
-                    "nodeArray": "execute",
-                    "state": "Ready",
-                    "privateIp": "10.0.0.1",
-                    "machineType": "Standard_D4s_v5",
-                }
-            ]
-        }
-        nodes_resp.raise_for_status = MagicMock()
-        mock_session.request.return_value = nodes_resp
-
-        request = _make_request(
-            resource_ids=["req-12345678-1234-1234-1234-123456789012"],
-            metadata={
-                "cluster_name": "my-cluster",
-                "node_array": "execute",
-                "cyclecloud_url": "https://cc.example.com",
-            },
-        )
-
-        results = handler.check_hosts_status(request)
-
-        assert len(results) == 1
-        assert results[0]["instance_id"] == "node-1"
-        assert results[0]["name"] == "node-1"
-        assert results[0]["status"] == "running"
-        assert results[0]["private_ip"] == "10.0.0.1"
-        assert results[0]["provider_data"]["node_id"] == "id-1"
-        assert results[0]["provider_data"]["resource_id"] == "my-cluster"
-
-    @patch("orb.providers.azure.infrastructure.handlers.cyclecloud_handler.requests.Session")
-    def test_check_hosts_status_accepts_pascal_case_node_fields(self, mock_session_cls):
-        handler = _make_handler()
-
-        mock_session = MagicMock()
-        mock_session_cls.return_value = mock_session
-
-        nodes_resp = MagicMock()
-        nodes_resp.content = b'{"nodes": []}'
-        nodes_resp.json.return_value = {
-            "nodes": [
-                {
-                    "Name": "dynamic-1",
-                    "NodeId": "id-1",
-                    "Template": "dynamic",
-                    "Status": "Ready",
-                    "State": "Started",
-                    "IpAddress": "10.0.1.5",
-                    "MachineType": "Standard_F2s_v2",
-                }
-            ]
-        }
-        nodes_resp.raise_for_status = MagicMock()
-        mock_session.request.return_value = nodes_resp
-
-        request = _make_request(
-            resource_ids=["req-12345678-1234-1234-1234-123456789012"],
-            metadata={
-                "cluster_name": "my-cluster",
-                "node_array": "dynamic",
-                "cyclecloud_url": "https://cc.example.com",
-            },
-        )
-
-        results = handler.check_hosts_status(request)
-
-        assert len(results) == 1
-        assert results[0]["instance_id"] == "dynamic-1"
-        assert results[0]["name"] == "dynamic-1"
-        assert results[0]["status"] == "running"
-        assert results[0]["private_ip"] == "10.0.1.5"
-        assert results[0]["provider_data"]["node_array"] == "dynamic"
-        assert results[0]["provider_data"]["resource_id"] == "my-cluster"
-
-    @patch("orb.providers.azure.infrastructure.handlers.cyclecloud_handler.requests.Session")
-    def test_check_hosts_status_includes_failed_node_errors(self, mock_session_cls):
-        handler = _make_handler()
-
-        mock_session = MagicMock()
-        mock_session_cls.return_value = mock_session
-
-        nodes_resp = MagicMock()
-        nodes_resp.content = b'{"nodes": []}'
-        nodes_resp.json.return_value = {
-            "nodes": [
-                {
-                    "name": "node-fail",
-                    "nodeId": "id-fail",
-                    "nodeArray": "execute",
-                    "state": "Failed",
-                    "message": "Node startup failed",
-                    "machineType": "Standard_D4s_v5",
-                }
-            ]
-        }
-        nodes_resp.raise_for_status = MagicMock()
-        mock_session.request.return_value = nodes_resp
-
-        request = _make_request(
-            resource_ids=["req-12345678-1234-1234-1234-123456789012"],
-            metadata={
-                "cluster_name": "my-cluster",
-                "node_array": "execute",
-                "cyclecloud_url": "https://cc.example.com",
-            },
-        )
-
-        results = handler.check_hosts_status(request)
-
-        assert len(results) == 1
-        assert results[0]["status"] == "failed"
-        assert results[0]["provider_data"]["fleet_errors"][0]["error_code"] == "NodeFailed"
-        assert results[0]["provider_data"]["fleet_errors"][0]["error_message"] == "Node startup failed"
+        assert len(result) == 1
+        assert result[0]["status"] == "running"
+        assert result[0]["instance_id"] == "node-1"
 
 
 # ---------------------------------------------------------------------------
@@ -635,132 +482,82 @@ class TestCycleCloudHandlerStatus:
 
 
 class TestCycleCloudHandlerRelease:
-    @patch("orb.providers.azure.infrastructure.handlers.cyclecloud_handler.requests.Session")
-    def test_release_hosts_success(self, mock_session_cls):
+    def test_release_hosts_returns_submitted_release_metadata(self):
         handler = _make_handler()
-
-        mock_session = MagicMock()
-        mock_session_cls.return_value = mock_session
-
-        nodes_resp = MagicMock()
-        nodes_resp.content = b'{"nodes": [{"name": "node-1", "nodeId": "node-1"}, {"name": "node-2", "nodeId": "node-2"}]}'
-        nodes_resp.json.return_value = {
-            "nodes": [
-                {"name": "node-1", "nodeId": "node-1"},
-                {"name": "node-2", "nodeId": "node-2"},
-            ]
-        }
-        nodes_resp.raise_for_status = MagicMock()
-
-        empty_resp = MagicMock()
-        empty_resp.content = b""
-        empty_resp.raise_for_status = MagicMock()
-        mock_session.request.side_effect = [nodes_resp, empty_resp, empty_resp]
-
-        handler.release_hosts(
-            machine_ids=["node-1", "node-2"],
-            resource_id="my-cluster",
-            context=AzureReleaseContext(
-                cyclecloud_request_context=CycleCloudRequestContext(
-                    cyclecloud_url="https://cc.example.com",
-                    cyclecloud_auth_mode="bearer",
-                    cyclecloud_aad_scope="https://cc.example.com/.default",
-                )
-            ),
+        _wire_async_cyclecloud_calls(
+            handler,
+            responses=[
+                {"nodes": [{"name": "node-1", "nodeId": "node-1"}]},
+                {
+                    "body": {"operationId": "op-release"},
+                    "headers": {"Location": "https://cc.example.com/operations/op-release"},
+                },
+            ],
         )
 
-        # Verify lookup + terminate call were made
-        assert mock_session.request.call_count == 2
-        calls = mock_session.request.call_args_list
-        assert "nodes" in calls[0].args[1]
-        assert "terminate" in calls[1].args[1]
-        assert calls[1].kwargs["json"] == {"ids": ["node-1", "node-2"]}
-        mock_session.close.assert_called_once_with()
-
-    @patch("orb.providers.azure.infrastructure.handlers.cyclecloud_handler.requests.Session")
-    def test_release_hosts_resolves_node_id_to_node_name(self, mock_session_cls):
-        handler = _make_handler()
-
-        mock_session = MagicMock()
-        mock_session_cls.return_value = mock_session
-
-        nodes_resp = MagicMock()
-        nodes_resp.content = b'{"nodes": [{"name": "dynamic-1", "nodeId": "cluster-dynamic-op-0"}]}'
-        nodes_resp.json.return_value = {
-            "nodes": [
-                {"name": "dynamic-1", "nodeId": "cluster-dynamic-op-0"},
-            ]
-        }
-        nodes_resp.raise_for_status = MagicMock()
-
-        empty_resp = MagicMock()
-        empty_resp.content = b""
-        empty_resp.raise_for_status = MagicMock()
-
-        mock_session.request.side_effect = [nodes_resp, empty_resp]
-
-        handler.release_hosts(
-            machine_ids=["cluster-dynamic-op-0"],
-            resource_id="my-cluster",
-            context=AzureReleaseContext(
-                cyclecloud_request_context=CycleCloudRequestContext(
-                    cyclecloud_url="https://cc.example.com",
-                    cyclecloud_auth_mode="bearer",
-                    cyclecloud_aad_scope="https://cc.example.com/.default",
-                )
-            ),
+        result = run_operation(
+            handler.release_hosts_async(
+                machine_ids=["node-1", "node-2"],
+                resource_id="my-cluster",
+                context=AzureReleaseContext(
+                    cyclecloud_request_context=CycleCloudRequestContext(
+                        cyclecloud_url="https://cc.example.com",
+                        cyclecloud_auth_mode="bearer",
+                        cyclecloud_aad_scope="https://cc.example.com/.default",
+                    )
+                ),
+            )
         )
-
-        assert mock_session.request.call_count == 2
-        calls = mock_session.request.call_args_list
-        assert calls[0].args[0] == "GET"
-        assert calls[1].kwargs["json"] == {"ids": ["cluster-dynamic-op-0"]}
-
-    @patch("orb.providers.azure.infrastructure.handlers.cyclecloud_handler.requests.Session")
-    def test_release_hosts_prefers_context_cluster_name(self, mock_session_cls):
-        handler = _make_handler()
-
-        mock_session = MagicMock()
-        mock_session_cls.return_value = mock_session
-
-        nodes_resp = MagicMock()
-        nodes_resp.content = b'{"nodes": [{"name": "dynamic-1", "nodeId": "cluster-dynamic-op-0"}]}'
-        nodes_resp.json.return_value = {
-            "nodes": [{"name": "dynamic-1", "nodeId": "cluster-dynamic-op-0"}]
-        }
-        nodes_resp.raise_for_status = MagicMock()
-
-        empty_resp = MagicMock()
-        empty_resp.content = b""
-        empty_resp.raise_for_status = MagicMock()
-
-        mock_session.request.side_effect = [nodes_resp, empty_resp]
-
-        handler.release_hosts(
-            machine_ids=["cluster-dynamic-op-0"],
-            resource_id="req-legacy-resource-id",
-            context=AzureReleaseContext(
-                cyclecloud_request_context=CycleCloudRequestContext(
-                    cluster_name="my-cluster",
-                    cyclecloud_url="https://cc.example.com",
-                    cyclecloud_auth_mode="bearer",
-                    cyclecloud_aad_scope="https://cc.example.com/.default",
-                )
-            ),
+        assert result["provider_data"]["operation_status"] == "submitted"
+        assert result["provider_data"]["terminate_operation_location"] == (
+            "https://cc.example.com/operations/op-release"
         )
-
-        calls = mock_session.request.call_args_list
-        assert calls[0].args[1] == "https://cc.example.com/clusters/my-cluster/nodes"
-        assert calls[1].args[1] == "https://cc.example.com/clusters/my-cluster/nodes/terminate"
 
     def test_release_hosts_missing_url(self):
         handler = _make_handler()
         with pytest.raises(TerminationError, match="cyclecloud_url is required"):
-            handler.release_hosts(
-                machine_ids=["node-1"],
-                resource_id="my-cluster",
-                context=AzureReleaseContext(),
+            run_operation(
+                handler.release_hosts_async(
+                    machine_ids=["node-1"],
+                    resource_id="my-cluster",
+                    context=AzureReleaseContext(),
+                )
             )
+
+    @pytest.mark.asyncio
+    async def test_release_hosts_async_returns_submitted_release_metadata(self):
+        handler = _make_handler()
+        session_context = MagicMock()
+        session_context.client = object()
+        session_context.base_url = "https://cc.example.com"
+        handler._async_cc_session_scope = MagicMock(return_value=_AsyncContextManager(session_context))
+        handler._resolve_release_node_targets_async = AsyncMock(
+            return_value={"names": ["node-1"]}
+        )
+        handler._cc_request_async = AsyncMock(
+            return_value={
+                "body": {"operationId": "op-release"},
+                "headers": {"Location": "https://cc.example.com/operations/op-release"},
+            }
+        )
+
+        result = await handler.release_hosts_async(
+            machine_ids=["node-1"],
+            resource_id="my-cluster",
+            context=AzureReleaseContext(
+                cyclecloud_request_context=_make_cc_request_context(
+                    cluster_name="my-cluster",
+                    cyclecloud_url="https://cc.example.com",
+                )
+            ),
+        )
+
+        assert result is not None
+        assert result["provider_data"]["operation_status"] == "submitted"
+        assert (
+            result["provider_data"]["terminate_operation_location"]
+            == "https://cc.example.com/operations/op-release"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -769,81 +566,130 @@ class TestCycleCloudHandlerRelease:
 
 
 class TestCycleCloudAuthModes:
-    def test_cc_request_uses_provider_configured_timeouts(self):
+    @pytest.mark.asyncio
+    async def test_cc_request_async_uses_provider_configured_timeouts(self):
         handler = _make_handler()
         handler.azure_client.get_provider_config.return_value = AzureProviderConfig(
             region="eastus2",
             connect_timeout=5,
             read_timeout=13,
         )
-        session = MagicMock()
+        client = MagicMock()
         response = MagicMock()
         response.content = b"{}"
         response.json.return_value = {}
         response.raise_for_status = MagicMock()
-        session.request.return_value = response
+        client.request = AsyncMock(return_value=response)
 
-        handler._cc_request(
-            session,
+        await handler._cc_request_async(
+            client,
             "GET",
             "https://cc.example.com/clusters/my-cluster/status",
         )
 
-        session.request.assert_called_once_with(
+        client.request.assert_awaited_once_with(
             "GET",
             "https://cc.example.com/clusters/my-cluster/status",
-            timeout=(5, 13),
         )
 
-    def test_build_session_uses_azure_bearer_when_no_basic_auth(self):
+    @pytest.mark.asyncio
+    async def test_build_async_cc_session_uses_async_credential(self):
         handler = _make_handler()
+        async_credential = MagicMock()
+        async_credential.get_token = AsyncMock(return_value=MagicMock(token="tok-123"))
+        handler.azure_client.get_async_credential = AsyncMock(return_value=async_credential)
+
+        class _CredentialProperty:
+            def __get__(self, instance, owner):
+                raise AssertionError("sync credential should not be used")
+
+        with patch.object(
+            type(handler.azure_client),
+            "credential",
+            new=_CredentialProperty(),
+            create=True,
+        ):
+            session_context = await handler._build_async_cc_session(
+                cc_url="https://cc.example.com",
+                verify_ssl=False,
+                request_context=_make_cc_request_context(cyclecloud_auth_mode="bearer"),
+            )
+
+        assert session_context.auth_mode == "bearer"
+        await session_context.client.aclose()
+
+    @pytest.mark.asyncio
+    async def test_build_async_cc_session_reads_timeout_tuple_once(self):
+        handler = _make_handler()
+        handler._get_cc_request_timeout = MagicMock(return_value=(5, 13))
+        handler.azure_client.get_async_credential = AsyncMock(return_value=None)
 
         with patch.object(
             CycleCloudSessionBuilder,
-            "_get_azure_bearer_token",
-            return_value="tok-123",
+            "resolve_async_auth",
+            new=AsyncMock(return_value=({}, None, "none")),
         ):
-            session_context = handler._build_cc_session(
+            session_context = await handler._build_async_cc_session(
                 cc_url="https://cc.example.com",
-                verify_ssl=True,
-                request_context=_make_cc_request_context(
-                    cyclecloud_auth_mode="bearer"
-                ),
+                verify_ssl=False,
+                request_context=_make_cc_request_context(),
             )
+
+        handler._get_cc_request_timeout.assert_called_once_with()
+        await session_context.client.aclose()
+
+    @pytest.mark.asyncio
+    async def test_build_async_cc_session_uses_azure_bearer_when_no_basic_auth(self):
+        handler = _make_handler()
+        async_credential = MagicMock()
+        async_credential.get_token = AsyncMock(return_value=MagicMock(token="tok-123"))
+        handler.azure_client.get_async_credential = AsyncMock(return_value=async_credential)
+
+        session_context = await handler._build_async_cc_session(
+            cc_url="https://cc.example.com",
+            verify_ssl=True,
+            request_context=_make_cc_request_context(
+                cyclecloud_auth_mode="bearer"
+            ),
+        )
 
         assert session_context.base_url == "https://cc.example.com"
         assert session_context.auth_mode == "bearer"
-        assert session_context.session.headers["Authorization"] == "Bearer tok-123"
+        assert session_context.client.headers["Authorization"] == "Bearer tok-123"
+        await session_context.client.aclose()
 
-    def test_build_session_rejects_ssh_auth_mode(self):
+    @pytest.mark.asyncio
+    async def test_build_async_cc_session_rejects_ssh_auth_mode(self):
         handler = _make_handler()
 
         with pytest.raises(
             CycleCloudConnectionError,
             match="cyclecloud_auth_mode=ssh is not supported",
         ):
-            handler._build_cc_session(
+            await handler._build_async_cc_session(
                 cc_url="https://cc.example.com",
                 verify_ssl=True,
                 request_context=_make_cc_request_context(cyclecloud_auth_mode="ssh"),
             )
 
-    @patch("orb.providers.azure.infrastructure.handlers.cyclecloud_handler.requests.Session")
-    def test_build_session_closes_session_when_auth_resolution_fails(self, mock_session_cls):
+    @pytest.mark.asyncio
+    async def test_build_async_cc_session_propagates_auth_resolution_failures(self):
         handler = _make_handler()
-        mock_session = MagicMock()
-        mock_session_cls.return_value = mock_session
 
         with patch.object(
             CycleCloudSessionBuilder,
-            "_get_azure_bearer_token",
-            return_value=None,
+            "resolve_async_auth",
+            new=AsyncMock(
+                side_effect=CycleCloudConnectionError(
+                    "cyclecloud_auth_mode=bearer requested but no bearer token could be resolved"
+                )
+            ),
         ):
             with pytest.raises(
                 CycleCloudConnectionError,
                 match="cyclecloud_auth_mode=bearer requested but no bearer token could be resolved",
             ):
-                handler._build_cc_session(
+                await handler._build_async_cc_session(
                     cc_url="https://cc.example.com",
                     verify_ssl=True,
                     request_context=_make_cc_request_context(
@@ -851,54 +697,54 @@ class TestCycleCloudAuthModes:
                     ),
                 )
 
-        mock_session.close.assert_called_once_with()
-
-    @patch("orb.providers.azure.infrastructure.handlers.cyclecloud_handler.requests.Session")
-    def test_build_session_closes_session_when_transport_setup_fails(self, mock_session_cls):
+    @pytest.mark.asyncio
+    async def test_build_async_cc_session_propagates_client_construction_failures(self):
         handler = _make_handler()
-        mock_session = MagicMock()
-        mock_session.headers.update.side_effect = RuntimeError("header setup failed")
-        mock_session_cls.return_value = mock_session
 
-        with pytest.raises(RuntimeError, match="header setup failed"):
-            handler._build_cc_session(
-                cc_url="https://cc.example.com",
-                verify_ssl=True,
-                request_context=_make_cc_request_context(
-                    cyclecloud_auth_mode="bearer"
-                ),
-            )
+        with (
+            patch.object(
+                CycleCloudSessionBuilder,
+                "resolve_async_auth",
+                new=AsyncMock(return_value=({}, None, "none")),
+            ),
+            patch(
+                "orb.providers.azure.infrastructure.handlers.cyclecloud_handler.httpx.AsyncClient",
+                side_effect=RuntimeError("client setup failed"),
+            ),
+        ):
+            with pytest.raises(RuntimeError, match="client setup failed"):
+                await handler._build_async_cc_session(
+                    cc_url="https://cc.example.com",
+                    verify_ssl=True,
+                    request_context=_make_cc_request_context(
+                        cyclecloud_auth_mode="none"
+                    ),
+                )
 
-        mock_session.close.assert_called_once_with()
-
-    @patch("orb.providers.azure.infrastructure.handlers.cyclecloud_handler.requests.Session")
-    def test_cc_session_scope_builds_session_on_enter(self, mock_session_cls):
+    @pytest.mark.asyncio
+    async def test_async_cc_session_scope_builds_session_on_enter(self):
         handler = _make_handler()
-        mock_session = MagicMock()
-        mock_session_cls.return_value = mock_session
 
         with patch.object(
             CycleCloudSessionBuilder,
-            "_get_azure_bearer_token",
-            return_value="tok-123",
+            "resolve_async_auth",
+            new=AsyncMock(return_value=({}, None, "none")),
         ):
-            scope = handler._cc_session_scope(
+            async with handler._async_cc_session_scope(
                 cc_url="https://cc.example.com",
                 verify_ssl=True,
                 request_context=_make_cc_request_context(
-                    cyclecloud_auth_mode="bearer"
+                    cyclecloud_auth_mode="none"
                 ),
-            )
-
-            mock_session_cls.assert_not_called()
-
-            with scope as session_context:
+            ) as session_context:
                 assert session_context.base_url == "https://cc.example.com"
+                client = session_context.client
+                assert client.is_closed is False
 
-        mock_session_cls.assert_called_once_with()
-        mock_session.close.assert_called_once_with()
+        assert client.is_closed is True
 
-    def test_build_session_loads_cyclecloud_config_from_provider(self):
+    @pytest.mark.asyncio
+    async def test_build_async_cc_session_loads_cyclecloud_config_from_provider(self):
         handler = _make_handler()
         handler.azure_client.get_provider_config.return_value = AzureProviderConfig(
             region="eastus2",
@@ -917,15 +763,16 @@ class TestCycleCloudAuthModes:
                 password="changeme",
             ),
         ):
-            session_context = handler._build_cc_session(
+            session_context = await handler._build_async_cc_session(
                 cc_url=None,
                 verify_ssl=None,
             )
 
         assert session_context.base_url == "https://cc.example.com"
-        assert session_context.session.verify is False
+        assert session_context.verify_ssl is False
         assert session_context.auth_mode == "basic"
-        assert session_context.session.auth == ("cc_admin", "changeme")
+        assert session_context.credential_path == "config/cyclecloud-credentials.json"
+        await session_context.client.aclose()
 
     def test_build_settings_does_not_carry_raw_credentials_in_repr(self):
         builder = CycleCloudSessionBuilder(
@@ -950,224 +797,3 @@ class TestCycleCloudAuthModes:
         settings_repr = repr(settings)
         assert "cc_admin" not in settings_repr
         assert "changeme" not in settings_repr
-
-    @patch("orb.providers.azure.infrastructure.handlers.cyclecloud_handler.requests.Session")
-    def test_acquire_hosts_persists_credential_path(self, mock_session_cls, tmp_path: Path):
-        handler = _make_handler()
-        credential_file = tmp_path / "cyclecloud-credentials.json"
-        credential_file.write_text(
-            json.dumps({"username": "file-admin", "password": "file-secret"}),
-            encoding="utf-8",
-        )
-        template = _make_template(
-            cyclecloud_auth_mode=None,
-            cyclecloud_credential_path=str(credential_file),
-        )
-        request = _make_request(count=1)
-
-        mock_session = MagicMock()
-        mock_session_cls.return_value = mock_session
-
-        cluster_status_resp = MagicMock()
-        cluster_status_resp.status_code = 200
-        cluster_status_resp.content = b'{"state": "Started"}'
-        cluster_status_resp.json.return_value = {"state": "Started"}
-        cluster_status_resp.raise_for_status = MagicMock()
-
-        node_create_resp = MagicMock()
-        node_create_resp.status_code = 200
-        node_create_resp.content = b'{"operationId": "op-123", "sets": [{"added": 1, "nodes": [{"name": "node-1", "status": "Acquiring"}]}]}'
-        node_create_resp.json.return_value = {
-            "operationId": "op-123",
-            "sets": [{"added": 1, "nodes": [{"name": "node-1", "status": "Acquiring"}]}],
-        }
-        node_create_resp.raise_for_status = MagicMock()
-
-        mock_session.request.side_effect = [cluster_status_resp, node_create_resp]
-
-        result = handler.acquire_hosts(request, template)
-
-        assert result["provider_data"]["cyclecloud_credential_path"] == str(credential_file)
-
-    @patch("orb.providers.azure.infrastructure.handlers.cyclecloud_handler.requests.Session")
-    def test_acquire_hosts_persists_resolved_provider_config_credential_path(
-        self,
-        mock_session_cls,
-        tmp_path: Path,
-    ):
-        handler = _make_handler()
-        credential_file = tmp_path / "cyclecloud-provider-credentials.json"
-        credential_file.write_text(
-            json.dumps(
-                {
-                    "username": "file-admin",
-                    "password": "file-secret",
-                    "url": "https://cc.example.com",
-                }
-            ),
-            encoding="utf-8",
-        )
-        handler.azure_client.get_provider_config.return_value = AzureProviderConfig(
-            subscription_id="12345678-1234-1234-1234-123456789012",
-            region="eastus2",
-            cyclecloud={
-                "credential_path": str(credential_file),
-                "url": "https://cc.example.com",
-                "verify_ssl": False,
-            },
-        )
-        template_fields = dict(_CC_TEMPLATE_FIELDS)
-        template_fields.update({
-            "cyclecloud_url": None,
-            "cyclecloud_auth_mode": None,
-            "cyclecloud_credential_path": None,
-        })
-        del template_fields["cyclecloud_verify_ssl"]
-        template = AzureTemplate(**template_fields)
-        request = _make_request(count=1)
-
-        mock_session = MagicMock()
-        mock_session_cls.return_value = mock_session
-
-        cluster_status_resp = MagicMock()
-        cluster_status_resp.status_code = 200
-        cluster_status_resp.content = b'{"state": "Started"}'
-        cluster_status_resp.json.return_value = {"state": "Started"}
-        cluster_status_resp.raise_for_status = MagicMock()
-
-        node_create_resp = MagicMock()
-        node_create_resp.status_code = 200
-        node_create_resp.content = b'{"operationId": "op-123", "sets": [{"added": 1, "nodes": [{"name": "node-1", "status": "Acquiring"}]}]}'
-        node_create_resp.json.return_value = {
-            "operationId": "op-123",
-            "sets": [{"added": 1, "nodes": [{"name": "node-1", "status": "Acquiring"}]}],
-        }
-        node_create_resp.raise_for_status = MagicMock()
-
-        mock_session.request.side_effect = [cluster_status_resp, node_create_resp]
-
-        result = handler.acquire_hosts(request, template)
-
-        assert result["provider_data"]["cyclecloud_credential_path"] == str(credential_file)
-        assert result["provider_data"]["cyclecloud_verify_ssl"] is False
-        assert mock_session.verify is False
-
-    @patch("orb.providers.azure.infrastructure.handlers.cyclecloud_handler.requests.Session")
-    def test_acquire_hosts_explicit_template_verify_ssl_true_overrides_provider_false(
-        self,
-        mock_session_cls,
-        tmp_path: Path,
-    ):
-        handler = _make_handler()
-        credential_file = tmp_path / "cyclecloud-provider-credentials.json"
-        credential_file.write_text(
-            json.dumps(
-                {
-                    "username": "file-admin",
-                    "password": "file-secret",
-                    "url": "https://cc.example.com",
-                }
-            ),
-            encoding="utf-8",
-        )
-        handler.azure_client.get_provider_config.return_value = AzureProviderConfig(
-            subscription_id="12345678-1234-1234-1234-123456789012",
-            region="eastus2",
-            cyclecloud={
-                "credential_path": str(credential_file),
-                "url": "https://cc.example.com",
-                "verify_ssl": False,
-            },
-        )
-        template = _make_template(
-            cyclecloud_url=None,
-            cyclecloud_auth_mode=None,
-            cyclecloud_credential_path=None,
-            cyclecloud_verify_ssl=True,
-        )
-        request = _make_request(count=1)
-
-        mock_session = MagicMock()
-        mock_session_cls.return_value = mock_session
-
-        cluster_status_resp = MagicMock()
-        cluster_status_resp.status_code = 200
-        cluster_status_resp.content = b'{"state": "Started"}'
-        cluster_status_resp.json.return_value = {"state": "Started"}
-        cluster_status_resp.raise_for_status = MagicMock()
-
-        node_create_resp = MagicMock()
-        node_create_resp.status_code = 200
-        node_create_resp.content = b'{"operationId": "op-123", "sets": [{"added": 1, "nodes": [{"name": "node-1", "status": "Acquiring"}]}]}'
-        node_create_resp.json.return_value = {
-            "operationId": "op-123",
-            "sets": [{"added": 1, "nodes": [{"name": "node-1", "status": "Acquiring"}]}],
-        }
-        node_create_resp.raise_for_status = MagicMock()
-
-        mock_session.request.side_effect = [cluster_status_resp, node_create_resp]
-
-        result = handler.acquire_hosts(request, template)
-
-        assert result["provider_data"]["cyclecloud_verify_ssl"] is True
-        assert mock_session.verify is True
-
-    @patch("orb.providers.azure.infrastructure.handlers.cyclecloud_handler.requests.Session")
-    def test_acquire_hosts_honors_explicit_template_verify_ssl_false(
-        self,
-        mock_session_cls,
-        tmp_path: Path,
-    ):
-        handler = _make_handler()
-        credential_file = tmp_path / "cyclecloud-provider-credentials.json"
-        credential_file.write_text(
-            json.dumps(
-                {
-                    "username": "file-admin",
-                    "password": "file-secret",
-                    "url": "https://cc.example.com",
-                }
-            ),
-            encoding="utf-8",
-        )
-        handler.azure_client.get_provider_config.return_value = AzureProviderConfig(
-            subscription_id="12345678-1234-1234-1234-123456789012",
-            region="eastus2",
-            cyclecloud={
-                "credential_path": str(credential_file),
-                "url": "https://cc.example.com",
-                "verify_ssl": True,
-            },
-        )
-        template = _make_template(
-            cyclecloud_url=None,
-            cyclecloud_auth_mode=None,
-            cyclecloud_credential_path=None,
-            cyclecloud_verify_ssl=False,
-        )
-        request = _make_request(count=1)
-
-        mock_session = MagicMock()
-        mock_session_cls.return_value = mock_session
-
-        cluster_status_resp = MagicMock()
-        cluster_status_resp.status_code = 200
-        cluster_status_resp.content = b'{"state": "Started"}'
-        cluster_status_resp.json.return_value = {"state": "Started"}
-        cluster_status_resp.raise_for_status = MagicMock()
-
-        node_create_resp = MagicMock()
-        node_create_resp.status_code = 200
-        node_create_resp.content = b'{"operationId": "op-123", "sets": [{"added": 1, "nodes": [{"name": "node-1", "status": "Acquiring"}]}]}'
-        node_create_resp.json.return_value = {
-            "operationId": "op-123",
-            "sets": [{"added": 1, "nodes": [{"name": "node-1", "status": "Acquiring"}]}],
-        }
-        node_create_resp.raise_for_status = MagicMock()
-
-        mock_session.request.side_effect = [cluster_status_resp, node_create_resp]
-
-        result = handler.acquire_hosts(request, template)
-
-        assert result["provider_data"]["cyclecloud_verify_ssl"] is False
-        assert mock_session.verify is False

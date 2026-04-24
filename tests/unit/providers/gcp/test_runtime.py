@@ -42,7 +42,9 @@ class _ComputeClientStub:
         self.fail_start_instance_for: set[str] = set()
         self.fail_stop_instance_for: set[str] = set()
         self.fail_delete_instance_for: set[str] = set()
+        self.fail_create_regional_mig = False
         self.template_operation_result_called = False
+        self.deleted_templates: list[str] = []
 
     class _OperationStub(SimpleNamespace):
         def __init__(self, owner: _ComputeClientStub, **kwargs) -> None:
@@ -76,8 +78,14 @@ class _ComputeClientStub:
         mig_name: str,
         body: object,
     ) -> object:
+        if self.fail_create_regional_mig:
+            raise RuntimeError("regional mig create failed")
         self.created_migs.append((region, mig_name, body))
         return SimpleNamespace(name=f"mig-op-{mig_name}", status="PENDING", target_link=None)
+
+    def delete_instance_template(self, *, template_name: str) -> object:
+        self.deleted_templates.append(template_name)
+        return SimpleNamespace(name=f"delete-template-{template_name}")
 
     def get_image_from_family(self, *, image_project: str, family: str) -> object:
         return SimpleNamespace(
@@ -368,6 +376,42 @@ def test_mig_handler_acquire_hosts_times_out_waiting_for_template_operation() ->
     assert compute_client.created_migs == []
 
 
+def test_mig_handler_rolls_back_instance_template_when_mig_create_fails() -> None:
+    compute_client = _ComputeClientStub()
+    compute_client.fail_create_regional_mig = True
+    handler = GCPManagedInstanceGroupHandler(
+        compute_client=compute_client,
+        config=_config(),
+        logger=MagicMock(),
+    )
+    request = Request.create_new_request(
+        request_type=RequestType.ACQUIRE,
+        template_id="gcp-mig",
+        machine_count=3,
+        provider_type="gcp",
+    )
+    template = GCPTemplate.model_validate(
+        {
+            "template_id": "gcp-mig",
+            "provider_type": "gcp",
+            "provider_api": "MIG",
+            "project_id": "orb-example-12345",
+            "region": "us-central1",
+            "zones": ["us-central1-a", "us-central1-b"],
+            "mig_scope": "regional",
+            "instance_type": "e2-standard-4",
+            "max_instances": 3,
+            "source_image_family": "debian-12",
+            "source_image_project": "debian-cloud",
+        }
+    )
+
+    with pytest.raises(RuntimeError, match="regional mig create failed"):
+        handler.acquire_hosts(request, template)
+
+    assert compute_client.deleted_templates == [compute_client.created_templates[0][0]]
+
+
 def test_provisioning_service_projects_failed_operations_into_fleet_errors() -> None:
     template = GCPTemplate.model_validate(
         {
@@ -604,6 +648,34 @@ async def test_strategy_create_instances_dry_run_short_circuits_handler_calls() 
     assert result.data["provider_api"] == "MIG"
     assert result.data["resource_ids"] == ["dry-run-gcp-mig"]
     assert result.metadata["provider_data"]["dry_run"] is True
+    assert is_dry_run_active() is False
+
+
+@pytest.mark.asyncio
+async def test_strategy_execute_operation_preserves_dry_run_context_inside_to_thread() -> None:
+    strategy = GCPProviderStrategy(config=_config(), logger=MagicMock(), provider_name="gcp-default")
+    assert strategy.initialize() is True
+
+    observed: dict[str, bool] = {}
+
+    def fake_execute(operation):
+        _ = operation
+        observed["dry_run_active"] = is_dry_run_active()
+        return SimpleNamespace(success=True, data={}, metadata={})
+
+    strategy._execute_operation_internal_sync = fake_execute
+
+    result = await strategy.execute_operation(
+        ProviderOperation(
+            operation_type=ProviderOperationType.HEALTH_CHECK,
+            parameters={},
+            context={"dry_run": True},
+        )
+    )
+
+    assert result.success is True
+    assert observed["dry_run_active"] is True
+    assert result.metadata["dry_run"] is True
     assert is_dry_run_active() is False
 
 

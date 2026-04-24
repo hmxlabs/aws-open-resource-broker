@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -195,3 +196,130 @@ async def test_planned_async_submitted_create_is_not_retried():
         "fulfillment_final": True,
     }
     assert provider_selection_port.execute_operation.await_count == 1
+
+
+@pytest.mark.unit
+@pytest.mark.application
+@pytest.mark.asyncio
+async def test_provider_error_with_no_result_data_preserves_error_message():
+    container = MagicMock()
+    scheduler = MagicMock()
+    scheduler.format_template_for_provider.return_value = {
+        "template_id": "azure-single-vm-test",
+        "provider_api": "SingleVM",
+    }
+    container.get.return_value = scheduler
+
+    provider_selection_port = MagicMock()
+    provider_selection_port.execute_operation = AsyncMock(
+        return_value=OperationResult.error_result(
+            "Provisioning failed: insufficient capacity",
+            "PROVISIONING_ADAPTER_ERROR",
+            metadata={"provider_data": {"fleet_errors": [{"error_code": "AllocationFailed"}]}},
+        )
+    )
+
+    provider_config_port = MagicMock()
+    config_port = MagicMock()
+    config_port.get_request_config.return_value = {
+        "fulfillment_max_retries": 3,
+        "fulfillment_timeout_seconds": 300,
+        "fulfillment_batch_size": 1000,
+    }
+
+    service = ProvisioningOrchestrationService(
+        container=container,
+        logger=MagicMock(),
+        provider_selection_port=provider_selection_port,
+        provider_config_port=provider_config_port,
+        config_port=config_port,
+        circuit_breaker_factory=lambda _key: MagicMock(has_state=MagicMock(return_value=False)),
+    )
+
+    request = Request.create_new_request(
+        request_type=RequestType.ACQUIRE,
+        template_id="azure-single-vm-test",
+        machine_count=1,
+        provider_type="azure",
+        provider_name="azure-default",
+        request_id="req-12345678-1234-1234-1234-123456789012",
+    )
+    template = MagicMock()
+    template.template_id = "azure-single-vm-test"
+    selection_result = ProviderSelectionResult(
+        provider_type="azure",
+        provider_name="azure-default",
+        selection_reason="test",
+    )
+
+    result = await service.execute_provisioning(template, request, selection_result)
+
+    assert result.success is False
+    assert result.error_message == "Provisioning failed: insufficient capacity"
+    assert result.provider_data == {
+        "fleet_errors": [{"error_code": "AllocationFailed"}]
+    }
+
+
+@pytest.mark.unit
+@pytest.mark.application
+@pytest.mark.asyncio
+async def test_execute_provisioning_times_out_hung_provider_dispatch():
+    container = MagicMock()
+    scheduler = MagicMock()
+    scheduler.format_template_for_provider.return_value = {
+        "template_id": "azure-single-vm-test",
+        "provider_api": "SingleVM",
+    }
+    container.get.return_value = scheduler
+
+    provider_selection_port = MagicMock()
+
+    async def _hang(*_args, **_kwargs):
+        await asyncio.sleep(1)
+
+    provider_selection_port.execute_operation = AsyncMock(side_effect=_hang)
+
+    provider_config_port = MagicMock()
+    config_port = MagicMock()
+    config_port.get_request_config.return_value = {
+        "fulfillment_max_retries": 3,
+        "fulfillment_timeout_seconds": 0.01,
+        "fulfillment_batch_size": 1000,
+    }
+    logger = MagicMock()
+
+    service = ProvisioningOrchestrationService(
+        container=container,
+        logger=logger,
+        provider_selection_port=provider_selection_port,
+        provider_config_port=provider_config_port,
+        config_port=config_port,
+        circuit_breaker_factory=lambda _key: MagicMock(has_state=MagicMock(return_value=False)),
+    )
+
+    request = Request.create_new_request(
+        request_type=RequestType.ACQUIRE,
+        template_id="azure-single-vm-test",
+        machine_count=1,
+        provider_type="azure",
+        provider_name="azure-default",
+        request_id="req-12345678-1234-1234-1234-123456789012",
+    )
+    template = MagicMock()
+    selection_result = ProviderSelectionResult(
+        provider_type="azure",
+        provider_name="azure-default",
+        selection_reason="test",
+    )
+
+    result = await service.execute_provisioning(template, request, selection_result)
+
+    assert result.success is False
+    assert result.error_message == (
+        "Provisioning operation timed out; provider submission status is unknown"
+    )
+    assert result.provider_data["operation_status"] == "timeout"
+    assert result.provider_data["submission_status"] == "unknown"
+    assert result.provider_data["timed_out"] is True
+    logger.warning.assert_called()

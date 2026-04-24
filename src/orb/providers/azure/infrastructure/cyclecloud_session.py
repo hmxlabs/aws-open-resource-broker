@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
-import requests
+import httpx
 
 
 def _coerce_optional_bool(value: Any) -> Optional[bool]:
@@ -144,19 +144,21 @@ class CycleCloudRequestContext:
 
 
 @dataclass(frozen=True)
-class CycleCloudSessionContext:
-    """Resolved CycleCloud HTTP session plus ORB-specific connection metadata."""
+class AsyncCycleCloudSessionContext:
+    """Resolved async CycleCloud HTTP session plus ORB-specific connection metadata."""
 
-    session: requests.Session = field(repr=False)
+    client: httpx.AsyncClient = field(repr=False)
     base_url: str
     auth_mode: Optional[str]
     credential_path: Optional[str]
+    verify_ssl: bool
 
     def __repr__(self) -> str:
-        """Return a safe repr that avoids leaking session internals or auth material."""
+        """Return a safe repr that avoids leaking client internals or auth material."""
         return (
-            "CycleCloudSessionContext("
+            "AsyncCycleCloudSessionContext("
             f"base_url={self.base_url!r}, "
             f"auth_mode={self.auth_mode!r}, "
-            f"credential_path={self.credential_path!r})"
+            f"credential_path={self.credential_path!r}, "
+            f"verify_ssl={self.verify_ssl!r})"
         )

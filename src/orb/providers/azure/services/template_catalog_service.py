@@ -2,10 +2,22 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Protocol, cast
 
 from orb.domain.base.ports import LoggingPort
 from orb.providers.azure.domain.template.value_objects import AzureProviderApi
+
+
+class SchedulerTemplateStrategy(Protocol):
+    """Structural subset used from the active scheduler strategy."""
+
+    def get_template_paths(self) -> list[str]:
+        """Return configured template search paths."""
+        ...
+
+    def load_templates_from_path(self, path: str) -> list[dict[str, Any]]:
+        """Load templates from one scheduler-managed path."""
+        ...
 
 
 class AzureTemplateCatalogService:
@@ -20,7 +32,10 @@ class AzureTemplateCatalogService:
             from orb.infrastructure.scheduler.registry import get_scheduler_registry
 
             scheduler_registry = get_scheduler_registry()
-            scheduler_strategy = scheduler_registry.get_active_strategy()
+            scheduler_strategy = cast(
+                SchedulerTemplateStrategy | None,
+                scheduler_registry.get_active_strategy(),  # type: ignore[attr-defined]
+            )
 
             if scheduler_strategy:
                 templates: list[dict[str, Any]] = []

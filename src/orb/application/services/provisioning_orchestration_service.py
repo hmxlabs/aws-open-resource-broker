@@ -1,5 +1,6 @@
 """Service for orchestrating provider provisioning operations."""
 
+import asyncio
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Callable
@@ -104,8 +105,37 @@ class ProvisioningOrchestrationService:
 
             try:
                 last_result = await self._dispatch_single_attempt(
-                    template, request, selection_result, attempt_count
+                    template,
+                    request,
+                    selection_result,
+                    attempt_count,
+                    operation_timeout_seconds=max(timeout_seconds - elapsed, 0.0),
                 )
+            except TimeoutError:
+                self._logger.warning(
+                    "Provisioning operation timed out after %.1fs for request %s",
+                    timeout_seconds,
+                    request.request_id,
+                )
+                last_result = ProvisioningResult(
+                    success=False,
+                    resource_ids=[],
+                    machine_ids=[],
+                    instances=[],
+                    provider_data={
+                        "operation_status": "timeout",
+                        "submission_status": "unknown",
+                        "timed_out": True,
+                        "timeout_seconds": timeout_seconds,
+                    },
+                    error_message=(
+                        "Provisioning operation timed out; provider submission status is unknown"
+                    ),
+                    fulfilled_count=0,
+                    is_final=True,
+                )
+                accumulated_provider_data.update(last_result.provider_data)
+                break
             except Exception as e:
                 if not isinstance(e, CircuitBreakerOpenError):
                     raise
@@ -168,7 +198,7 @@ class ProvisioningOrchestrationService:
                     request.requested_count,
                     remaining,
                 )
-                request, persist_ok = self._persist_acquiring(request)
+                request, persist_ok = await self._persist_acquiring(request)
                 if not persist_ok:
                     self._logger.warning(
                         "ACQUIRING persist failed for request %s on attempt %d — "
@@ -194,7 +224,11 @@ class ProvisioningOrchestrationService:
             is_final=last_result.is_final if last_result else True,
         )
 
-    def _persist_acquiring(self, request: Request) -> tuple[Request, bool]:
+    async def _persist_acquiring(self, request: Request) -> tuple[Request, bool]:
+        """Persist ACQUIRING status off the event loop between retry attempts."""
+        return await asyncio.to_thread(self._persist_acquiring_sync, request)
+
+    def _persist_acquiring_sync(self, request: Request) -> tuple[Request, bool]:
         """Persist request with ACQUIRING status between retry attempts.
 
         Returns:
@@ -249,6 +283,7 @@ class ProvisioningOrchestrationService:
         request: Request,
         selection_result: ProviderSelectionResult,
         count: int,
+        operation_timeout_seconds: float,
     ) -> ProvisioningResult:
         """Dispatch a single provisioning attempt for `count` instances."""
         try:
@@ -277,18 +312,20 @@ class ProvisioningOrchestrationService:
 
             self._provider_config_port.get_provider_instance_config(selection_result.provider_name)
 
-            result = await self._provider_selection_port.execute_operation(
-                selection_result.provider_name, operation
-            )
+            async with asyncio.timeout(operation_timeout_seconds):
+                result = await self._provider_selection_port.execute_operation(
+                    selection_result.provider_name, operation
+                )
+            result_data = result.data if isinstance(result.data, dict) else {}
 
             if result.success:
                 self._logger.debug("Provider result.data: %s", result.data)
                 self._logger.debug("Provider result.metadata: %s", result.metadata)
 
-                resource_ids = result.data.get("resource_ids", [])
-                instances = result.data.get("instances", [])
+                resource_ids = result_data.get("resource_ids", [])
+                instances = result_data.get("instances", [])
 
-                provider_data = result.data.get("provider_data", None) or (
+                provider_data = result_data.get("provider_data", None) or (
                     result.metadata or {}
                 ).get("provider_data", {})
                 fulfillment_final = provider_data.get("fulfillment_final", False)
@@ -298,7 +335,7 @@ class ProvisioningOrchestrationService:
                 return ProvisioningResult(
                     success=True,
                     resource_ids=resource_ids,
-                    machine_ids=result.data.get("instance_ids", []),
+                    machine_ids=result_data.get("instance_ids", []),
                     instances=instances,
                     provider_data=provider_data,
                     fulfilled_count=len(instances),
@@ -306,7 +343,7 @@ class ProvisioningOrchestrationService:
                     or fulfillment_final,
                 )
             else:
-                provider_data = result.data.get("provider_data", None) or (
+                provider_data = result_data.get("provider_data", None) or (
                     result.metadata or {}
                 ).get("provider_data", {})
                 return ProvisioningResult(
@@ -320,6 +357,9 @@ class ProvisioningOrchestrationService:
 
         except CircuitBreakerOpenError:
             raise  # do not swallow — let it propagate to execute_provisioning
+
+        except TimeoutError:
+            raise
 
         except QuotaError as e:
             self._logger.error(

@@ -198,15 +198,16 @@ class AzureProvisioningService:
             },
         )
 
-    def execute_create_handler(
+    async def execute_create_handler_async(
         self,
         *,
         create_context: CreateOperationContext,
         request: Request,
     ) -> ProviderResult:
-        """Execute the handler's acquire_hosts method and normalize the result."""
-        handler_result = create_context.handler.acquire_hosts(
-            request, create_context.azure_template
+        """Execute the handler acquire call through the async Azure handler contract."""
+        handler_result = await create_context.handler.acquire_hosts_async(
+            request,
+            create_context.azure_template,
         )
         return self.normalize_handler_create_result(
             handler_result,

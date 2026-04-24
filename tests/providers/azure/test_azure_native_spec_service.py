@@ -9,24 +9,14 @@ from orb.application.services.native_spec_service import NativeSpecService
 from orb.config.schemas.provider_strategy_schema import ProviderConfig
 from orb.domain.request.aggregate import Request
 from orb.domain.request.request_types import RequestType
-from orb.providers.azure.domain.template.azure_template_aggregate import AzureTemplate
 from orb.providers.azure.infrastructure.services.azure_native_spec_service import AzureNativeSpecService
+from tests.providers.azure.strategy_test_support import make_azure_template
 
 
 def _make_template(**overrides):
-    return AzureTemplate(
+    return make_azure_template(
         template_id="azure-native-spec-test",
         provider_api="VMSS",
-        vm_size="Standard_D4s_v5",
-        resource_group="test-rg",
-        location="eastus2",
-        ssh_public_keys=["ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQC7 test@host"],
-        image={
-            "publisher": "Canonical",
-            "offer": "0001-com-ubuntu-server-jammy",
-            "sku": "22_04-lts-gen2",
-            "version": "latest",
-        },
         **overrides,
     )
 

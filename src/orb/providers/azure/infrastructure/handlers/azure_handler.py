@@ -1,10 +1,8 @@
 """Azure handler base class.
 
-All Azure infrastructure handlers extend this ABC, providing a common constructor
-contract and the three core operations
-(acquire, status, release) that the provisioning adapter and strategy call.
+All Azure infrastructure handlers extend this ABC and expose the native async
+create, status, and release operations used by Azure services.
 """
-
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any, NotRequired, Optional, TypeAlias, TypedDict
@@ -13,6 +11,10 @@ from orb.domain.base.dependency_injection import injectable
 from orb.domain.base.ports import LoggingPort
 from orb.domain.request.aggregate import Request
 from orb.providers.azure.domain.template.azure_template_aggregate import AzureTemplate
+from orb.providers.azure.exceptions.azure_exceptions import (
+    AzureValidationError,
+    TerminationError,
+)
 from orb.providers.azure.infrastructure.azure_client import AzureClient
 from orb.providers.azure.infrastructure.cyclecloud_session import CycleCloudRequestContext
 
@@ -32,6 +34,7 @@ class AzureStatusProviderData(TypedDict, total=False):
 
     resource_id: str
     vm_name: str
+    vmss_name: str
     vm_id: str
     vmss_instance_id: str
     node_id: str
@@ -42,9 +45,9 @@ class AzureStatusProviderData(TypedDict, total=False):
     hostname: str
     resource_group: str
     location: str
-    nic_id: str
-    nic_name: str
-    vnet_id: str
+    nic_id: str | None
+    nic_name: str | None
+    vnet_id: str | None
     fleet_errors: list[dict[str, Any]]
 
 
@@ -107,6 +110,7 @@ class AzureVmssReleaseProviderData(TypedDict, total=False):
     vmss_name: str
     operation_status: str
     submitted_deletions: list[AzureSubmittedDeletion]
+    failed_deletions: list[AzureSubmittedDeletion]
     resolved_instance_ids: list[str]
     pending_resource_cleanup: AzurePendingResourceCleanupMetadata
 
@@ -145,7 +149,7 @@ class AzureHandler(ABC):
     """Abstract base handler for Azure provisioning operations.
 
     Concrete implementations (``VMSSHandler``, ``SingleVMHandler``)
-    implement the three abstract methods for their specific Azure API surface.
+    implement async methods for their specific Azure API surface.
     """
 
     def __init__(
@@ -156,41 +160,71 @@ class AzureHandler(ABC):
         self.azure_client = azure_client
         self._logger = logger
 
+    def _resolve_release_resource_group(
+        self,
+        *,
+        machine_ids: list[str],
+        context: Optional[AzureReleaseContext],
+    ) -> str:
+        """Resolve the resource group for Azure termination submissions."""
+        release_context = context or AzureReleaseContext()
+        resource_group = release_context.resource_group or self.azure_client.resource_group
+        if resource_group:
+            return resource_group
+        raise TerminationError(
+            "resource_group is required for release_hosts",
+            resource_ids=machine_ids,
+        )
+
+    @staticmethod
+    def _resolve_subnet_id(template: AzureTemplate) -> str | None:
+        """Return the subnet ARM ID from network_config or subnet_ids."""
+        if template.network_config and template.network_config.subnet_id:
+            return template.network_config.subnet_id
+
+        subnet_ids = [
+            subnet_id
+            for subnet_id in template.subnet_ids
+            if subnet_id and subnet_id != "default-subnet"
+        ]
+        if len(subnet_ids) > 1:
+            raise AzureValidationError(
+                "Azure templates support a single subnet for VM network interfaces; "
+                "set network_config.subnet_id or provide exactly one subnet_id",
+                details={
+                    "template_id": template.template_id,
+                    "subnet_ids": subnet_ids,
+                },
+                error_code="InvalidParameter",
+            )
+        if subnet_ids:
+            return subnet_ids[0]
+        return None
+
     # ------------------------------------------------------------------
     # Core operations
     # ------------------------------------------------------------------
 
     @abstractmethod
-    def acquire_hosts(
+    async def acquire_hosts_async(
         self, request: Request, template: AzureTemplate
     ) -> AzureAcquireHostsResult:
-        """Provision resources.
-
-        Returns:
-            ``AzureAcquireHostsResult`` with normalized create-operation fields.
-        """
+        """Provision resources without blocking the event loop."""
 
     @abstractmethod
-    def check_hosts_status(self, request: Request) -> list[AzureHandlerStatusResult]:
-        """Return list of instance detail dicts for ``request.resource_ids``.
-
-        Each dict must include at minimum:
-            instance_id, status, private_ip, public_ip,
-            launch_time, instance_type, subnet_id, vpc_id
-        """
+    async def check_hosts_status_async(
+        self, request: Request
+    ) -> list[AzureHandlerStatusResult]:
+        """Return instance details without blocking the event loop."""
 
     @abstractmethod
-    def release_hosts(
+    async def release_hosts_async(
         self,
         machine_ids: list[str],
         resource_id: str,
         context: Optional[AzureReleaseContext] = None,
     ) -> Optional[AzureReleaseHostsResult]:
-        """Delete / deallocate cloud resources and optionally return provider metadata."""
-
-    # ------------------------------------------------------------------
-    # Optional helpers
-    # ------------------------------------------------------------------
+        """Delete / deallocate cloud resources without blocking the event loop."""
 
     @classmethod
     def get_example_templates(cls) -> list[dict[str, Any]]:
