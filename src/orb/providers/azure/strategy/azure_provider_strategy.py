@@ -458,7 +458,7 @@ class AzureProviderStrategy(ProviderStrategy):
 
     def check_health(self) -> ProviderHealthStatus:
         """Check Azure connectivity and return the current health status."""
-        return self._health_check_service.check_health(self.azure_client)
+        return self._health_check_service.check_health()
 
     def get_available_credential_sources(self) -> list[dict]:
         """Return Azure credential source options."""
@@ -527,7 +527,7 @@ class AzureProviderStrategy(ProviderStrategy):
     def test_credentials(self, credential_source: Optional[str] = None, **kwargs) -> dict:
         """Validate Azure credentials by performing a health check."""
         del credential_source
-        health = self._health_check_service.check_health(self.azure_client)
+        health = self._health_check_service.check_health()
         if health.is_healthy:
             return {"success": True}
         return {
@@ -984,7 +984,7 @@ class AzureProviderStrategy(ProviderStrategy):
         self, operation: ProviderOperation
     ) -> ProviderResult:
         _ = operation
-        health_status = await self._health_check_service.check_health_async(self.azure_client)
+        health_status = await self._health_check_service.check_health_async()
         return ProviderResult.success_result(
             {
                 "is_healthy": health_status.is_healthy,

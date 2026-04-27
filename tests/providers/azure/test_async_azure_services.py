@@ -1,7 +1,6 @@
 """Direct async coverage for Azure async service entry points."""
 
 import asyncio
-import builtins
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -506,39 +505,41 @@ async def test_describe_resource_instances_async_warns_when_vmss_handler_lacks_e
 
 
 @pytest.mark.asyncio
-async def test_health_check_async_uses_async_credential_validation():
+async def test_health_check_async_uses_short_lived_async_token_provider(monkeypatch):
     config = MagicMock()
     config.region = "eastus2"
+    config.client_id = "client-id"
     service = AzureHealthCheckService(config=config, logger=MagicMock())
-    azure_client = MagicMock()
-    azure_client.validate_credentials_async = AsyncMock(return_value=True)
+    provider = MagicMock()
+    provider.get_access_token = AsyncMock(return_value="token")
+    provider_cls = MagicMock(return_value=provider)
+    monkeypatch.setattr(
+        "orb.providers.azure.services.health_check_service.AsyncDefaultAzureAccessTokenProvider",
+        provider_cls,
+    )
 
-    result = await service.check_health_async(azure_client)
+    result = await service.check_health_async()
 
     assert result.is_healthy is True
-    azure_client.validate_credentials_async.assert_awaited_once()
+    provider_cls.assert_called_once_with(client_id="client-id", logger=service._logger)
+    provider.get_access_token.assert_awaited_once_with("https://management.azure.com/.default")
 
 
-def test_health_check_sync_uses_client_credential_validation_bridge():
+def test_health_check_sync_uses_short_lived_sync_token_provider(monkeypatch):
     config = MagicMock()
     config.region = "eastus2"
+    config.client_id = "client-id"
     service = AzureHealthCheckService(config=config, logger=MagicMock())
-    azure_client = MagicMock()
-    azure_client.validate_credentials_async = AsyncMock(return_value=True)
+    provider = MagicMock()
+    provider.get_access_token.return_value = "token"
+    provider_cls = MagicMock(return_value=provider)
+    monkeypatch.setattr(
+        "orb.providers.azure.services.health_check_service.DefaultAzureAccessTokenProvider",
+        provider_cls,
+    )
 
-    result = service.check_health(azure_client)
+    result = service.check_health()
 
     assert result.is_healthy is True
-    azure_client.validate_credentials_async.assert_awaited_once()
-
-
-@pytest.mark.asyncio
-async def test_health_check_sync_bridge_raises_exception_group_from_thread():
-    async def failing_validation():
-        raise RuntimeError("credential boom")
-
-    with pytest.raises(builtins.ExceptionGroup) as exc_info:
-        AzureHealthCheckService._run_coro_sync(failing_validation())
-
-    assert len(exc_info.value.exceptions) == 1
-    assert isinstance(exc_info.value.exceptions[0], RuntimeError)
+    provider_cls.assert_called_once_with(client_id="client-id", logger=service._logger)
+    provider.get_access_token.assert_called_once_with("https://management.azure.com/.default")
