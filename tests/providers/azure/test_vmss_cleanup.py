@@ -114,6 +114,7 @@ async def test_vmss_cleanup_coordinator_reconciles_delete_retry_state():
                 "delete_submission_semantics": "best_effort_without_reverification",
                 "delete_submitted": False,
                 "delete_retry_pending": True,
+                "delete_retry_count": 1,
                 "last_delete_error": "delete blocked",
             }
         ],
@@ -181,11 +182,75 @@ async def test_vmss_cleanup_coordinator_recovers_delete_retry_state_after_record
                 "delete_submission_semantics": "best_effort_without_reverification",
                 "delete_submitted": False,
                 "delete_retry_pending": True,
+                "delete_retry_count": 1,
                 "last_delete_error": "delete blocked",
             }
         ],
     }
     logger.warning.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_vmss_cleanup_coordinator_marks_terminal_failure_after_retry_exhaustion():
+    logger = MagicMock()
+    begin_delete_vmss = AsyncMock(side_effect=RuntimeError("delete blocked"))
+    coordinator = VmssCleanupCoordinator(
+        logger=logger,
+        get_vmss_member_count=AsyncMock(return_value=0),
+        vmss_exists=AsyncMock(return_value=True),
+        begin_delete_vmss=begin_delete_vmss,
+        max_delete_retries=2,
+    )
+
+    coordinator.record(
+        {
+            "provider_data": {
+                "pending_resource_cleanup": {
+                    "resource_group": "test-rg",
+                    "vmss_name": "vmss-demo",
+                    "machine_ids": ["vm-a"],
+                    "delete_vmss_when_empty": True,
+                }
+            }
+        }
+    )
+
+    for _ in range(2):
+        await coordinator.reconcile(
+            resource_group="test-rg",
+            resource_ids=["vmss-demo"],
+            observed_ids=set(),
+        )
+
+    await coordinator.reconcile(
+        resource_group="test-rg",
+        resource_ids=["vmss-demo"],
+        observed_ids=set(),
+    )
+
+    assert begin_delete_vmss.await_count == 2
+    assert coordinator.status_metadata(
+        resource_group="test-rg",
+        resource_ids=["vmss-demo"],
+    ) == {
+        "termination_follow_up_pending": False,
+        "termination_follow_up_failed": True,
+        "termination_follow_up_details": [
+            {
+                "resource_group": "test-rg",
+                "vmss_name": "vmss-demo",
+                "machine_ids": ["vm-a"],
+                "delete_vmss_when_empty": True,
+                "member_delete_submitted": True,
+                "delete_submission_semantics": "best_effort_without_reverification",
+                "delete_submitted": False,
+                "delete_retry_pending": False,
+                "delete_retry_count": 2,
+                "delete_retry_exhausted": True,
+                "last_delete_error": "delete blocked",
+            }
+        ],
+    }
 
 
 def test_vmss_cleanup_coordinator_restores_pending_state_from_request_metadata():

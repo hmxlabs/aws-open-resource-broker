@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from threading import RLock
-from typing import Mapping, Optional, Protocol, TypeAlias, Any
+from typing import Mapping, Optional, Protocol, SupportsInt, TypeAlias, Any, cast
 
 
 class _VmssCleanupLogger(Protocol):
@@ -19,6 +19,12 @@ VmssExists: TypeAlias = Callable[..., Awaitable[Optional[bool]]]
 BeginDeleteVmss: TypeAlias = Callable[..., Awaitable[None]]
 
 
+# VMSS empty-delete follow-up is driven by request-status polling. Keep this
+# patient because Azure can report empty membership before the scale set accepts
+# a delete submission.
+DEFAULT_VMSS_DELETE_FOLLOW_UP_RETRIES = 24
+
+
 @dataclass
 class PendingVmssCleanup:
     """Durable cleanup intent and submission state for one VMSS."""
@@ -30,6 +36,8 @@ class PendingVmssCleanup:
     member_delete_submitted: bool = False
     delete_submitted: bool = False
     delete_retry_pending: bool = False
+    delete_retry_count: int = 0
+    delete_retry_exhausted: bool = False
     last_delete_error: Optional[str] = None
     delete_submission_semantics: str = "best_effort_without_reverification"
 
@@ -51,6 +59,10 @@ class PendingVmssCleanup:
             return None
         if not isinstance(raw_machine_ids, list):
             return None
+        delete_retry_count = max(
+            0,
+            int(cast(SupportsInt, metadata.get("delete_retry_count", 0))),
+        )
 
         machine_ids: list[str] = []
         for machine_id in raw_machine_ids:
@@ -66,6 +78,8 @@ class PendingVmssCleanup:
             member_delete_submitted=bool(metadata.get("member_delete_submitted", True)),
             delete_submitted=bool(metadata.get("delete_submitted", False)),
             delete_retry_pending=bool(metadata.get("delete_retry_pending", False)),
+            delete_retry_count=delete_retry_count,
+            delete_retry_exhausted=bool(metadata.get("delete_retry_exhausted", False)),
             last_delete_error=(
                 None
                 if metadata.get("last_delete_error") in (None, "")
@@ -87,6 +101,8 @@ class PendingVmssCleanup:
         member_delete_submitted: bool = False,
         delete_submitted: bool = False,
         delete_retry_pending: bool = False,
+        delete_retry_count: int = 0,
+        delete_retry_exhausted: bool = False,
         last_delete_error: Optional[str] = None,
     ) -> PendingVmssCleanup:
         """Create a new PendingVmssCleanup instance with the given parameters.
@@ -99,6 +115,8 @@ class PendingVmssCleanup:
             member_delete_submitted (bool): Whether member delete has been submitted.
             delete_submitted (bool): Whether delete has been submitted.
             delete_retry_pending (bool): Whether a retry is pending.
+            delete_retry_count (int): Number of failed follow-up delete retry attempts.
+            delete_retry_exhausted (bool): Whether follow-up delete retries are exhausted.
             last_delete_error (Optional[str]): Last error message, if any.
         Returns:
             PendingVmssCleanup: The constructed instance.
@@ -111,6 +129,8 @@ class PendingVmssCleanup:
             member_delete_submitted=member_delete_submitted,
             delete_submitted=delete_submitted,
             delete_retry_pending=delete_retry_pending,
+            delete_retry_count=max(0, int(delete_retry_count)),
+            delete_retry_exhausted=delete_retry_exhausted,
             last_delete_error=(
                 None if last_delete_error in (None, "") else str(last_delete_error)
             ),
@@ -136,7 +156,11 @@ class PendingVmssCleanup:
             delete_vmss_when_empty=self.delete_vmss_when_empty or other.delete_vmss_when_empty,
             member_delete_submitted=self.member_delete_submitted or other.member_delete_submitted,
             delete_submitted=self.delete_submitted or other.delete_submitted,
-            delete_retry_pending=self.delete_retry_pending or other.delete_retry_pending,
+            delete_retry_pending=(
+                self.delete_retry_pending or other.delete_retry_pending
+            ) and not (self.delete_retry_exhausted or other.delete_retry_exhausted),
+            delete_retry_count=max(self.delete_retry_count, other.delete_retry_count),
+            delete_retry_exhausted=self.delete_retry_exhausted or other.delete_retry_exhausted,
             last_delete_error=other.last_delete_error or self.last_delete_error,
             delete_submission_semantics=other.delete_submission_semantics
             or self.delete_submission_semantics,
@@ -148,14 +172,17 @@ class PendingVmssCleanup:
         self.delete_retry_pending = False
         self.last_delete_error = None
 
-    def mark_delete_retry_pending(self, exc: Exception) -> None:
+    def mark_delete_retry_pending(self, exc: Exception, *, max_delete_retries: int) -> None:
         """Mark this cleanup as needing a retry, recording the exception message.
 
         Args:
             exc (Exception): The exception that caused the retry.
+            max_delete_retries (int): Maximum follow-up delete retries before terminal failure.
         """
         self.delete_submitted = False
-        self.delete_retry_pending = True
+        self.delete_retry_count += 1
+        self.delete_retry_exhausted = self.delete_retry_count >= max_delete_retries
+        self.delete_retry_pending = not self.delete_retry_exhausted
         self.last_delete_error = str(exc)
 
     def to_metadata(self) -> dict[str, Any]:
@@ -174,6 +201,10 @@ class PendingVmssCleanup:
             "delete_submitted": self.delete_submitted,
             "delete_retry_pending": self.delete_retry_pending,
         }
+        if self.delete_retry_count:
+            metadata["delete_retry_count"] = self.delete_retry_count
+        if self.delete_retry_exhausted:
+            metadata["delete_retry_exhausted"] = True
         if self.last_delete_error not in (None, ""):
             metadata["last_delete_error"] = self.last_delete_error
         return metadata
@@ -197,12 +228,14 @@ class VmssCleanupCoordinator:
         get_vmss_member_count: GetVmssMemberCount,
         vmss_exists: VmssExists,
         begin_delete_vmss: BeginDeleteVmss,
+        max_delete_retries: int = DEFAULT_VMSS_DELETE_FOLLOW_UP_RETRIES,
     ) -> None:
         """Initialize the coordinator with necessary dependencies."""
         self._logger = logger
         self._get_vmss_member_count = get_vmss_member_count
         self._vmss_exists = vmss_exists
         self._begin_delete_vmss = begin_delete_vmss
+        self._max_delete_retries = max(1, int(max_delete_retries))
         self._pending_cleanups: dict[tuple[str, str], PendingVmssCleanup] = {}
         self._lock = RLock()
 
@@ -290,6 +323,7 @@ class VmssCleanupCoordinator:
             dict[str, Any]: Metadata about pending cleanups.
         """
         follow_up_details: list[dict[str, Any]] = []
+        follow_up_failed = False
 
         if resource_group:
             with self._lock:
@@ -297,11 +331,15 @@ class VmssCleanupCoordinator:
                     pending = self._pending_cleanups.get((str(resource_group), str(resource_id)))
                     if pending is not None:
                         follow_up_details.append(pending.to_status_detail())
+                        follow_up_failed = follow_up_failed or pending.delete_retry_exhausted
 
-        return {
-            "termination_follow_up_pending": bool(follow_up_details),
+        metadata: dict[str, Any] = {
+            "termination_follow_up_pending": bool(follow_up_details) and not follow_up_failed,
             "termination_follow_up_details": follow_up_details,
         }
+        if follow_up_failed:
+            metadata["termination_follow_up_failed"] = True
+        return metadata
 
     async def reconcile(
         self,
@@ -382,6 +420,9 @@ class VmssCleanupCoordinator:
             )
             return
 
+        if pending.delete_retry_exhausted:
+            return
+
         if requested_ids & observed_ids:
             return
 
@@ -393,14 +434,29 @@ class VmssCleanupCoordinator:
                     self._pending_cleanups.pop(key, None)
         except Exception as exc:
             with self._lock:
-                if self._pending_cleanups.get(key) is pending:
-                    pending.mark_delete_retry_pending(exc)
+                current = self._pending_cleanups.get(key)
+                if current is not None:
+                    current.mark_delete_retry_pending(
+                        exc,
+                        max_delete_retries=self._max_delete_retries,
+                    )
+                    exhausted = current.delete_retry_exhausted
+                else:
+                    exhausted = False
             self._logger.warning(
                 "Failed to clean up pending VMSS '%s' in '%s': %s",
                 vmss_name,
                 resource_group,
                 exc,
             )
+            if exhausted:
+                self._logger.warning(
+                    "VMSS cleanup delete retries exhausted for '%s' in '%s' "
+                    "after %d failed follow-up attempt(s)",
+                    vmss_name,
+                    resource_group,
+                    self._max_delete_retries,
+                )
 
     async def _clear_if_vmss_is_gone(
         self,
@@ -448,17 +504,12 @@ class VmssCleanupCoordinator:
                 return False
             if current.delete_submitted:
                 return True
+            if current.delete_retry_exhausted:
+                return True
             current.mark_delete_submitted()
 
-        try:
-            await self._begin_delete_vmss(
-                resource_group=pending.resource_group,
-                vmss_name=pending.vmss_name,
-            )
-            return True
-        except Exception as exc:
-            with self._lock:
-                current = self._pending_cleanups.get(key)
-                if current is not None:
-                    current.mark_delete_retry_pending(exc)
-            raise
+        await self._begin_delete_vmss(
+            resource_group=pending.resource_group,
+            vmss_name=pending.vmss_name,
+        )
+        return True

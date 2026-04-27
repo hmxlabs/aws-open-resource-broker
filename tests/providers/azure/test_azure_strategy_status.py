@@ -693,6 +693,7 @@ class TestDescribeResourceInstances:
                 "delete_submitted": False,
                 "delete_retry_pending": True,
                 "delete_submission_semantics": "best_effort_without_reverification",
+                "delete_retry_count": 1,
                 "last_delete_error": "delete still blocked",
             }
         ]

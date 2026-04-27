@@ -30,15 +30,23 @@ class RequestStatusService:
         """Determine request status from machine states."""
         try:
             db_machine_count = len(db_machines)
-            follow_up_pending_message = (
-                "Return in progress: awaiting provider follow-up cleanup"
-            )
-            termination_follow_up_pending = bool(
-                provider_metadata.get("termination_follow_up_pending", False)
-            )
 
             # Determine new status based on request type
             if request.request_type.value == "return":
+                follow_up_pending_message = (
+                    "Return in progress: awaiting provider follow-up cleanup"
+                )
+                if provider_metadata.get("termination_follow_up_failed"):
+                    details = provider_metadata.get("termination_follow_up_details", [{}])
+                    error = details[0].get("last_delete_error") if details else None
+                    message = "Return request failed: provider follow-up cleanup failed"
+                    if error:
+                        message = f"{message}: {error}"
+                    return RequestStatus.FAILED.value, message
+                termination_follow_up_pending = bool(
+                    provider_metadata.get("termination_follow_up_pending", False)
+                )
+
                 # For return requests, provider disappearance is only final once
                 # any provider-owned follow-up cleanup has also completed.
                 if not provider_machines:
@@ -249,10 +257,9 @@ class RequestStatusService:
                 return "executing"
             else:
                 return "fail"
+        elif status == "running":
+            return "succeed"
+        elif status in ["pending", "launching"]:
+            return "executing"
         else:
-            if status == "running":
-                return "succeed"
-            elif status in ["pending", "launching"]:
-                return "executing"
-            else:
-                return "fail"
+            return "fail"

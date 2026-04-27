@@ -114,6 +114,24 @@ class TestReturnRequestCompletion:
         assert status == RequestStatus.IN_PROGRESS.value
         assert "follow-up cleanup" in message
 
+    def test_return_request_fails_when_provider_follow_up_cleanup_fails(self):
+        status, message = self.svc.determine_status_from_machines(
+            db_machines=[],
+            provider_machines=[],
+            request=self.req,
+            provider_metadata={
+                "termination_follow_up_failed": True,
+                "termination_follow_up_details": [
+                    {"last_delete_error": "delete retries exhausted"}
+                ],
+            },
+        )
+        assert status == RequestStatus.FAILED.value
+        assert message == (
+            "Return request failed: provider follow-up cleanup failed: "
+            "delete retries exhausted"
+        )
+
 
 class _FakeUnitOfWork(AbstractContextManager):
     def __init__(self, requests_repo) -> None:
