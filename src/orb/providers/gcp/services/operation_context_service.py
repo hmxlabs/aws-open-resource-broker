@@ -13,6 +13,7 @@ from orb.providers.gcp.domain.template.gcp_template_aggregate import GCPTemplate
 from orb.providers.gcp.domain.template.value_objects import GCPProviderApi
 from orb.providers.gcp.exceptions import GCPValidationError
 from orb.providers.gcp.infrastructure.gcp_handler_factory import GCPHandlerFactory
+from orb.providers.gcp.infrastructure.handlers.base_handler import GCPHandler
 from orb.providers.gcp.types import (
     GCPCreateOperationContext,
     GCPHandlerContext,
@@ -127,7 +128,7 @@ class GCPOperationContextService:
         merged.setdefault("max_instances", count)
         return merged
 
-    def _get_handler_for_operation(self, operation: ProviderOperation):
+    def _get_handler_for_operation(self, operation: ProviderOperation) -> GCPHandler:
         provider_api = operation.parameters.get("provider_api") or operation.parameters.get(
             "request_metadata", {}
         ).get("provider_api")
