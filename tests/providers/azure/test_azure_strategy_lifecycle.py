@@ -472,7 +472,6 @@ class TestTerminateInstances:
                     "machine_ids": ["orb-1"],
                     "delete_vmss_when_empty": False,
                     "member_delete_submitted": True,
-                    "delete_submission_semantics": "best_effort_without_reverification",
                     "delete_submitted": False,
                     "delete_retry_pending": False,
                 }
@@ -502,7 +501,6 @@ class TestTerminateInstances:
                     "machine_ids": ["orb-1"],
                     "delete_vmss_when_empty": False,
                     "member_delete_submitted": True,
-                    "delete_submission_semantics": "best_effort_without_reverification",
                     "delete_submitted": False,
                     "delete_retry_pending": False,
                 }
@@ -524,7 +522,6 @@ class TestTerminateInstances:
                         "machine_ids": ["orb-1"],
                         "delete_vmss_when_empty": False,
                         "member_delete_submitted": True,
-                        "delete_submission_semantics": "best_effort_without_reverification",
                         "delete_submitted": False,
                         "delete_retry_pending": False,
                     }
@@ -538,7 +535,6 @@ class TestTerminateInstances:
                         "machine_ids": ["orb-2"],
                         "delete_vmss_when_empty": False,
                         "member_delete_submitted": True,
-                        "delete_submission_semantics": "best_effort_without_reverification",
                         "delete_submitted": False,
                         "delete_retry_pending": False,
                     }
@@ -581,7 +577,6 @@ class TestTerminateInstances:
                     "machine_ids": ["orb-1"],
                     "delete_vmss_when_empty": False,
                     "member_delete_submitted": True,
-                    "delete_submission_semantics": "best_effort_without_reverification",
                     "delete_submitted": False,
                     "delete_retry_pending": False,
                 }
@@ -595,7 +590,6 @@ class TestTerminateInstances:
                     "machine_ids": ["orb-2"],
                     "delete_vmss_when_empty": False,
                     "member_delete_submitted": True,
-                    "delete_submission_semantics": "best_effort_without_reverification",
                     "delete_submitted": False,
                     "delete_retry_pending": False,
                 }

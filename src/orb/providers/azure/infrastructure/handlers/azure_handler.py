@@ -118,7 +118,6 @@ class AzurePendingResourceCleanupMetadata(TypedDict, total=False):
     delete_submitted: bool
     delete_retry_pending: bool
     last_delete_error: str
-    delete_submission_semantics: str
 
 
 class AzureVmssReleaseProviderData(TypedDict, total=False):

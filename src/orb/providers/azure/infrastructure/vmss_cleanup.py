@@ -39,7 +39,6 @@ class PendingVmssCleanup:
     delete_retry_count: int = 0
     delete_retry_exhausted: bool = False
     last_delete_error: Optional[str] = None
-    delete_submission_semantics: str = "best_effort_without_reverification"
 
     @classmethod
     def from_metadata(cls, metadata: Mapping[str, object]) -> Optional[PendingVmssCleanup]:
@@ -84,9 +83,6 @@ class PendingVmssCleanup:
                 None
                 if metadata.get("last_delete_error") in (None, "")
                 else str(metadata.get("last_delete_error"))
-            ),
-            delete_submission_semantics=str(
-                metadata.get("delete_submission_semantics", "best_effort_without_reverification")
             ),
         )
 
@@ -162,8 +158,6 @@ class PendingVmssCleanup:
             delete_retry_count=max(self.delete_retry_count, other.delete_retry_count),
             delete_retry_exhausted=self.delete_retry_exhausted or other.delete_retry_exhausted,
             last_delete_error=other.last_delete_error or self.last_delete_error,
-            delete_submission_semantics=other.delete_submission_semantics
-            or self.delete_submission_semantics,
         )
 
     def mark_delete_submitted(self) -> None:
@@ -197,7 +191,6 @@ class PendingVmssCleanup:
             "machine_ids": list(self.machine_ids),
             "delete_vmss_when_empty": self.delete_vmss_when_empty,
             "member_delete_submitted": self.member_delete_submitted,
-            "delete_submission_semantics": self.delete_submission_semantics,
             "delete_submitted": self.delete_submitted,
             "delete_retry_pending": self.delete_retry_pending,
         }

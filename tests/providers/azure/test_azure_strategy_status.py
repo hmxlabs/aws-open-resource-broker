@@ -421,7 +421,6 @@ class TestDescribeResourceInstances:
                 "member_delete_submitted": True,
                 "delete_submitted": True,
                 "delete_retry_pending": False,
-                "delete_submission_semantics": "best_effort_without_reverification",
             }
         ]
 
@@ -572,7 +571,6 @@ class TestDescribeResourceInstances:
                 "member_delete_submitted": True,
                 "delete_submitted": False,
                 "delete_retry_pending": False,
-                "delete_submission_semantics": "best_effort_without_reverification",
             }
         ]
         compute_client.virtual_machine_scale_sets.begin_delete.assert_not_awaited()
@@ -633,7 +631,6 @@ class TestDescribeResourceInstances:
                 "member_delete_submitted": True,
                 "delete_submitted": False,
                 "delete_retry_pending": False,
-                "delete_submission_semantics": "best_effort_without_reverification",
             }
         ]
         compute_client.virtual_machine_scale_sets.begin_delete.assert_not_awaited()
@@ -692,7 +689,6 @@ class TestDescribeResourceInstances:
                 "member_delete_submitted": True,
                 "delete_submitted": False,
                 "delete_retry_pending": True,
-                "delete_submission_semantics": "best_effort_without_reverification",
                 "delete_retry_count": 1,
                 "last_delete_error": "delete still blocked",
             }

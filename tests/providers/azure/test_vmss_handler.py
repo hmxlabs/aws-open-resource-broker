@@ -410,7 +410,6 @@ async def test_release_hosts_async_marks_flexible_vmss_for_cleanup_when_last_ins
                 "machine_ids": ["vm-a"],
                 "delete_vmss_when_empty": True,
                 "member_delete_submitted": True,
-                "delete_submission_semantics": "best_effort_without_reverification",
                 "delete_submitted": True,
                 "delete_retry_pending": False,
             },
@@ -828,7 +827,6 @@ def test_vmss_release_marks_flexible_vmss_for_cleanup_when_last_instance_is_retu
         "machine_ids": ["vm-a"],
         "delete_vmss_when_empty": True,
         "member_delete_submitted": True,
-        "delete_submission_semantics": "best_effort_without_reverification",
         "delete_submitted": True,
         "delete_retry_pending": False,
     }
@@ -985,7 +983,6 @@ def test_vmss_release_marks_uniform_vmss_for_cleanup_when_last_instance_is_retur
         "machine_ids": ["3"],
         "delete_vmss_when_empty": True,
         "member_delete_submitted": True,
-        "delete_submission_semantics": "best_effort_without_reverification",
         "delete_submitted": True,
         "delete_retry_pending": False,
     }
@@ -1025,7 +1022,6 @@ def test_vmss_release_surfaces_retry_pending_when_immediate_empty_vmss_delete_fa
         "machine_ids": ["vm-a"],
         "delete_vmss_when_empty": True,
         "member_delete_submitted": True,
-        "delete_submission_semantics": "best_effort_without_reverification",
         "delete_submitted": False,
         "delete_retry_pending": True,
         "last_delete_error": "scale set still has deleting members",
