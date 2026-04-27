@@ -1,4 +1,3 @@
-"""GCP infrastructure package."""
 """GCP infrastructure helpers."""
 
 from orb.providers.gcp.infrastructure.compute_client import GCPComputeClient
