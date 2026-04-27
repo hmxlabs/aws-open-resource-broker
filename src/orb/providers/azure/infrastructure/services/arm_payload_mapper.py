@@ -35,6 +35,8 @@ class ArmPayloadMapper:
         """Build the ARM resource payload for a VMSS create/update.
 
         Equivalent to the former ``AzureTemplate.to_azure_api_format()``.
+        The broad return type is necessary: this is arbitrary ARM JSON that can be
+        merged with user-provided native specs before it reaches the Azure SDK.
         """
         properties: dict[str, Any] = {
             "orchestrationMode": template.orchestration_mode.value,
