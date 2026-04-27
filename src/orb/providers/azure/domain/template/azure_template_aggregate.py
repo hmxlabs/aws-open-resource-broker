@@ -125,7 +125,7 @@ class AzureTemplate(Template):
     # VM size selection
     # ------------------------------------------------------------------
     vm_size: str = Field(
-        ...,
+        default=...,
         description="Primary Azure VM size, e.g. 'Standard_D4s_v5'.",
         validation_alias=AliasChoices("vm_size", "vmSize"),
     )

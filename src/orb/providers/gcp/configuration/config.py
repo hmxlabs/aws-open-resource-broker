@@ -17,9 +17,9 @@ class GCPProviderConfig(BaseProviderConfig):
 
     model_config = ConfigDict(populate_by_name=True, extra="forbid")
 
-    provider_type: str = Field("gcp", description="Provider type identifier")
+    provider_type: str = Field(default="gcp", description="Provider type identifier")
     project_id: str = Field(..., description="GCP project ID used for Compute Engine operations")
-    region: str = Field("us-central1", description="Default GCP region")
+    region: str = Field(default="us-central1", description="Default GCP region")
     zones: list[str] = Field(default_factory=list, description="Optional preferred zones")
     network: str | None = Field(None, description="Default VPC network self-link or name")
     subnetwork: str | None = Field(

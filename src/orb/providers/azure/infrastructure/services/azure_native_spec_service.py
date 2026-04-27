@@ -18,7 +18,12 @@ from orb.providers.azure.domain.template.azure_template_aggregate import AzureTe
 class _AzureNativeSpecConfig(BaseModel):
     """Azure native spec extension config owned by the Azure native spec subsystem."""
 
-    spec_file_base_path: str = Field("specs/azure")
+    spec_file_base_path: str = Field(default="specs/azure")
+
+
+def _default_azure_native_spec_config() -> _AzureNativeSpecConfig:
+    """Create the default Azure native spec extension config."""
+    return _AzureNativeSpecConfig()
 
 
 class _AzureProviderExtensionsConfig(BaseModel):
@@ -26,7 +31,7 @@ class _AzureProviderExtensionsConfig(BaseModel):
 
     model_config = ConfigDict(extra="ignore")
 
-    native_spec: _AzureNativeSpecConfig = Field(default_factory=_AzureNativeSpecConfig)
+    native_spec: _AzureNativeSpecConfig = Field(default_factory=_default_azure_native_spec_config)
 
 
 @injectable

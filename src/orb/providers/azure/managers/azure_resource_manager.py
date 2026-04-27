@@ -3,7 +3,7 @@
 Provides the live async Azure resource-management helpers used by ORB.
 """
 
-from typing import Any, Optional
+from typing import Optional
 
 from orb.domain.base.dependency_injection import injectable
 from orb.domain.base.ports import LoggingPort
@@ -51,10 +51,10 @@ class AzureResourceManager:
             return {
                 "vmss_name": vmss_name,
                 "resource_group": resource_group,
-                "capacity": sku.capacity if sku else 0,
+                "capacity": int(sku.capacity or 0) if sku else 0,
                 "vm_size": sku.name if sku else None,
                 "provisioning_state": vmss.provisioning_state,
-                "provisioned_instance_count": provisioned_instance_count,
+                "provisioned_instance_count": provisioned_instance_count or 0,
             }
         except Exception as exc:
             self._logger.error(

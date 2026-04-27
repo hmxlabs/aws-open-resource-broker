@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any, Optional, Protocol, runtime_checkable
 
 from orb.domain.base.ports import LoggingPort
+from orb.domain.request.aggregate import Request
 from orb.providers.azure.domain.template.value_objects import AzureProviderApi
 from orb.providers.azure.exceptions.azure_exceptions import AzureValidationError
 from orb.providers.azure.infrastructure.handlers.azure_handler import (
@@ -68,6 +69,7 @@ class ResolveAzureHandler(Protocol):
         allow_vmss_uniform_fallback: bool = False,
     ) -> Optional[AzureHandler]:
         """Resolve a handler for the given Azure provider API."""
+        ...
 
 
 @runtime_checkable
@@ -80,6 +82,7 @@ class VmssResourceErrorReader(Protocol):
         resource_id: str,
     ) -> list[ProviderErrorEntry]:
         """Return VMSS resource-level errors for one scale set."""
+        ...
 
 
 class AzureInventoryQueryService:
@@ -335,7 +338,7 @@ class AzureInventoryQueryService:
         self,
         *,
         read_context: AzureReadOperationContext,
-    ) -> Any:
+    ) -> Request:
         """Build the handler request used for Azure resource-instance discovery."""
         extra_metadata: dict[str, Any] = {}
         if read_context.provider_api == AzureProviderApi.SINGLE_VM:

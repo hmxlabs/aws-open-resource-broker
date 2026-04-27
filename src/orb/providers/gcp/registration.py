@@ -4,11 +4,16 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from contextlib import suppress
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any, Optional, Protocol
 
 if TYPE_CHECKING:
     from orb.domain.base.ports import LoggingPort
     from orb.providers.registry import ProviderRegistry
+    from orb.providers.gcp.configuration.config import GCPProviderConfig
+    from orb.providers.gcp.infrastructure.adapters.gcp_validation_adapter import (
+        GCPValidationAdapter,
+    )
+    from orb.providers.gcp.strategy.gcp_provider_strategy import GCPProviderStrategy
 
 from orb.domain.base.ports.provider_cli_spec_port import CLISpecRegistry
 from orb.domain.template.extensions import TemplateExtensionRegistry
@@ -17,11 +22,18 @@ from orb.providers.gcp.cli.gcp_cli_spec import GCPCLISpec
 from orb.providers.gcp.configuration.template_extension import GCPTemplateExtensionConfig
 
 
+class GCPProviderInstanceProtocol(Protocol):
+    """Named provider instance shape consumed by GCP registration."""
+
+    name: str
+    config: Mapping[str, Any]
+
+
 def create_gcp_strategy(
     provider_config: Mapping[str, Any],
     *,
     provider_name: Optional[str] = None,
-) -> Any:
+) -> GCPProviderStrategy:
     """Create a GCP provider strategy from raw provider config data.
 
     Azure/GCP are standardized at this boundary for now: provider factories
@@ -44,14 +56,16 @@ def create_gcp_strategy(
     return strategy
 
 
-def create_gcp_config(data: Mapping[str, Any]) -> Any:
+def create_gcp_config(data: Mapping[str, Any]) -> GCPProviderConfig:
     """Create typed GCP config."""
     from orb.providers.gcp.configuration.config import GCPProviderConfig
 
     return GCPProviderConfig(**data)
 
 
-def create_gcp_validator(provider_config: "Mapping[str, Any] | GCPProviderConfig | None" = None) -> Any:
+def create_gcp_validator(
+    provider_config: Mapping[str, Any] | GCPProviderConfig | None = None,
+) -> GCPValidationAdapter | None:
     """Create GCP template validator."""
     from orb.infrastructure.adapters.logging_adapter import LoggingAdapter
     from orb.providers.gcp.configuration.config import GCPProviderConfig
@@ -113,7 +127,7 @@ def register_gcp_provider(
 
 
 def register_gcp_provider_instance(
-    provider_instance: Any,
+    provider_instance: GCPProviderInstanceProtocol,
     logger: Optional[LoggingPort] = None,
 ) -> bool:
     """Register a named GCP provider instance."""

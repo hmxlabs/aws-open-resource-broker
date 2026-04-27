@@ -38,6 +38,7 @@ from orb.providers.azure.infrastructure.error_utils import (
 )
 from orb.providers.azure.infrastructure.sdk_shapes import (
     AzureVmWithIdentityProtocol,
+    AzureVmRuntimeStatusProtocol,
     instance_view_statuses,
 )
 from orb.providers.azure.infrastructure.handlers._network_identity import (
@@ -120,7 +121,7 @@ def _build_vmss_delete_instance_ids(instance_ids: list[str]) -> Any:
     return VirtualMachineScaleSetVMInstanceRequiredIDs(instance_ids=instance_ids)
 
 
-def _read_vm_identity(vm: Any) -> _AzureVmIdentity:
+def _read_vm_identity(vm: AzureVmWithIdentityProtocol) -> _AzureVmIdentity:
     """Normalize VM identity across VMSS VM and regular VM SDK objects.
 
     Microsoft documents `VirtualMachineScaleSetVM` with `name`, `instance_id`,
@@ -148,11 +149,11 @@ class VMSSHandler(AzureHandler):
 
     def __init__(
         self,
-        azure_client: "AzureClient",
-        logger: "LoggingPort",
+        azure_client: AzureClient,
+        logger: LoggingPort,
         *,
-        azure_native_spec_service: "AzureNativeSpecService | None" = None,
-        azure_resource_manager: "AzureResourceManager | None" = None,
+        azure_native_spec_service: AzureNativeSpecService | None = None,
+        azure_resource_manager: AzureResourceManager | None = None,
     ) -> None:
         """Initialize handler with explicit optional infrastructure services."""
         super().__init__(azure_client=azure_client, logger=logger)
@@ -705,7 +706,7 @@ class VMSSHandler(AzureHandler):
         *,
         machine_ids: list[str],
         current_members: list[AzureHandlerStatusResult],
-        logger: Any,
+        logger: LoggingPort,
         vmss_name: str,
     ) -> list[str]:
         """Resolve Flexible VMSS requested IDs to Azure VM names."""
@@ -766,7 +767,7 @@ class VMSSHandler(AzureHandler):
         *,
         machine_ids: list[str],
         current_members: list[AzureHandlerStatusResult],
-        logger: Any,
+        logger: LoggingPort,
         vmss_name: str,
     ) -> list[str]:
         """Resolve mixed IDs (vm_id/vm_name/instance_id) using already-fetched VMSS members."""
@@ -966,7 +967,7 @@ class VMSSHandler(AzureHandler):
         ]
 
     async def _normalise_vm_async(
-        self, vm: Any, vmss_name: str, resource_group: str
+        self, vm: AzureVmRuntimeStatusProtocol, vmss_name: str, resource_group: str
     ) -> AzureHandlerStatusResult:
         """Async variant of ``_normalise_vm`` with async network enrichment."""
         vm_identity = _read_vm_identity(vm)
@@ -1013,7 +1014,7 @@ class VMSSHandler(AzureHandler):
     def _build_normalized_vm_status(
         self,
         *,
-        vm: Any,
+        vm: AzureVmRuntimeStatusProtocol,
         vm_identity: _AzureVmIdentity,
         vmss_name: str,
         resource_group: str,

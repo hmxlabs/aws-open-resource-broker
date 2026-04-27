@@ -1,6 +1,7 @@
 """Direct async coverage for Azure async service entry points."""
 
 import asyncio
+import builtins
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -529,3 +530,15 @@ def test_health_check_sync_uses_client_credential_validation_bridge():
 
     assert result.is_healthy is True
     azure_client.validate_credentials_async.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_health_check_sync_bridge_raises_exception_group_from_thread():
+    async def failing_validation():
+        raise RuntimeError("credential boom")
+
+    with pytest.raises(builtins.ExceptionGroup) as exc_info:
+        AzureHealthCheckService._run_coro_sync(failing_validation())
+
+    assert len(exc_info.value.exceptions) == 1
+    assert isinstance(exc_info.value.exceptions[0], RuntimeError)

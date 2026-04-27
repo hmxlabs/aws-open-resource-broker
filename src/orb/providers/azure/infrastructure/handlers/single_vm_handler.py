@@ -22,7 +22,11 @@ from orb.providers.azure.infrastructure.error_utils import (
     canonical_azure_error_code,
     extract_azure_error_details,
 )
-from orb.providers.azure.infrastructure.sdk_shapes import instance_view_statuses
+from orb.providers.azure.infrastructure.sdk_shapes import (
+    AzureVmRuntimeStatusProtocol,
+    AzureVmWithIdentityProtocol,
+    instance_view_statuses,
+)
 from orb.providers.azure.infrastructure.handlers._network_identity import (
     resolve_network_identity_or_empty_async,
 )
@@ -65,7 +69,7 @@ def _looks_like_uuid(value: str) -> bool:
         return False
 
 
-def _build_vm_name_lookup(vms: Iterable[Any]) -> dict[str, str]:
+def _build_vm_name_lookup(vms: Iterable[AzureVmWithIdentityProtocol]) -> dict[str, str]:
     """Build a lookup that resolves VM names and VM IDs to VM names."""
     lookup: dict[str, str] = {}
     for vm in vms:
@@ -90,10 +94,10 @@ class SingleVMHandler(AzureHandler):
 
     def __init__(
         self,
-        azure_client: "AzureClient",
-        logger: "LoggingPort",
+        azure_client: AzureClient,
+        logger: LoggingPort,
         *,
-        azure_native_spec_service: "AzureNativeSpecService | None" = None,
+        azure_native_spec_service: AzureNativeSpecService | None = None,
     ) -> None:
         """Initialize handler with deployment and optional native-spec service."""
         super().__init__(azure_client=azure_client, logger=logger)
@@ -110,7 +114,7 @@ class SingleVMHandler(AzureHandler):
     @staticmethod
     def _build_status_result(
         *,
-        vm: Any,
+        vm: AzureVmRuntimeStatusProtocol,
         resource_group: str,
         status: str,
         network_identity: AzureNetworkIdentity,
@@ -458,7 +462,7 @@ class SingleVMHandler(AzureHandler):
         resource_group: str,
         machine_ids: list[str],
         resolved: list[Optional[str]],
-        logger: Any,
+        logger: LoggingPort,
     ) -> list[str]:
         """Apply unresolved lookups, preserve input order, and log any remapping."""
         ordered_resolved = [

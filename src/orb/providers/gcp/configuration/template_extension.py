@@ -12,12 +12,12 @@ from orb.providers.gcp.constants import DEFAULT_GCP_SERVICE_ACCOUNT_SCOPES
 class GCPTemplateExtensionConfig(BaseModel):
     """GCP-specific template defaults."""
 
-    provider_api: str = Field("MIG", description="Default GCP provider API")
-    machine_type: str = Field("e2-standard-4", description="Default GCP machine type")
-    boot_disk_size_gb: int = Field(50, ge=10, description="Boot disk size in GiB")
-    boot_disk_type: str = Field("pd-balanced", description="Boot disk type")
+    provider_api: str = Field(default="MIG", description="Default GCP provider API")
+    machine_type: str = Field(default="e2-standard-4", description="Default GCP machine type")
+    boot_disk_size_gb: int = Field(default=50, ge=10, description="Boot disk size in GiB")
+    boot_disk_type: str = Field(default="pd-balanced", description="Boot disk type")
     service_account_email: Optional[str] = Field(
-        None, description="Default service account email"
+        default=None, description="Default service account email"
     )
     service_account_scopes: list[str] = Field(
         default_factory=lambda: list(DEFAULT_GCP_SERVICE_ACCOUNT_SCOPES),
@@ -26,17 +26,17 @@ class GCPTemplateExtensionConfig(BaseModel):
     network_tags: list[str] = Field(default_factory=list, description="Default network tags")
     labels: dict[str, str] = Field(default_factory=dict, description="Default instance labels")
     provisioning_model: str = Field(
-        "STANDARD",
+        default="STANDARD",
         description="Default GCP provisioning model (STANDARD or SPOT)",
     )
     source_image_family: Optional[str] = Field(
-        "debian-12", description="Default source image family"
+        default="debian-12", description="Default source image family"
     )
     source_image_project: Optional[str] = Field(
-        "debian-cloud", description="Default source image project"
+        default="debian-cloud", description="Default source image project"
     )
     instance_template_name_prefix: Optional[str] = Field(
-        "orb", description="Default prefix for generated instance templates"
+        default="orb", description="Default prefix for generated instance templates"
     )
 
     def to_template_defaults(self) -> dict[str, Any]:

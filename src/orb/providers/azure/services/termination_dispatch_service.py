@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import builtins
 from typing import Callable
 
 from orb.domain.base.ports import LoggingPort
@@ -51,9 +52,11 @@ class AzureTerminationDispatchService:
             return_exceptions=True,
         )
         for handler_result in handler_results:
-            if isinstance(handler_result, asyncio.CancelledError):
-                raise handler_result
-            if isinstance(handler_result, Exception):
+            if isinstance(handler_result, BaseException):
+                if isinstance(handler_result, asyncio.CancelledError):
+                    raise handler_result
+                if not isinstance(handler_result, Exception):
+                    raise handler_result
                 dispatch_failures.append(handler_result)
                 self._logger.warning(
                     "Azure termination dispatch group failed: %s",
@@ -71,7 +74,7 @@ class AzureTerminationDispatchService:
 
         if dispatch_failures and not termination_provider_data:
             if len(dispatch_failures) > 1:
-                raise ExceptionGroup(
+                raise builtins.ExceptionGroup(
                     "All Azure termination dispatch groups failed",
                     dispatch_failures,
                 )

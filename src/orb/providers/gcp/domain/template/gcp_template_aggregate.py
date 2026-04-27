@@ -28,7 +28,7 @@ class GCPTemplate(Template):
     region: GCPRegion
     zones: list[GCPZone] = Field(default_factory=list)
     mig_scope: GCPMIGScope = GCPMIGScope.REGIONAL
-    instance_type: str = Field(..., description="Compute Engine machine type")
+    instance_type: str = Field(default=..., description="Compute Engine machine type")
     network: Optional[str] = None
     subnetwork: Optional[str] = None
     service_account_email: Optional[str] = None

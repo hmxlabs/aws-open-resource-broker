@@ -6,6 +6,7 @@ to the appropriate handlers via the VMSS / SingleVM infrastructure layer.
 
 from __future__ import annotations
 
+import argparse
 import asyncio
 import inspect
 import time
@@ -16,6 +17,7 @@ from orb.application.services.spot_placement_execution import (
     SpotPlacementExecutionService,
 )
 from orb.application.services.spot_placement_planner import (
+    PlacementPlanEntry,
     SpotPlacementPlanner,
 )
 from orb.domain.base.dependency_injection import injectable
@@ -274,7 +276,7 @@ class AzureProviderStrategy(ProviderStrategy):
         self,
         azure_template: AzureTemplate,
         count: int,
-    ) -> list[Any]:
+    ) -> list[PlacementPlanEntry]:
         """Compatibility wrapper for tests and callers that patch this seam."""
         return self._spot_launch_service.build_spot_placement_plan(
             azure_template=azure_template,
@@ -286,7 +288,7 @@ class AzureProviderStrategy(ProviderStrategy):
         self,
         azure_template: AzureTemplate,
         count: int,
-    ) -> list[Any]:
+    ) -> list[PlacementPlanEntry]:
         """Build the spot placement plan without blocking the async create flow."""
         patched_sync_builder = self.__dict__.get("_build_spot_placement_plan")
         if patched_sync_builder is not None:
@@ -483,7 +485,7 @@ class AzureProviderStrategy(ProviderStrategy):
         """Return the default Azure location for CLI prompts."""
         return "eastus2"
 
-    def get_cli_provider_config(self, args: Any) -> dict[str, Any]:
+    def get_cli_provider_config(self, args: argparse.Namespace) -> dict[str, Any]:
         """Extract Azure provider config from init CLI args."""
         args_dict = vars(args)
         provider_config: dict[str, Any] = {

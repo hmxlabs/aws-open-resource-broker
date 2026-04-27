@@ -50,7 +50,7 @@ class GCPInstanceStatus(TypedDict):
     provider_data: dict[str, str]
 
 
-GCPProviderDataValue = str | int | bool
+GCPProviderDataValue = str | int | bool | list[str] | list[dict[str, str]]
 GCPProviderData = dict[str, GCPProviderDataValue]
 
 

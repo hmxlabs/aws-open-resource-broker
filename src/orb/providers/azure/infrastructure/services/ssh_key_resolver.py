@@ -6,9 +6,40 @@ the Compute SDK, keeping infrastructure concerns out of the domain model.
 
 from __future__ import annotations
 
-from typing import NoReturn
-
+from collections.abc import Awaitable
 from typing import Any
+from typing import Protocol
+
+
+class AzureSshPublicKeyResourceProtocol(Protocol):
+    """Azure SSH public key resource fields used by ORB."""
+
+    @property
+    def public_key(self) -> str | None:
+        """Return the public key material stored on the resource."""
+        ...
+
+
+class AzureSshPublicKeyOperationsProtocol(Protocol):
+    """Azure SDK SSH public key operations used by ORB."""
+
+    def get(
+        self,
+        resource_group_name: str,
+        ssh_public_key_name: str,
+        **kwargs: Any,
+    ) -> Awaitable[AzureSshPublicKeyResourceProtocol]:
+        """Fetch an Azure SSH public key resource."""
+        ...
+
+
+class AzureComputeSshKeyClientProtocol(Protocol):
+    """Azure Compute client surface used for SSH key lookup."""
+
+    @property
+    def ssh_public_keys(self) -> AzureSshPublicKeyOperationsProtocol:
+        """Return SSH public key operations."""
+        ...
 
 
 def _azure_resource_not_found_error_type() -> type[Exception]:
@@ -44,12 +75,12 @@ def _validate_ssh_key_request(
 
 def _extract_key_data(
     *,
-    ssh_resource: Any,
+    ssh_resource: AzureSshPublicKeyResourceProtocol,
     ssh_key_name: str,
     resource_group: str,
 ) -> list[str]:
     """Validate resolved Azure SSH key payload and return it in ORB list form."""
-    key_data: str = ssh_resource.public_key
+    key_data = ssh_resource.public_key
     if not key_data:
         raise ValueError(
             f"Azure SSH Public Key resource '{ssh_key_name}' "
@@ -64,7 +95,7 @@ def _translate_ssh_key_resolution_error(
     exc: Exception,
     ssh_key_name: str,
     resource_group: str,
-) -> ValueError | NoReturn:
+) -> ValueError:
     """Translate Azure SDK lookup failures into stable provider-facing errors."""
     if isinstance(exc, _azure_resource_not_found_error_type()):
         return ValueError(
@@ -86,7 +117,7 @@ async def resolve_ssh_keys_async(
     ssh_key_name: str | None,
     ssh_public_keys: list[str],
     resource_group: str,
-    compute_client: Any,
+    compute_client: AzureComputeSshKeyClientProtocol,
 ) -> list[str]:
     """Async variant of ``resolve_ssh_keys`` for the Azure async SDK clients."""
     inline_keys = _validate_ssh_key_request(
@@ -96,20 +127,21 @@ async def resolve_ssh_keys_async(
     if inline_keys:
         return inline_keys
 
+    resolved_ssh_key_name = str(ssh_key_name)
     try:
         ssh_resource = await compute_client.ssh_public_keys.get(
             resource_group_name=resource_group,
-            ssh_public_key_name=ssh_key_name,
+            ssh_public_key_name=resolved_ssh_key_name,
         )
         return _extract_key_data(
             ssh_resource=ssh_resource,
-            ssh_key_name=str(ssh_key_name),
+            ssh_key_name=resolved_ssh_key_name,
             resource_group=resource_group,
         )
     except Exception as exc:
         translated = _translate_ssh_key_resolution_error(
             exc=exc,
-            ssh_key_name=str(ssh_key_name),
+            ssh_key_name=resolved_ssh_key_name,
             resource_group=resource_group,
         )
         raise translated from exc

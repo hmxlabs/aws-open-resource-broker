@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import asyncio
 import time
 from typing import Any, Mapping, Optional
@@ -444,7 +445,7 @@ class GCPProviderStrategy(ProviderStrategy):
         """Run the provider health check service."""
         return self._health_service.check_health()
 
-    def generate_provider_name(self, config: Mapping[str, object]) -> str:
+    def generate_provider_name(self, config: dict[str, Any]) -> str:
         """Generate a provider name from GCP project and region values."""
         project_id = config.get("project_id", "default")
         region = config.get("region", "global")
@@ -491,7 +492,7 @@ class GCPProviderStrategy(ProviderStrategy):
         """List additional template keys accepted from GCP CLI arguments."""
         return {"network", "subnetwork", "service_account_email", "service_account_scopes"}
 
-    def get_cli_infrastructure_defaults(self, args: Any) -> dict[str, Any]:
+    def get_cli_infrastructure_defaults(self, args: argparse.Namespace) -> dict[str, Any]:
         """Extract infrastructure defaults from parsed GCP CLI arguments."""
         result: dict[str, Any] = {}
         if args.gcp_network:
