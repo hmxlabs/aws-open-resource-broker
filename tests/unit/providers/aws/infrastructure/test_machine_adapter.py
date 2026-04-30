@@ -172,3 +172,59 @@ class TestCloudHostId:
         }
         result = _call(adapter, data)
         assert result["provider_data"]["cloud_host_id"] == "i-pascal"
+
+
+class TestTerminalStatePascalCase:
+    """Terminal-state PascalCase instances must surface tags at the top level."""
+
+    _TERMINAL_BASE = {
+        "InstanceId": "i-term001",
+        "InstanceType": "t3.medium",
+        "State": {"Name": "terminated"},
+        "ImageId": "ami-0abc123",
+    }
+
+    def test_terminal_state_instance_produces_top_level_tags(self):
+        """Terminated instances must put tags at the top level, not in metadata."""
+        adapter = _make_adapter()
+        data = {
+            **self._TERMINAL_BASE,
+            "Tags": [
+                {"Key": "Name", "Value": "my-terminated-machine"},
+                {"Key": "env", "Value": "prod"},
+            ],
+        }
+        result = _call(adapter, data)
+
+        assert result["tags"] == {"Name": "my-terminated-machine", "env": "prod"}
+        assert "tags" not in result.get("metadata", {})
+
+    def test_terminal_state_empty_tags_produces_empty_dict(self):
+        """Terminated instance with no Tags key yields an empty tags dict."""
+        adapter = _make_adapter()
+        result = _call(adapter, dict(self._TERMINAL_BASE))
+
+        assert result["tags"] == {}
+        assert "tags" not in result.get("metadata", {})
+
+    def test_terminal_state_metadata_is_empty(self):
+        """Terminal-state path returns an empty metadata dict (no placement data)."""
+        adapter = _make_adapter()
+        result = _call(adapter, dict(self._TERMINAL_BASE))
+
+        assert result.get("metadata") == {}
+
+    def test_stopping_state_also_produces_top_level_tags(self):
+        """The 'stopping' state follows the same terminal-state code path."""
+        adapter = _make_adapter()
+        data = {
+            "InstanceId": "i-stop001",
+            "InstanceType": "t3.medium",
+            "State": {"Name": "stopping"},
+            "ImageId": "ami-0abc123",
+            "Tags": [{"Key": "team", "Value": "infra"}],
+        }
+        result = _call(adapter, data)
+
+        assert result["tags"] == {"team": "infra"}
+        assert "tags" not in result.get("metadata", {})

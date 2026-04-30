@@ -1,7 +1,7 @@
 """Request aggregate - core request domain logic."""
 
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Any, ClassVar, Optional
 
 from pydantic import ConfigDict, Field
 
@@ -24,6 +24,21 @@ class Request(AggregateRoot):
         frozen=False,
         validate_assignment=True,
         populate_by_name=True,  # Allow both field names and aliases
+    )
+
+    # Fields intentionally NOT persisted by RequestSerializer.
+    # Adding anything here is a deliberate decision to drop it on save.
+    # If you add a field to Request, either add it to RequestSerializer
+    # or add it to this set with a comment explaining why.
+    _SERIALIZATION_EXCLUDED_FIELDS: ClassVar[frozenset[str]] = frozenset(
+        {
+            # Inherited from Entity; used as an internal Pydantic/aggregate identity
+            # key but request_id is the canonical persisted identifier.
+            "id",
+            # Inherited from Entity; not written by RequestSerializer — the serializer
+            # only persists created_at, started_at, and completed_at.
+            "updated_at",
+        }
     )
 
     # Core request identification

@@ -67,7 +67,8 @@ class RequestSerializer(BaseEntitySerializer):
                 # Core request fields
                 "request_id": _id_str(request.request_id),
                 "template_id": request.template_id,
-                "machine_count": request.requested_count,
+                "machine_count": request.requested_count,  # Legacy key — kept for backward compat
+                "requested_count": request.requested_count,
                 "desired_capacity": request.desired_capacity,
                 "request_type": _id_str(request.request_type),
                 "status": _id_str(request.status),
