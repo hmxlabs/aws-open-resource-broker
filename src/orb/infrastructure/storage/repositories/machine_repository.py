@@ -11,128 +11,58 @@ from orb.infrastructure.logging.logger import get_logger
 from orb.infrastructure.storage.base.repository_mixin import StorageRepositoryMixin
 from orb.infrastructure.storage.base.strategy import BaseStorageStrategy
 from orb.infrastructure.storage.components.entity_serializer import BaseEntitySerializer
-from orb.infrastructure.storage.components.generic_serializer import GenericEntitySerializer
 from orb.infrastructure.storage.constants import LEGACY_DEFAULT_PROVIDER_TYPE
 
 
 class MachineSerializer(BaseEntitySerializer):
-    """Handles Machine aggregate serialization/deserialization."""
+    """Handles Machine aggregate serialization/deserialization.
 
-    def __init__(self) -> None:
-        """Initialize the instance."""
-        super().__init__()
-        self._dt = GenericEntitySerializer(Machine, "Machine", "machine_id")
+    Thin wrapper around Machine.model_dump / Machine.model_validate.
+    Value objects (MachineId, InstanceType, Tags, …) carry @model_serializer /
+    @model_validator so they self-flatten to/from plain scalars — no hand-rolling
+    needed here.
+    """
+
+    # Fields produced by model_dump that must not be written to storage.
+    _DUMP_EXCLUDED: set[str] = set(Machine._SERIALIZATION_EXCLUDED_FIELDS)
 
     def to_dict(self, machine: Machine) -> dict[str, Any]:  # type: ignore[override]
-        """Convert Machine aggregate to dictionary with additional fields."""
+        """Serialize Machine to a storage-compatible dict."""
         try:
-            return {
-                # Core machine identification
-                "machine_id": str(machine.machine_id.value),
-                "name": machine.name,
-                "template_id": machine.template_id,
-                "request_id": machine.request_id,
-                "return_request_id": machine.return_request_id,
-                "provider_type": machine.provider_type,
-                "provider_name": machine.provider_name,
-                "provider_api": machine.provider_api,
-                "resource_id": machine.resource_id,
-                # Machine configuration
-                "instance_type": str(machine.instance_type.value),
-                "image_id": machine.image_id,
-                "price_type": machine.price_type,
-                # Network configuration
-                "private_ip": machine.private_ip,
-                "public_ip": machine.public_ip,
-                "private_dns_name": machine.private_dns_name,
-                "public_dns_name": machine.public_dns_name,
-                "subnet_id": machine.subnet_id,
-                "security_group_ids": machine.security_group_ids,
-                # Machine state
-                "status": machine.status.value,
-                "status_reason": machine.status_reason,
-                # Lifecycle timestamps
-                "launch_time": self._dt.serialize_datetime(machine.launch_time),
-                "termination_time": self._dt.serialize_datetime(machine.termination_time),
-                # Tags and metadata
-                "tags": machine.tags.to_dict() if machine.tags else {},
-                "metadata": machine.metadata or {},
-                # Provider-specific data
-                "provider_data": machine.provider_data or {},
-                # Versioning
-                "version": machine.version,
-                # Base entity fields
-                "created_at": self._dt.serialize_datetime(machine.created_at),
-                "updated_at": self._dt.serialize_datetime(machine.updated_at),
-                # Schema version for migration support
-                "schema_version": "2.0.0",
-            }
+            data = machine.model_dump(mode="json", exclude=self._DUMP_EXCLUDED)
+            data["schema_version"] = "3.0.0"
+            return data
         except Exception as e:
             self.logger.error("Failed to serialize machine %s: %s", machine.machine_id, e)
             raise
 
     def from_dict(self, data: dict[str, Any]) -> Machine:
-        """Convert dictionary to Machine aggregate with field support."""
+        """Deserialize a storage dict back to a Machine aggregate."""
         try:
-            from orb.domain.base.value_objects import InstanceType, Tags
-            from orb.domain.machine.machine_status import MachineStatus
-
-            # Parse datetime fields using shared helper
-            launch_time = self._dt.deserialize_datetime(data.get("launch_time"))
-            termination_time = self._dt.deserialize_datetime(data.get("termination_time"))
-            created_at = self._dt.deserialize_datetime(data.get("created_at"))
-            updated_at = self._dt.deserialize_datetime(data.get("updated_at"))
-
-            # Build machine data with additional fields
-            machine_data = {
-                "machine_id": MachineId(value=data["machine_id"]),
-                "name": data.get("name", data["machine_id"]),  # Fallback to machine_id
-                "template_id": data["template_id"],
-                "request_id": data.get("request_id"),
-                "return_request_id": data.get("return_request_id"),
-                # Legacy records written before provider_type was persisted default to 'aws'.
-                # Do not change this default without a data migration.
-                "provider_type": data.get("provider_type", LEGACY_DEFAULT_PROVIDER_TYPE),
-                "provider_name": data.get("provider_name"),
-                "provider_api": data.get("provider_api"),
-                "resource_id": data.get("resource_id"),
-                # Machine configuration
-                "instance_type": InstanceType(value=data["instance_type"]),
-                "image_id": data["image_id"],
-                "price_type": data.get("price_type"),
-                # Network configuration
-                "private_ip": data.get("private_ip"),
-                "public_ip": data.get("public_ip"),
-                "private_dns_name": data.get("private_dns_name"),
-                "public_dns_name": data.get("public_dns_name"),
-                "subnet_id": data.get("subnet_id"),
-                "security_group_ids": data.get("security_group_ids", []),
-                # Machine state
-                "status": MachineStatus(data.get("status", MachineStatus.PENDING.value)),
-                "status_reason": data.get("status_reason"),
-                # Lifecycle timestamps
-                "launch_time": launch_time,
-                "termination_time": termination_time,
-                # Tags and metadata
-                "tags": Tags(tags=data.get("tags", {})),
-                "metadata": data.get("metadata", {}),
-                # Provider-specific data
-                "provider_data": data.get("provider_data", {}),
-                # Versioning
-                "version": data.get("version", 0),
-                # Base entity fields
-                "created_at": created_at,
-                "updated_at": updated_at,
-            }
-
-            # Create machine using model_validate to handle all fields correctly
-            machine = Machine.model_validate(machine_data)
-
-            return machine
-
+            if data.get("schema_version", "1.0.0") < "3.0.0":
+                data = self._migrate_pre_3_0_0(data)
+            return Machine.model_validate(data)
         except Exception as e:
             self.logger.error("Failed to deserialize machine data: %s", e)
             raise
+
+    def _migrate_pre_3_0_0(self, data: dict[str, Any]) -> dict[str, Any]:
+        """Upgrade records written before schema_version 3.0.0.
+
+        Handles two legacy gaps:
+        - tags stored inside metadata.tags (legacy schema)
+        - provider_type absent from very old records (pre-1.0)
+        """
+        data = dict(data)  # shallow copy — don't mutate the caller's dict
+        # Tags may live in metadata.tags on old records
+        if not data.get("tags"):
+            legacy_tags = (data.get("metadata") or {}).get("tags")
+            if legacy_tags:
+                data["tags"] = legacy_tags
+        # provider_type default for pre-1.0 records
+        if "provider_type" not in data:
+            data.setdefault("provider_type", LEGACY_DEFAULT_PROVIDER_TYPE)
+        return data
 
 
 class MachineRepositoryImpl(StorageRepositoryMixin, MachineRepositoryInterface):
