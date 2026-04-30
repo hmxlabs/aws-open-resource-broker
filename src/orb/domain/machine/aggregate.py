@@ -1,7 +1,7 @@
 """Machine aggregate - core machine domain logic."""
 
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Any, ClassVar, Optional
 
 from pydantic import ConfigDict, Field
 
@@ -20,6 +20,18 @@ class Machine(AggregateRoot):
         frozen=False,
         validate_assignment=True,
         populate_by_name=True,  # Allow both field names and aliases
+    )
+
+    # Fields that are intentionally NOT persisted by MachineSerializer.
+    # Adding anything here is a deliberate decision to drop it on save.
+    # If you add a field to Machine, either add it to MachineSerializer
+    # or add it to this set with a comment explaining why.
+    _SERIALIZATION_EXCLUDED_FIELDS: ClassVar[frozenset[str]] = frozenset(
+        {
+            # Inherited from Entity; used as an internal Pydantic/aggregate identity
+            # key but machine_id is the canonical persisted identifier.
+            "id",
+        }
     )
 
     # Core machine identification
