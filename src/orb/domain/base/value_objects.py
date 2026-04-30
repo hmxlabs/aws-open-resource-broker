@@ -5,7 +5,15 @@ from abc import ABC
 from enum import Enum
 from typing import ClassVar, Optional, TypeVar
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationInfo,
+    field_validator,
+    model_serializer,
+    model_validator,
+)
 
 T = TypeVar("T", bound="ValueObject")
 
@@ -25,6 +33,19 @@ class ResourceId(ValueObject):
 
     value: str
     resource_type: ClassVar[str] = "Resource"
+
+    @model_validator(mode="before")
+    @classmethod
+    def _accept_string(cls, data: object) -> object:
+        """Allow construction from a plain string, e.g. model_validate('i-abc')."""
+        if isinstance(data, str):
+            return {"value": data}
+        return data
+
+    @model_serializer
+    def _serialize(self) -> str:
+        """Serialize to a plain string instead of {'value': '...'}."""
+        return self.value
 
     @field_validator("value")
     @classmethod
@@ -121,6 +142,19 @@ class InstanceType(ValueObject):
 
     value: str
 
+    @model_validator(mode="before")
+    @classmethod
+    def _accept_string(cls, data: object) -> object:
+        """Allow construction from a plain string, e.g. model_validate('m5.large')."""
+        if isinstance(data, str):
+            return {"value": data}
+        return data
+
+    @model_serializer
+    def _serialize(self) -> str:
+        """Serialize to a plain string instead of {'value': '...'}."""
+        return self.value
+
     def __str__(self) -> str:
         return self.value
 
@@ -141,6 +175,19 @@ class InstanceId(ValueObject):
 
     value: str
 
+    @model_validator(mode="before")
+    @classmethod
+    def _accept_string(cls, data: object) -> object:
+        """Allow construction from a plain string, e.g. model_validate('i-abc123')."""
+        if isinstance(data, str):
+            return {"value": data}
+        return data
+
+    @model_serializer
+    def _serialize(self) -> str:
+        """Serialize to a plain string instead of {'value': '...'}."""
+        return self.value
+
     def __str__(self) -> str:
         return self.value
 
@@ -160,6 +207,19 @@ class Tags(ValueObject):
     """Tags value object for resource tagging."""
 
     tags: dict[str, str] = Field(default_factory=dict)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _accept_dict(cls, data: object) -> object:
+        """Allow construction from a plain dict, e.g. model_validate({'Env': 'prod'})."""
+        if isinstance(data, dict) and "tags" not in data:
+            return {"tags": data}
+        return data
+
+    @model_serializer
+    def _serialize(self) -> dict[str, str]:
+        """Serialize to a plain dict instead of {'tags': {...}}."""
+        return dict(self.tags)
 
     def __str__(self) -> str:
         if not self.tags:
