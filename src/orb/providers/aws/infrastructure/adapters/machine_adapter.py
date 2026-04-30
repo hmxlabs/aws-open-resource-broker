@@ -212,7 +212,11 @@ class AWSMachineAdapter:
                         "status_reason": self._extract_status_reason(aws_instance_data),
                         "provider_api": provider_api,
                         "resource_id": resource_id,
-                        "price_type": PriceType.ON_DEMAND.value,
+                        "price_type": (
+                            PriceType.SPOT.value
+                            if aws_instance_data.get("InstanceLifecycle") == "spot"
+                            else PriceType.ON_DEMAND.value
+                        ),
                         "subnet_id": aws_instance_data.get("SubnetId"),
                         "security_group_ids": [],
                         "tags": {

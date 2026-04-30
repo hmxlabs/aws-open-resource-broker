@@ -530,7 +530,7 @@ class AWSHandler(ABC):
         return combined_results
 
     def _build_fallback_machine_payload(
-        self, inst: dict[str, Any], resource_id: str
+        self, inst: dict[str, Any], resource_id: str, provider_api: str = ""
     ) -> dict[str, Any]:
         """Construct minimal machine payload when machine adapter is unavailable."""
         state = inst.get("State")
@@ -552,6 +552,13 @@ class AWSHandler(ABC):
             "subnet_id": inst.get("SubnetId"),
             "security_group_ids": [sg["GroupId"] for sg in inst.get("SecurityGroups", [])],
             "vpc_id": inst.get("VpcId"),
+            "tags": {},
+            "price_type": None,
+            "provider_api": provider_api,
+            "name": inst.get("InstanceId", inst.get("instance_id", "")),
+            "status_reason": None,
+            "provider_data": {},
+            "metadata": {},
         }
 
     def _get_instance_details(
