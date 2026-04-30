@@ -30,7 +30,7 @@ class MachineSerializer(BaseEntitySerializer):
         """Serialize Machine to a storage-compatible dict."""
         try:
             data = machine.model_dump(mode="json", exclude=self._DUMP_EXCLUDED)
-            data["schema_version"] = "3.0.0"
+            data["schema_version"] = "2.0.0"
             return data
         except Exception as e:
             self.logger.error("Failed to serialize machine %s: %s", machine.machine_id, e)
@@ -39,27 +39,28 @@ class MachineSerializer(BaseEntitySerializer):
     def from_dict(self, data: dict[str, Any]) -> Machine:
         """Deserialize a storage dict back to a Machine aggregate."""
         try:
-            if data.get("schema_version", "1.0.0") < "3.0.0":
-                data = self._migrate_pre_3_0_0(data)
+            data = self._normalize_on_read(data)
             return Machine.model_validate(data)
         except Exception as e:
             self.logger.error("Failed to deserialize machine data: %s", e)
             raise
 
-    def _migrate_pre_3_0_0(self, data: dict[str, Any]) -> dict[str, Any]:
-        """Upgrade records written before schema_version 3.0.0.
+    def _normalize_on_read(self, data: dict[str, Any]) -> dict[str, Any]:
+        """Normalize storage data before model_validate.
 
-        Handles two legacy gaps:
-        - tags stored inside metadata.tags (legacy schema)
-        - provider_type absent from very old records (pre-1.0)
+        Runs on every read to handle legacy data quirks and future
+        schema evolution. Each fixup is idempotent.
         """
         data = dict(data)  # shallow copy — don't mutate the caller's dict
+        # Name fallback: legacy records may not have a name field
+        if not data.get("name"):
+            data["name"] = data.get("machine_id", "")
         # Tags may live in metadata.tags on old records
         if not data.get("tags"):
             legacy_tags = (data.get("metadata") or {}).get("tags")
             if legacy_tags:
                 data["tags"] = legacy_tags
-        # provider_type default for pre-1.0 records
+        # provider_type default for very old records
         if "provider_type" not in data:
             data.setdefault("provider_type", LEGACY_DEFAULT_PROVIDER_TYPE)
         return data
