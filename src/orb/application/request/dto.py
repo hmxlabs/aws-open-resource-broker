@@ -22,7 +22,7 @@ class MachineReferenceDTO(BaseDTO):
     instance_type: Optional[str] = None
     price_type: Optional[str] = None
     vcpus: Optional[int] = None
-    instance_tags: Optional[str] = None
+    tags: Optional[dict[str, str]] = None
     cloud_host_id: Optional[str] = None
     launch_time: Optional[int] = None
     request_id: Optional[str] = None
@@ -53,7 +53,7 @@ class MachineReferenceDTO(BaseDTO):
             public_ip_address=getattr(machine_ref, "public_ip", None),
             instance_type=metadata.get("instance_type"),
             price_type=metadata.get("price_type"),
-            instance_tags=metadata.get("instance_tags"),
+            tags=metadata.get("tags"),
             cloud_host_id=metadata.get("cloud_host_id"),
             launch_time=metadata.get("launch_time"),
             message=getattr(machine_ref, "message", machine_ref.error_message or ""),

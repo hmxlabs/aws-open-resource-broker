@@ -1,6 +1,5 @@
 """Unit tests for RequestDTOFactory."""
 
-import json
 from datetime import datetime, timezone
 
 import pytest
@@ -154,15 +153,13 @@ class TestCreateFromDomainForwardsHFFields:
         ref = dto.machine_references[0]
         assert ref.instance_type == "m5.large"
         assert ref.price_type == "ondemand"
-        assert ref.instance_tags == json.dumps(
-            {"Environment": "prod", "Owner": "team-x"}, sort_keys=True
-        )
+        assert ref.tags == {"Environment": "prod", "Owner": "team-x"}
 
     def test_empty_tags_serialize_to_none(self, factory):
         machine = _make_machine(tags=Tags(tags={}))
         dto = factory.create_from_domain(_make_request(), [machine])
 
-        assert dto.machine_references[0].instance_tags is None
+        assert dto.machine_references[0].tags is None
 
     def test_missing_price_type_forwarded_as_none(self, factory):
         machine = _make_machine(price_type=None)

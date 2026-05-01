@@ -854,11 +854,8 @@ class HostFactorySchedulerStrategy(BaseSchedulerStrategy):
                 formatted_machine["instanceType"] = machine["instance_type"]
             if machine.get("price_type"):
                 formatted_machine["priceType"] = machine["price_type"]
-            if machine.get("instance_tags"):
-                tags = machine["instance_tags"]
-                formatted_machine["instanceTags"] = (
-                    json.dumps(tags) if isinstance(tags, dict) else str(tags)
-                )
+            if machine.get("tags"):
+                formatted_machine["instanceTags"] = json.dumps(machine["tags"], sort_keys=True)
 
             formatted_machines.append(formatted_machine)
 

@@ -88,9 +88,8 @@ class TestMachineFieldContract:
         )
         assert ref.instance_type == "m5.xlarge"
         assert ref.price_type == "spot"
-        assert ref.instance_tags is not None
-        parsed_tags = json.loads(ref.instance_tags)
-        assert parsed_tags == {"Env": "test", "Owner": "contract"}
+        assert ref.tags is not None
+        assert ref.tags == {"Env": "test", "Owner": "contract"}
         assert ref.cloud_host_id == "cloud-host-abc"
 
         # --- Layer 2: RequestDTO → HF wire via format_request_status_response ---
@@ -182,11 +181,9 @@ class TestMachineFieldContract:
 
         request_dto = self.factory.create_from_domain(request, [machine])
 
-        # DTO layer: tags serialised with sort_keys=True
+        # DTO layer: tags stored as dict
         ref = request_dto.machine_references[0]
-        assert ref.instance_tags == json.dumps(
-            {"Zebra": "z", "Alpha": "a", "Middle": "m"}, sort_keys=True
-        )
+        assert ref.tags == {"Zebra": "z", "Alpha": "a", "Middle": "m"}
 
         wire = self.formatter.format_request_status_response(
             [request_dto],
