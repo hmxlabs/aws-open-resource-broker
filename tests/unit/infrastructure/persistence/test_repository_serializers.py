@@ -35,10 +35,18 @@ class TestLegacyDefaultProviderTypeConstant:
         assert "data.get('provider_type', 'aws')" not in source
         assert 'data.get("provider_type", "aws")' not in source
 
-    def test_machine_repository_imports_constant(self):
-        """machine_repository must import LEGACY_DEFAULT_PROVIDER_TYPE."""
+    def test_machine_repository_does_not_inline_bare_aws_default(self):
+        """machine_repository must not inline a bare 'aws' string as a provider_type default.
+
+        The default now lives on Machine.provider_type = Field(default="aws") in the
+        aggregate, so the repository no longer needs to import or reference the constant.
+        This test guards against re-introducing an inline literal in _normalize_on_read.
+        """
         source = inspect.getsource(_machine_repo_mod)
-        assert "LEGACY_DEFAULT_PROVIDER_TYPE" in source
+        assert "data.get('provider_type', 'aws')" not in source
+        assert 'data.get("provider_type", "aws")' not in source
+        assert "setdefault('provider_type', 'aws')" not in source
+        assert 'setdefault("provider_type", "aws")' not in source
 
     def test_request_repository_imports_constant(self):
         """request_repository must import LEGACY_DEFAULT_PROVIDER_TYPE."""

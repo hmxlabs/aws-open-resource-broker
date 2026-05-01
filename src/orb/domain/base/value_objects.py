@@ -19,7 +19,21 @@ T = TypeVar("T", bound="ValueObject")
 
 
 class ValueObject(BaseModel, ABC):
-    """Base class for all value objects."""
+    """Base class for all value objects.
+
+    Subclasses that define ``@model_serializer`` serialize to a **single scalar
+    shape** (e.g. ``ResourceId`` → ``str``, ``Tags`` → ``dict``).  This is
+    intentional: Pydantic's ``model_dump`` / ``model_validate`` round-trip works
+    correctly because the matching ``@model_validator(mode="before")`` accepts
+    that same scalar on the way back in.
+
+    Constraint — if a second serialization shape is ever needed (e.g. a verbose
+    ``{"value": ..., "meta": ...}`` form alongside the plain-scalar form), do
+    **not** add a second ``@model_serializer`` branch here.  Instead, move the
+    alternative serialization to the infrastructure layer (e.g. a dedicated
+    ``to_dict`` method on the repository serializer or DTO factory) so the
+    domain value object stays single-purpose.
+    """
 
     model_config = ConfigDict(
         frozen=True,  # Value objects are immutable

@@ -54,13 +54,7 @@ class MachineReferenceDTO(BaseDTO):
 
         return cls(
             machine_id=str(machine.machine_id.value),
-            name=(
-                machine.name
-                or machine.private_dns_name
-                or machine.public_dns_name
-                or machine.private_ip
-                or str(machine.machine_id.value)
-            ),
+            name=machine.display_name,
             result=map_machine_status_to_result(status, request_type=rt_str),
             status=status,
             private_ip_address=machine.private_ip or "",
@@ -68,7 +62,7 @@ class MachineReferenceDTO(BaseDTO):
             instance_type=str(machine.instance_type) if machine.instance_type else None,
             price_type=machine.price_type,
             vcpus=machine.metadata.get("vcpus") if machine.metadata else None,
-            launch_time=int(machine.launch_time.timestamp()) if machine.launch_time else 0,
+            launch_time=int(machine.launch_time.timestamp()) if machine.launch_time else None,
             cloud_host_id=machine.provider_data.get("cloud_host_id"),
             request_id=machine.request_id,
             return_request_id=machine.return_request_id,

@@ -21,13 +21,7 @@ class RequestDTOFactory:
         machine_references = [
             MachineReferenceDTO(
                 machine_id=str(machine.machine_id.value),
-                name=(
-                    machine.name
-                    or machine.private_dns_name
-                    or machine.public_dns_name
-                    or machine.private_ip
-                    or str(machine.machine_id.value)
-                ),
+                name=machine.display_name,
                 result=self.map_machine_status_to_result(
                     machine.status.value, request.request_type
                 ),

@@ -11,7 +11,6 @@ from orb.infrastructure.logging.logger import get_logger
 from orb.infrastructure.storage.base.repository_mixin import StorageRepositoryMixin
 from orb.infrastructure.storage.base.strategy import BaseStorageStrategy
 from orb.infrastructure.storage.components.entity_serializer import BaseEntitySerializer
-from orb.infrastructure.storage.constants import LEGACY_DEFAULT_PROVIDER_TYPE
 
 
 class MachineSerializer(BaseEntitySerializer):
@@ -50,19 +49,34 @@ class MachineSerializer(BaseEntitySerializer):
 
         Runs on every read to handle legacy data quirks and future
         schema evolution. Each fixup is idempotent.
+
+        Categories:
+          - FIELD MIGRATION: field was renamed or moved between schema versions
+          - LEGACY DEFAULT:  field was absent in old records; the aggregate now
+                             carries a Field(default=...) so these fixups are only
+                             needed for fields whose storage default differs from
+                             the aggregate default, or where the key must be
+                             present for model_validate to accept the record.
         """
         data = dict(data)  # shallow copy — don't mutate the caller's dict
-        # Name fallback: legacy records may not have a name field
+
+        # FIELD MIGRATION: legacy records may not have a name field; use
+        # machine_id as a stand-in so the aggregate's Optional[str] name stays
+        # meaningful rather than blank.
         if not data.get("name"):
             data["name"] = data.get("machine_id", "")
-        # Tags may live in metadata.tags on old records
+
+        # FIELD MIGRATION: tags were stored under metadata.tags in very old
+        # records before the top-level tags field was introduced.
         if not data.get("tags"):
             legacy_tags = (data.get("metadata") or {}).get("tags")
             if legacy_tags:
                 data["tags"] = legacy_tags
-        # provider_type default for very old records
-        if "provider_type" not in data:
-            data.setdefault("provider_type", LEGACY_DEFAULT_PROVIDER_TYPE)
+
+        # provider_type: Machine.provider_type now has Field(default="aws"), so
+        # model_validate will supply the default when the key is absent.
+        # No fixup needed here.
+
         return data
 
 

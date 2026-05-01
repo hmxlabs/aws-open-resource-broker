@@ -424,7 +424,9 @@ class HostFactorySchedulerStrategy(BaseSchedulerStrategy):
             "template_id": raw_data.get("templateId"),
             "name": raw_data.get("name"),
             "description": raw_data.get("description"),
-            # Instance configuration
+            # Instance configuration — vmType/vmTypes mapped to machine_types using
+            # the same logic as _transform_machine_types_input so both code paths
+            # produce identical output.
             "instance_type": raw_data.get("vmType"),
             "image_id": raw_data.get("imageId"),
             "max_instances": raw_data.get("maxNumber", 1),
@@ -445,8 +447,6 @@ class HostFactorySchedulerStrategy(BaseSchedulerStrategy):
             "updated_at": raw_data.get("updatedAt"),
             "is_active": raw_data.get("isActive", True),
             # HostFactory-specific fields
-            "vm_type": raw_data.get("vmType"),
-            "vm_types": raw_data.get("vmTypes", {}),
             "key_name": raw_data.get("keyName"),
             "user_data": raw_data.get("userData"),
             # Native spec fields
@@ -455,6 +455,9 @@ class HostFactorySchedulerStrategy(BaseSchedulerStrategy):
             "provider_api_spec": raw_data.get("provider_api_spec"),
             "provider_api_spec_file": raw_data.get("provider_api_spec_file"),
         }
+
+        # Map vmType/vmTypes → machine_types (same logic as _transform_machine_types_input)
+        domain_data.update(self._transform_machine_types_input(raw_data))
 
         # Create TemplateDTO object with validation
         return cast(TemplateDTO, TemplateDTO.from_dict(domain_data))

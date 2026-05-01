@@ -99,7 +99,6 @@ class RequestSerializer(BaseEntitySerializer):
                 "version": request.version,
                 # Legacy fields for backward compatibility
                 "timeout": request.metadata.get("timeout"),
-                "tags": request.metadata.get("tags", {}),
                 "error_message": request.status_message,  # Legacy field name
                 # Schema version for migration support
                 "schema_version": "2.0.0",

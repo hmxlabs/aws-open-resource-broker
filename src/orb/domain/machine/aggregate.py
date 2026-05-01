@@ -40,7 +40,7 @@ class Machine(AggregateRoot):
     template_id: str
     request_id: Optional[str] = None
     return_request_id: Optional[str] = None
-    provider_type: str
+    provider_type: str = Field(default="aws")
     provider_name: str
     provider_api: Optional[str] = None
     resource_id: Optional[str] = None
@@ -240,6 +240,25 @@ class Machine(AggregateRoot):
     def get_provider_data(self, key: str, default: Any = None) -> Any:
         """Get provider-specific data value."""
         return self.provider_data.get(key, default)
+
+    @property
+    def display_name(self) -> str:
+        """Resolve a human-readable name for the machine.
+
+        Resolution chain (first non-empty value wins):
+          1. ``name``            — explicitly set name
+          2. ``private_dns_name`` — AWS-assigned private DNS
+          3. ``public_dns_name``  — AWS-assigned public DNS
+          4. ``private_ip``       — private IP address
+          5. ``str(machine_id)``  — always available fallback
+        """
+        return (
+            self.name
+            or self.private_dns_name
+            or self.public_dns_name
+            or (str(self.private_ip) if self.private_ip else None)
+            or str(self.machine_id)
+        )
 
     @property
     def is_running(self) -> bool:
