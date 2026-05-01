@@ -33,8 +33,6 @@ class MachineDTO(BaseDTO):
     public_dns_name: Optional[str] = None
     metadata: Optional[dict[str, Any]] = Field(default=None)
     health_checks: Optional[dict[str, Any]] = Field(default=None)
-    provider_data: dict[str, Any] = Field(default_factory=dict)
-    version: int = 0
 
     # Additional fields needed by formatter
     template_id: Optional[str] = None

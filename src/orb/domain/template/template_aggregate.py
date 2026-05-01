@@ -224,13 +224,6 @@ class Template(BaseModel):
             return self.__class__.model_validate(fields)
         return self
 
-    def set_provider_config(self, config: dict[str, Any]) -> "Template":
-        """Set provider-specific configuration."""
-        fields = self.model_dump(mode="json")
-        fields["provider_config"] = {**self.provider_config, **config}  # type: ignore[attr-defined]
-        fields["updated_at"] = datetime.now()
-        return Template.model_validate(fields)
-
     def __str__(self) -> str:
         """Return string representation of template."""
         return f"Template(id={self.template_id}, provider={self.provider_api}, instances={self.max_instances})"

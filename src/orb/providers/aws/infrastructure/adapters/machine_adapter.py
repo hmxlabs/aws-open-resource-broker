@@ -290,8 +290,6 @@ class AWSMachineAdapter:
                     "metadata": {
                         "availability_zone": aws_instance_data["Placement"]["AvailabilityZone"],
                         "vcpus": self._get_vcpus(aws_instance_data["InstanceType"]),
-                        "subnet_id": aws_instance_data["SubnetId"],
-                        "vpc_id": aws_instance_data["VpcId"],
                         "ami_id": aws_instance_data["ImageId"],
                         "ebs_optimized": aws_instance_data.get("EbsOptimized", False),
                         "monitoring": aws_instance_data.get("Monitoring", {}).get(
