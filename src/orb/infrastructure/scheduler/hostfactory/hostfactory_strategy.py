@@ -646,11 +646,11 @@ class HostFactorySchedulerStrategy(BaseSchedulerStrategy):
                 {
                     # Domain -> HostFactory field mapping using consistent serialization
                     "machineId": str(machine.machine_id),
-                    "templateId": str(machine.template_id),
-                    "requestId": str(machine.request_id),
+                    "templateId": machine.template_id or "",
+                    "requestId": machine.request_id or "",
                     "returnRequestId": machine.return_request_id,
                     "vmType": str(machine.instance_type),
-                    "imageId": str(machine.image_id),
+                    "imageId": machine.image_id or "",
                     "privateIp": machine.private_ip,
                     "publicIp": machine.public_ip,
                     "subnetId": machine.subnet_id,

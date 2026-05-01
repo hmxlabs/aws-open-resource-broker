@@ -69,15 +69,14 @@ class MachineReferenceDTO(BaseDTO):
             price_type=machine.price_type,
             vcpus=machine.metadata.get("vcpus") if machine.metadata else None,
             launch_time=int(machine.launch_time.timestamp()) if machine.launch_time else 0,
-            cloud_host_id=(
-                machine.provider_data.get("cloud_host_id") or str(machine.machine_id.value)
-            ),
+            cloud_host_id=machine.provider_data.get("cloud_host_id"),
             request_id=machine.request_id,
             return_request_id=machine.return_request_id,
             availability_zone=(
                 machine.metadata.get("availability_zone") if machine.metadata else None
             ),
             tags=machine.tags.tags if machine.tags and machine.tags.tags else None,
+            message=machine.status_reason or "",
         )
 
     @classmethod
@@ -193,7 +192,10 @@ class RequestDTO(BaseDTO):
             # Get existing machine references (domain model may not have this field)
             domain_refs = getattr(request, "machine_references", None)
             if domain_refs:
-                machine_refs = [MachineReferenceDTO.from_domain(m) for m in domain_refs]
+                machine_refs = [
+                    MachineReferenceDTO.from_machine(m, request.request_type)
+                    for m in domain_refs
+                ]
 
         # Create the DTO with all available fields
         return cls(
