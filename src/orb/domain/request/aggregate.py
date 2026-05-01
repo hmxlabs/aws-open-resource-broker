@@ -64,10 +64,11 @@ class Request(AggregateRoot):
 
     # Request state
     status: RequestStatus = Field(default=RequestStatus.PENDING)
+    # Human-readable description of the current status — set by domain methods
+    # (fail, cancel, complete, add_failure, update_status) and surfaced to callers
+    # via RequestDTO.message.  The HF wire-format "message" key is produced by
+    # RequestDTO.from_domain, which maps this field; it is NOT stored separately.
     status_message: Optional[str] = None
-
-    # HF output fields
-    message: Optional[str] = None
 
     # Results
     successful_count: int = 0

@@ -80,8 +80,10 @@ class RequestSerializer(BaseEntitySerializer):
                 # Resource tracking fields
                 "resource_ids": request.resource_ids,
                 "machine_ids": request.machine_ids,
-                # HF output fields
-                "message": request.message,
+                # Legacy HF wire-format key — written as an alias for status_message so
+                # that records read back by older ORB versions still have a "message" key.
+                # On read, from_dict treats "message" as a fallback for status_message.
+                "message": request.status_message,
                 # Results and instances
                 "successful_count": request.successful_count,
                 "failed_count": request.failed_count,
@@ -125,7 +127,12 @@ class RequestSerializer(BaseEntitySerializer):
                 ),  # Default to requested_count if not present
                 "request_type": RequestType(data["request_type"]),
                 "status": RequestStatus(data["status"]),
-                "status_message": data.get("status_message", data.get("error_message")),
+                # "message" is the legacy HF wire-format key written by older serializer
+                # versions.  Prefer the canonical "status_message"; fall back to
+                # "error_message" (even older alias), then "message".
+                "status_message": data.get("status_message")
+                or data.get("error_message")
+                or data.get("message"),
                 # Provider tracking fields
                 "provider_name": data.get("provider_name"),
                 "provider_api": data.get("provider_api"),
@@ -137,8 +144,6 @@ class RequestSerializer(BaseEntitySerializer):
                 "machine_ids": [
                     mid for mid in (data.get("machine_ids", []) or []) if mid is not None
                 ],
-                # HF output fields
-                "message": data.get("message"),
                 # Results and instances
                 "successful_count": data.get("successful_count", 0),
                 "failed_count": data.get("failed_count", 0),

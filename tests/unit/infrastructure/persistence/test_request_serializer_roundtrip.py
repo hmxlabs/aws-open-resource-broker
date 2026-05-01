@@ -33,8 +33,6 @@ def _make_fully_populated_request() -> Request:
         # Request state
         status=RequestStatus.IN_PROGRESS,
         status_message="Processing request",
-        # HF output fields
-        message="Launched via HF",
         # Results
         successful_count=2,
         failed_count=1,
@@ -172,7 +170,6 @@ class TestRequestSerializerRoundTrip:
         assert restored.started_at is None
         assert restored.completed_at is None
         assert restored.status_message is None
-        assert restored.message is None
 
     def test_round_trip_return_request(self):
         """A RETURN request with machine_ids must survive serialization."""

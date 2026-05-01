@@ -49,10 +49,11 @@ def test_request_serializer_covers_all_non_excluded_fields():
     # These are intentional serializer-level additions:
     #   machine_count   — legacy storage key for requested_count (backward compat)
     #   error_message   — legacy alias for status_message (backward compat)
+    #   message         — legacy alias for status_message (backward compat for HF readers)
     #   timeout         — denormalised from metadata for fast querying
     #   tags            — denormalised from metadata for fast querying
     #   schema_version  — migration-support meta key
-    serializer_only_keys = {"machine_count", "error_message", "timeout", "tags", "schema_version"}
+    serializer_only_keys = {"machine_count", "error_message", "message", "timeout", "tags", "schema_version"}
 
     missing = (model_fields - excluded) - serialized_keys
     extra = (serialized_keys - serializer_only_keys) - model_fields
