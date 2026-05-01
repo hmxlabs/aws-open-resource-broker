@@ -4,6 +4,19 @@ Single source of truth for the status→result translation used across the
 application layer (DTOs, query handlers) and infrastructure formatters.
 """
 
+import logging
+from enum import Enum
+
+logger = logging.getLogger(__name__)
+
+
+class ResultStatus(str, Enum):
+    """Result status values for machine references."""
+
+    SUCCEED = "succeed"
+    EXECUTING = "executing"
+    FAIL = "fail"
+
 
 def map_machine_status_to_result(
     status: str | None, request_type: str | None = None
@@ -20,16 +33,17 @@ def map_machine_status_to_result(
     """
     if request_type == "return":
         if status in ["terminated", "stopped"]:
-            return "succeed"
+            return ResultStatus.SUCCEED
         elif status in ["shutting-down", "stopping", "pending", "terminating", "running"]:
-            return "executing"
+            return ResultStatus.EXECUTING
         else:
-            return "fail"
+            return ResultStatus.FAIL
     elif status == "running":
-        return "succeed"
+        return ResultStatus.SUCCEED
     elif status in ["pending", "launching"]:
-        return "executing"
+        return ResultStatus.EXECUTING
     elif status in ["terminated", "failed", "error"]:
-        return "fail"
+        return ResultStatus.FAIL
     else:
-        return "executing"
+        logger.warning("Unknown machine status %r; defaulting result to 'executing'", status)
+        return ResultStatus.EXECUTING
