@@ -119,7 +119,7 @@ class RequestSerializer(BaseEntitySerializer):
                 # Core request fields - handle RequestId properly
                 "request_id": self._parse_request_id(data["request_id"]),
                 "template_id": data["template_id"],
-                "requested_count": data.get("machine_count", data.get("requested_count", 1)),
+                "requested_count": data.get("requested_count", data.get("machine_count", 1)),
                 "desired_capacity": data.get(
                     "desired_capacity", data.get("machine_count", data.get("requested_count", 1))
                 ),  # Default to requested_count if not present
