@@ -65,7 +65,15 @@ class Machine(AggregateRoot):
 
     # Lifecycle timestamps
     launch_time: Optional[datetime] = None
-    launched_at: Optional[datetime] = None
+    """AWS-reported timestamp when the instance actually started running.
+    Set when the machine transitions to RUNNING status (sourced from the
+    cloud provider, e.g. EC2 LaunchTime). Used for uptime calculations,
+    DTOs, and external consumers."""
+    provisioning_started_at: Optional[datetime] = None
+    """ORB-internal timestamp recording when this broker initiated the
+    launch sequence (i.e. when start_launching() was called and the
+    machine moved from PENDING → LAUNCHING). Not propagated to DTOs or
+    external consumers — use launch_time for provider-reported start time."""
     termination_time: Optional[datetime] = None
 
     # Tags and metadata
@@ -107,7 +115,7 @@ class Machine(AggregateRoot):
 
         fields = self.model_dump()
         fields["status"] = MachineStatus.LAUNCHING
-        fields["launched_at"] = datetime.now(timezone.utc)
+        fields["provisioning_started_at"] = datetime.now(timezone.utc)
         fields["version"] = self.version + 1
 
         updated_machine = Machine.model_validate(fields)
@@ -124,7 +132,7 @@ class Machine(AggregateRoot):
             reason="Machine launching initiated",
             metadata={
                 "reason": "Machine launching initiated",
-                "timestamp": fields["launched_at"].isoformat(),
+                "timestamp": fields["provisioning_started_at"].isoformat(),
                 "machine_type": str(self.instance_type),
                 "provider_type": self.provider_type,
             },

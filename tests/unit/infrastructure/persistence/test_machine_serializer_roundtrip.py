@@ -45,7 +45,7 @@ def _make_fully_populated_machine() -> Machine:
         status_reason="Machine is healthy",
         # Lifecycle timestamps
         launch_time=datetime(2026, 1, 15, 10, 0, 0, tzinfo=timezone.utc),
-        launched_at=datetime(2026, 1, 15, 9, 59, 30, tzinfo=timezone.utc),
+        provisioning_started_at=datetime(2026, 1, 15, 9, 59, 30, tzinfo=timezone.utc),
         termination_time=None,
         # Tags and metadata
         tags=Tags(tags={"Environment": "test", "Owner": "team-orb", "Project": "roundtrip"}),
@@ -92,14 +92,14 @@ class TestMachineSerializerRoundTrip:
 
         assert restored.vpc_id == machine.vpc_id
 
-    def test_round_trip_launched_at(self):
-        """launched_at must survive serialization — it is set by start_launching() and differs from launch_time."""
+    def test_round_trip_provisioning_started_at(self):
+        """provisioning_started_at must survive serialization — it records when ORB initiated the launch."""
         machine = _make_fully_populated_machine()
         serializer = MachineSerializer()
 
         restored = serializer.from_dict(serializer.to_dict(machine))
 
-        assert restored.launched_at == machine.launched_at
+        assert restored.provisioning_started_at == machine.provisioning_started_at
 
     def test_serialized_dict_contains_vpc_id_key(self):
         """to_dict output must include a 'vpc_id' key so storage backends persist it."""
@@ -108,11 +108,11 @@ class TestMachineSerializerRoundTrip:
         assert "vpc_id" in serialized, "to_dict is missing 'vpc_id'"
         assert serialized["vpc_id"] == "vpc-0abc123def456789a"
 
-    def test_serialized_dict_contains_launched_at_key(self):
-        """to_dict output must include a 'launched_at' key so storage backends persist it."""
+    def test_serialized_dict_contains_provisioning_started_at_key(self):
+        """to_dict output must include a 'provisioning_started_at' key so storage backends persist it."""
         machine = _make_fully_populated_machine()
         serialized = MachineSerializer().to_dict(machine)
-        assert "launched_at" in serialized, "to_dict is missing 'launched_at'"
+        assert "provisioning_started_at" in serialized, "to_dict is missing 'provisioning_started_at'"
 
     def test_round_trip_with_none_optional_fields(self):
         """Optional fields set to None must also survive the round-trip without becoming something else."""
@@ -130,7 +130,7 @@ class TestMachineSerializerRoundTrip:
 
         # All optional network fields should remain None
         assert restored.vpc_id is None
-        assert restored.launched_at is None
+        assert restored.provisioning_started_at is None
         assert restored.private_ip is None
         assert restored.public_ip is None
         assert restored.subnet_id is None
