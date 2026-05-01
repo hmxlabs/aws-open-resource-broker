@@ -6,7 +6,10 @@ from typing import Any, Optional
 from pydantic import Field
 
 from orb.application.dto.base import BaseDTO
+from orb.application.machine.result_mapping import map_machine_status_to_result
+from orb.domain.machine.aggregate import Machine
 from orb.domain.request.aggregate import Request
+from orb.domain.request.request_types import RequestType
 from orb.domain.request.value_objects import MachineReference
 
 
@@ -31,9 +34,63 @@ class MachineReferenceDTO(BaseDTO):
     message: str = ""
 
     @classmethod
+    def from_machine(cls, machine: Machine, request_type: RequestType) -> "MachineReferenceDTO":
+        """
+        Create DTO from a Machine aggregate and its request type.
+
+        This is the preferred constructor — it populates all HF-required fields
+        directly from the Machine aggregate and computes ``result`` using the
+        correct request-type-aware mapping.
+
+        Args:
+            machine: Machine aggregate
+            request_type: RequestType of the owning request (drives result mapping)
+
+        Returns:
+            MachineReferenceDTO instance
+        """
+        status = machine.status.value if hasattr(machine.status, "value") else str(machine.status)
+        rt_str = request_type.value if hasattr(request_type, "value") else str(request_type)
+
+        return cls(
+            machine_id=str(machine.machine_id.value),
+            name=(
+                machine.name
+                or machine.private_dns_name
+                or machine.public_dns_name
+                or machine.private_ip
+                or str(machine.machine_id.value)
+            ),
+            result=map_machine_status_to_result(status, request_type=rt_str),
+            status=status,
+            private_ip_address=machine.private_ip or "",
+            public_ip_address=machine.public_ip,
+            instance_type=str(machine.instance_type) if machine.instance_type else None,
+            price_type=machine.price_type,
+            vcpus=machine.metadata.get("vcpus") if machine.metadata else None,
+            launch_time=int(machine.launch_time.timestamp()) if machine.launch_time else 0,
+            cloud_host_id=(
+                machine.provider_data.get("cloud_host_id") or str(machine.machine_id.value)
+            ),
+            request_id=machine.request_id,
+            return_request_id=machine.return_request_id,
+            availability_zone=(
+                machine.metadata.get("availability_zone") if machine.metadata else None
+            ),
+            tags=machine.tags.tags if machine.tags and machine.tags.tags else None,
+        )
+
+    @classmethod
     def from_domain(cls, machine_ref: MachineReference) -> "MachineReferenceDTO":
         """
-        Create DTO from domain object.
+        Create DTO from a MachineReference value object.
+
+        .. deprecated::
+            ``MachineReference.metadata`` is always ``None``, so ``instance_type``,
+            ``price_type``, ``launch_time``, ``cloud_host_id`` and ``tags`` will be
+            missing from the result.  Use :meth:`from_machine` with a ``Machine``
+            aggregate instead, or build ``MachineReferenceDTO`` directly via
+            ``RequestDTOFactory.create_from_domain``.
 
         Args:
             machine_ref: Machine reference domain object

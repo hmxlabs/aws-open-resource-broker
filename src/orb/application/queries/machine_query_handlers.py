@@ -16,6 +16,7 @@ from orb.application.machine.queries import (
     ConvertMachineStatusQuery,
     ValidateProviderStateQuery,
 )
+from orb.application.machine.result_mapping import map_machine_status_to_result
 from orb.application.ports.command_bus_port import CommandBusPort
 from orb.application.services.machine_sync_service import MachineSyncService
 from orb.domain.base import UnitOfWorkFactory
@@ -59,7 +60,7 @@ class GetMachineHandler(BaseQueryHandler[GetMachineQuery, MachineDTO]):
                     public_ip=machine.public_ip,
                     private_dns_name=machine.private_dns_name,
                     public_dns_name=machine.public_dns_name,
-                    result=MachineDTO._get_result_status(machine.status.value),
+                    result=map_machine_status_to_result(machine.status.value),
                     launch_time=self.timestamp_service.format_for_dto(machine.launch_time),
                     message=machine.status_reason or "",
                     provider_api=machine.provider_api,
@@ -179,7 +180,7 @@ class ListMachinesHandler(BaseQueryHandler[ListMachinesQuery, list[MachineDTO]])
                         private_dns_name=machine.private_dns_name,
                         public_dns_name=machine.public_dns_name,
                         price_type=machine.price_type,
-                        result=MachineDTO._get_result_status(machine.status.value),
+                        result=map_machine_status_to_result(machine.status.value),
                         launch_time=self.timestamp_service.format_with_type(
                             machine.launch_time, query.timestamp_format or "auto"
                         ),

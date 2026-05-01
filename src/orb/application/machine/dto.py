@@ -6,8 +6,8 @@ from typing import Any, Optional, Union
 from pydantic import Field
 
 from orb.application.dto.base import BaseDTO
+from orb.application.machine.result_mapping import map_machine_status_to_result
 from orb.domain.machine.aggregate import Machine
-from orb.domain.machine.value_objects import MachineStatus
 
 
 class MachineDTO(BaseDTO):
@@ -45,15 +45,6 @@ class MachineDTO(BaseDTO):
     provider_data: dict[str, Any] = Field(default_factory=dict)
     version: int = 0
 
-    @staticmethod
-    def _get_result_status(status: str) -> str:
-        """Get result status as per HostFactory requirements."""
-        if status == MachineStatus.RUNNING.value:
-            return "succeed"
-        elif status in [MachineStatus.FAILED.value, MachineStatus.TERMINATED.value]:
-            return "fail"
-        return "executing"
-
     @classmethod
     def from_domain(cls, machine: Machine, long: bool = False) -> "MachineDTO":
         """
@@ -76,7 +67,8 @@ class MachineDTO(BaseDTO):
             "instance_type": str(machine.instance_type),
             "private_ip": str(machine.private_ip),
             "public_ip": str(machine.public_ip) if machine.public_ip else None,
-            "result": cls._get_result_status(status),
+            # No request_type available here (machine list/get context) — acquire mapping applies
+            "result": map_machine_status_to_result(status),
             "launch_time": int(machine.launch_time.timestamp()) if machine.launch_time else None,
             "message": machine.metadata.get("message", "") if machine.metadata else "",
             "request_id": str(machine.request_id) if machine.request_id else None,

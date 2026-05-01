@@ -1,5 +1,6 @@
 """Request DTO factory for data transformation."""
 
+from orb.application.machine.result_mapping import map_machine_status_to_result
 from orb.application.request.dto import MachineReferenceDTO, RequestDTO
 from orb.domain.machine.aggregate import Machine
 from orb.domain.request.aggregate import Request
@@ -52,18 +53,5 @@ class RequestDTOFactory:
 
     def map_machine_status_to_result(self, status: str, request_type: RequestType) -> str:
         """Map machine status to result code."""
-        if request_type == RequestType.RETURN:
-            # For return requests, terminated is success, pending is executing
-            if status in ["terminated", "stopped"]:
-                return "succeed"
-            elif status in ["pending", "terminating", "shutting-down", "stopping", "running"]:
-                return "executing"
-            else:
-                return "fail"
-        # For acquire requests, running is success, pending is executing
-        elif status == "running":
-            return "succeed"
-        elif status in ["pending", "launching"]:
-            return "executing"
-        else:
-            return "fail"
+        rt_str = request_type.value if hasattr(request_type, "value") else str(request_type)
+        return map_machine_status_to_result(status, request_type=rt_str)

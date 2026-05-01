@@ -4,6 +4,7 @@ import json
 from typing import Any
 
 from orb.application.dto.responses import MachineDTO
+from orb.application.machine.result_mapping import map_machine_status_to_result as _map_result
 from orb.application.request.dto import RequestDTO
 from orb.infrastructure.template.dtos import TemplateDTO
 
@@ -295,21 +296,7 @@ class HostFactoryResponseFormatter:
         self, status: str | None, request_type: str | None = None
     ) -> str:
         """Map machine status to HostFactory result field per hf_docs/input-output.md."""
-        if request_type == "return":
-            if status in ["terminated", "stopped"]:
-                return "succeed"
-            elif status in ["shutting-down", "stopping", "pending", "terminating", "running"]:
-                return "executing"
-            else:
-                return "fail"
-        elif status == "running":
-            return "succeed"
-        elif status in ["pending", "launching"]:
-            return "executing"
-        elif status in ["terminated", "failed", "error"]:
-            return "fail"
-        else:
-            return "executing"
+        return _map_result(status, request_type=request_type)
 
     def map_domain_status_to_hostfactory(self, domain_status: str) -> str:
         """Map domain status to HostFactory status per hf_docs/input-output.md."""
