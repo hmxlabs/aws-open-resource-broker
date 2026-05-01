@@ -112,7 +112,9 @@ class TestMachineSerializerRoundTrip:
         """to_dict output must include a 'provisioning_started_at' key so storage backends persist it."""
         machine = _make_fully_populated_machine()
         serialized = MachineSerializer().to_dict(machine)
-        assert "provisioning_started_at" in serialized, "to_dict is missing 'provisioning_started_at'"
+        assert "provisioning_started_at" in serialized, (
+            "to_dict is missing 'provisioning_started_at'"
+        )
 
     def test_round_trip_with_none_optional_fields(self):
         """Optional fields set to None must also survive the round-trip without becoming something else."""

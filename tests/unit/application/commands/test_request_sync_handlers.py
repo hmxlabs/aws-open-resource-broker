@@ -80,6 +80,7 @@ def _make_handler(
 # Tests
 # ---------------------------------------------------------------------------
 
+
 class TestPopulateMachineIdsDispatch:
     @pytest.mark.asyncio
     async def test_dispatch_includes_provider_api_and_template_id(self):
@@ -90,9 +91,7 @@ class TestPopulateMachineIdsDispatch:
 
         async def _execute_operation(provider_name: str, operation: Operation) -> OperationResult:
             captured_operations.append(operation)
-            return OperationResult.success_result(
-                data={"instances": [{"instance_id": "i-abc123"}]}
-            )
+            return OperationResult.success_result(data={"instances": [{"instance_id": "i-abc123"}]})
 
         provider_selection_port = MagicMock()
         provider_selection_port.execute_operation = _execute_operation

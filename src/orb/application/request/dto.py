@@ -187,8 +187,7 @@ class RequestDTO(BaseDTO):
             domain_refs = getattr(request, "machine_references", None)
             if domain_refs:
                 machine_refs = [
-                    MachineReferenceDTO.from_machine(m, request.request_type)
-                    for m in domain_refs
+                    MachineReferenceDTO.from_machine(m, request.request_type) for m in domain_refs
                 ]
 
         # Create the DTO with all available fields

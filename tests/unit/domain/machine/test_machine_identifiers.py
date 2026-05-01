@@ -1,6 +1,5 @@
 """Unit tests for MachineId self-flattening serialization."""
 
-
 from orb.domain.machine.machine_identifiers import MachineId
 
 

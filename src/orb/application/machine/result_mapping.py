@@ -18,9 +18,7 @@ class ResultStatus(str, Enum):
     FAIL = "fail"
 
 
-def map_machine_status_to_result(
-    status: str | None, request_type: str | None = None
-) -> str:
+def map_machine_status_to_result(status: str | None, request_type: str | None = None) -> str:
     """Map machine status to HostFactory result field.
 
     Args:

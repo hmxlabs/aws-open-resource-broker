@@ -22,6 +22,7 @@ from orb.infrastructure.scheduler.hostfactory.response_formatter import (
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_request() -> Request:
     """Build a minimal ACQUIRE Request with a generated (valid) request ID."""
     return Request.create_new_request(
@@ -58,6 +59,7 @@ def _make_machine(request_id: str) -> Machine:
 # ---------------------------------------------------------------------------
 # Contract test
 # ---------------------------------------------------------------------------
+
 
 class TestMachineFieldContract:
     """End-to-end contract: Machine → MachineReferenceDTO → HF wire format."""
@@ -121,9 +123,7 @@ class TestMachineFieldContract:
         assert m["privateIpAddress"] == "10.0.1.42", "privateIpAddress dropped"
 
         # Timing
-        expected_launchtime = int(
-            datetime(2026, 4, 29, 12, 0, 0, tzinfo=timezone.utc).timestamp()
-        )
+        expected_launchtime = int(datetime(2026, 4, 29, 12, 0, 0, tzinfo=timezone.utc).timestamp())
         assert m["launchtime"] == expected_launchtime, "launchtime dropped"
 
         # Instance characteristics
@@ -165,7 +165,9 @@ class TestMachineFieldContract:
         assert m["result"] == "executing"
 
         # instance_type is required on Machine so it always appears in the wire output
-        assert m.get("instanceType") == "t3.micro", "instanceType should reflect machine instance_type"
+        assert m.get("instanceType") == "t3.micro", (
+            "instanceType should reflect machine instance_type"
+        )
 
         # price_type and tags are truly optional — absent when not set on the Machine
         assert "priceType" not in m, "priceType should be absent when not set"
