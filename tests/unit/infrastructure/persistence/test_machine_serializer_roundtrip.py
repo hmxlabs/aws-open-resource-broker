@@ -90,9 +90,7 @@ class TestMachineSerializerRoundTrip:
             if field_name == "metadata":
                 # After migration, migrated keys are removed from metadata
                 expected_metadata = {
-                    k: v
-                    for k, v in original_dump["metadata"].items()
-                    if k not in _migrated_keys
+                    k: v for k, v in original_dump["metadata"].items() if k not in _migrated_keys
                 }
                 assert restored_dump["metadata"] == expected_metadata, (
                     f"Field 'metadata' mismatch after migration: "

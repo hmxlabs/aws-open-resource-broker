@@ -569,15 +569,15 @@ class HostFactorySchedulerStrategy(BaseSchedulerStrategy):
         """
         items: list[dict[str, Any]] = []
         for r in requests:
-            d = r if isinstance(r, dict) else (
-                r.to_dict() if hasattr(r, "to_dict") else r.model_dump()
+            d = (
+                r
+                if isinstance(r, dict)
+                else (r.to_dict() if hasattr(r, "to_dict") else r.model_dump())
             )
             grace_period = int(d.get("grace_period", 0))
             machines = d.get("machines") or d.get("machine_references") or []
             for m in machines:
-                m_dict = m if isinstance(m, dict) else (
-                    m.to_dict() if hasattr(m, "to_dict") else m
-                )
+                m_dict = m if isinstance(m, dict) else (m.to_dict() if hasattr(m, "to_dict") else m)
                 # Fall back to machine_id when hostname is absent so the item
                 # stays non-empty — HF still accepts the entry.
                 identifier = m_dict.get("name") or m_dict.get("machine_id")
@@ -585,7 +585,9 @@ class HostFactorySchedulerStrategy(BaseSchedulerStrategy):
                     items.append({"machine": identifier, "gracePeriod": grace_period})
         return {
             "status": "complete",
-            "message": "Return requests retrieved successfully." if items else "No machines to return.",
+            "message": "Return requests retrieved successfully."
+            if items
+            else "No machines to return.",
             "requests": items,
         }
 

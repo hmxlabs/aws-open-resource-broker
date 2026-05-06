@@ -202,13 +202,9 @@ class AWSMachineAdapter:
                     )
                     _terminal_pd: dict[str, Any] = {
                         "cloud_host_id": aws_instance_data["InstanceId"],
-                        "vcpus": self._get_vcpus(
-                            aws_instance_data.get("InstanceType", "unknown")
-                        ),
+                        "vcpus": self._get_vcpus(aws_instance_data.get("InstanceType", "unknown")),
                         "region": (
-                            _terminal_az[:-1]
-                            if _terminal_az
-                            else self._aws_client.region_name
+                            _terminal_az[:-1] if _terminal_az else self._aws_client.region_name
                         ),
                     }
                     if _terminal_az:
@@ -352,9 +348,7 @@ class AWSMachineAdapter:
                 provider_data["region"] = az[:-1]
             else:
                 provider_data["region"] = self._aws_client.region_name
-            provider_data["vcpus"] = self._get_vcpus(
-                aws_instance_data.get("instance_type", "")
-            )
+            provider_data["vcpus"] = self._get_vcpus(aws_instance_data.get("instance_type", ""))
 
             field_mappings = {
                 "network_interfaces": "network_interfaces",
@@ -382,9 +376,7 @@ class AWSMachineAdapter:
                 provider_data["region"] = az[:-1]
             else:
                 provider_data["region"] = self._aws_client.region_name
-            provider_data["vcpus"] = self._get_vcpus(
-                aws_instance_data.get("InstanceType", "")
-            )
+            provider_data["vcpus"] = self._get_vcpus(aws_instance_data.get("InstanceType", ""))
 
             field_mappings = {
                 "network_interfaces": "NetworkInterfaces",
@@ -431,7 +423,9 @@ class AWSMachineAdapter:
                 "details": {
                     "state_reason": state_reason,
                     "state_transition_reason": state_transition_reason,
-                } if has_reason else None,
+                }
+                if has_reason
+                else None,
             }
 
         return provider_data

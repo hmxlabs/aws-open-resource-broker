@@ -186,12 +186,16 @@ def test_create_hf_attributes_no_ncores(hf):
 
 def test_create_hf_attributes_ncpus_is_string(hf):
     attrs = hf.field_mapper._create_hf_attributes("t3.micro")
-    assert isinstance(attrs["ncpus"][1], str), f"ncpus value should be str, got {type(attrs['ncpus'][1])}"
+    assert isinstance(attrs["ncpus"][1], str), (
+        f"ncpus value should be str, got {type(attrs['ncpus'][1])}"
+    )
 
 
 def test_create_hf_attributes_nram_is_string(hf):
     attrs = hf.field_mapper._create_hf_attributes("t3.micro")
-    assert isinstance(attrs["nram"][1], str), f"nram value should be str, got {type(attrs['nram'][1])}"
+    assert isinstance(attrs["nram"][1], str), (
+        f"nram value should be str, got {type(attrs['nram'][1])}"
+    )
 
 
 def test_create_hf_attributes_pattern(hf):
@@ -229,7 +233,9 @@ def test_fail_result_with_no_detail_gets_default_message(hf):
 
 
 def test_fail_result_with_status_reason_uses_it(hf):
-    machines = [{"machine_id": "i-fail", "status": "failed", "status_reason": "InsufficientCapacity"}]
+    machines = [
+        {"machine_id": "i-fail", "status": "failed", "status_reason": "InsufficientCapacity"}
+    ]
     formatted = hf._format_machines_for_hostfactory(machines, request_type="provision")
     assert formatted[0]["message"] == "InsufficientCapacity"
 

@@ -190,16 +190,18 @@ class BaseSchedulerStrategy(SchedulerPort, ABC):
         out = []
         for r in requests:
             d = _d(r)
-            out.append({
-                "request_id": d.get("request_id"),
-                "status": d.get("status"),
-                "message": d.get("message"),
-                "grace_period": d.get("grace_period"),
-                "machines": [
-                    {"machine_id": _d(m).get("machine_id"), "name": _d(m).get("name")}
-                    for m in (d.get("machines") or d.get("machine_references") or [])
-                ],
-            })
+            out.append(
+                {
+                    "request_id": d.get("request_id"),
+                    "status": d.get("status"),
+                    "message": d.get("message"),
+                    "grace_period": d.get("grace_period"),
+                    "machines": [
+                        {"machine_id": _d(m).get("machine_id"), "name": _d(m).get("name")}
+                        for m in (d.get("machines") or d.get("machine_references") or [])
+                    ],
+                }
+            )
         return {"return_requests": out}
 
     def format_request_status_response(self, requests: list[RequestDTO]) -> dict[str, Any]:

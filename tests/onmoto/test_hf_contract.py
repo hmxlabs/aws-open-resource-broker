@@ -353,7 +353,9 @@ class TestGetAvailableTemplatesSchema:
             attrs = tmpl["attributes"]
             for key in ("type", "ncpus", "nram"):
                 assert key in attrs, f"Template {tmpl.get('templateId')} attributes missing '{key}'"
-            assert "ncores" not in attrs, f"Template {tmpl.get('templateId')} must not have ncores (LSF-only)"
+            assert "ncores" not in attrs, (
+                f"Template {tmpl.get('templateId')} must not have ncores (LSF-only)"
+            )
 
     def test_hf_instance_tags_is_string_not_dict(self, hf_strat, orb_config_dir):
         """instanceTags in HF response is a string (not a dict) when present."""

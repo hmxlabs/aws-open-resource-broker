@@ -190,7 +190,12 @@ class AWSProviderStrategy(ProviderStrategy):
                         "execution_time_ms": execution_time_ms,
                         "provider": "aws",
                     },
-                    "metadata": {**result.metadata, "dry_run": is_dry_run, "execution_time_ms": execution_time_ms, "provider": "aws"},
+                    "metadata": {
+                        **result.metadata,
+                        "dry_run": is_dry_run,
+                        "execution_time_ms": execution_time_ms,
+                        "provider": "aws",
+                    },
                 }
             )
 

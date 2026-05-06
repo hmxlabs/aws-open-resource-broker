@@ -149,7 +149,15 @@ class TestMachineDTOFromDomain:
 
     def test_all_previously_gated_fields_declared(self):
         """Regression guard: all formerly long-gated fields must be declared on the model."""
-        for field in ("provider_api", "resource_id", "price_type", "cloud_host_id",
-                      "metadata", "health_checks", "provider_data", "version",
-                      "return_request_id"):
+        for field in (
+            "provider_api",
+            "resource_id",
+            "price_type",
+            "cloud_host_id",
+            "metadata",
+            "health_checks",
+            "provider_data",
+            "version",
+            "return_request_id",
+        ):
             assert field in MachineDTO.model_fields, f"Missing field: {field}"

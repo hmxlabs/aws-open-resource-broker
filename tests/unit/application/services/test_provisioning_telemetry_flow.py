@@ -140,7 +140,11 @@ async def test_routing_info_from_composite_strategy_reaches_provider_data():
     svc = _make_service()
 
     provider_result = ProviderResult.success_result(
-        data={"resource_ids": ["i-comp"], "instances": [{"id": "i-comp"}], "instance_ids": ["i-comp"]},
+        data={
+            "resource_ids": ["i-comp"],
+            "instances": [{"id": "i-comp"}],
+            "instance_ids": ["i-comp"],
+        },
         metadata={},
     ).model_copy(
         update={
@@ -176,7 +180,11 @@ async def test_no_routing_info_does_not_break_provider_data():
     svc = _make_service()
 
     provider_result = ProviderResult.success_result(
-        data={"resource_ids": ["i-plain"], "instances": [{"id": "i-plain"}], "instance_ids": ["i-plain"]},
+        data={
+            "resource_ids": ["i-plain"],
+            "instances": [{"id": "i-plain"}],
+            "instance_ids": ["i-plain"],
+        },
         metadata={"some_key": "some_value"},
     )
     # routing_info is None by default

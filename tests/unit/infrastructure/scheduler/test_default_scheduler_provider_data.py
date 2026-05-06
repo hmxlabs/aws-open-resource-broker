@@ -49,14 +49,18 @@ class TestFormatRequestStatusFirstLastCheck:
         dto = _make_request_dto({})
         result = strategy.format_request_status_response([dto])
         # None values are excluded by to_dict(verbose=True) via exclude_none
-        assert result["requests"][0].get("first_status_check") is None or \
-               "first_status_check" not in result["requests"][0]
+        assert (
+            result["requests"][0].get("first_status_check") is None
+            or "first_status_check" not in result["requests"][0]
+        )
 
     def test_omits_last_status_check_when_none(self, strategy):
         dto = _make_request_dto({})
         result = strategy.format_request_status_response([dto])
-        assert result["requests"][0].get("last_status_check") is None or \
-               "last_status_check" not in result["requests"][0]
+        assert (
+            result["requests"][0].get("last_status_check") is None
+            or "last_status_check" not in result["requests"][0]
+        )
 
     def test_started_at_serialized_as_iso_string(self, strategy):
         dt = datetime(2024, 5, 10, 9, 0, 0)

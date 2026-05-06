@@ -234,8 +234,16 @@ def test_format_machine_status_response_core_fields_present(hf_strategy):
     )
     result = hf_strategy.format_machine_status_response([dto])
     machine = result["machines"][0]
-    for field in ("machineId", "templateId", "requestId", "vmType", "imageId",
-                  "privateIp", "status", "cloudHostId"):
+    for field in (
+        "machineId",
+        "templateId",
+        "requestId",
+        "vmType",
+        "imageId",
+        "privateIp",
+        "status",
+        "cloudHostId",
+    ):
         assert field in machine, f"Missing required field: {field}"
 
 

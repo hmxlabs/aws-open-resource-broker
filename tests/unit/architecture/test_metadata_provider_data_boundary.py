@@ -168,8 +168,7 @@ class TestMetadataProviderDataBoundary:
         violations = _scan_provider_data_violations()
         assert not violations, (
             f"provider_data written outside providers/ or aggregate.py "
-            f"({len(violations)} site(s)):\n"
-            + "\n".join(f"  src/orb/{v}" for v in violations)
+            f"({len(violations)} site(s)):\n" + "\n".join(f"  src/orb/{v}" for v in violations)
         )
 
     def test_metadata_writes_not_in_providers(self) -> None:

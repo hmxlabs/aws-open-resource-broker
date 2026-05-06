@@ -212,8 +212,13 @@ class DefaultSchedulerStrategy(BaseSchedulerStrategy):
     @staticmethod
     def _serialize_request_datetimes(d: dict[str, Any]) -> dict[str, Any]:
         """Convert any datetime values in a request dict to ISO 8601 strings."""
-        datetime_fields = ("created_at", "started_at", "completed_at",
-                           "first_status_check", "last_status_check")
+        datetime_fields = (
+            "created_at",
+            "started_at",
+            "completed_at",
+            "first_status_check",
+            "last_status_check",
+        )
         result = dict(d)
         for field in datetime_fields:
             val = result.get(field)
@@ -283,7 +288,11 @@ class DefaultSchedulerStrategy(BaseSchedulerStrategy):
 
         # Provider_data fields — prefer top-level if already present, else pull from provider_data
         for key in ("region", "availability_zone", "vcpus", "health_checks"):
-            val = machine_data.get(key) if machine_data.get(key) is not None else provider_data.get(key)
+            val = (
+                machine_data.get(key)
+                if machine_data.get(key) is not None
+                else provider_data.get(key)
+            )
             if val is not None:
                 result[key] = val
 
