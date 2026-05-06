@@ -139,10 +139,11 @@ def test_hf_format_templates_response_attributes_structure():
     dto = _make_template_dto(machine_types={"t3.medium": 1})
     result = strategy.format_templates_response([dto])
     attrs = result["templates"][0]["attributes"]
-    for key in ("type", "ncpus", "ncores", "nram"):
+    for key in ("type", "ncpus", "nram"):
         assert key in attrs
         assert isinstance(attrs[key], list)
         assert len(attrs[key]) == 2
+    assert "ncores" not in attrs, "ncores is LSF-only and must not appear in HF attributes"
 
 
 def test_hf_format_templates_response_instance_tags_serialised_as_string():

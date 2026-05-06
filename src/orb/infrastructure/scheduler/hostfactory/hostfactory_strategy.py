@@ -560,6 +560,35 @@ class HostFactorySchedulerStrategy(BaseSchedulerStrategy):
             "total_count": len(formatted_templates),
         }
 
+    def format_return_requests_response(self, requests: list[Any]) -> dict[str, Any]:
+        """HF-spec-compliant getReturnRequests response.
+
+        Flattens each request's machines into individual {machine, gracePeriod}
+        items per IBM Symphony HF 7.3.2 spec. The request-level grace_period
+        applies to every machine in that request.
+        """
+        items: list[dict[str, Any]] = []
+        for r in requests:
+            d = r if isinstance(r, dict) else (
+                r.to_dict() if hasattr(r, "to_dict") else r.model_dump()
+            )
+            grace_period = int(d.get("grace_period", 0))
+            machines = d.get("machines") or d.get("machine_references") or []
+            for m in machines:
+                m_dict = m if isinstance(m, dict) else (
+                    m.to_dict() if hasattr(m, "to_dict") else m
+                )
+                # Fall back to machine_id when hostname is absent so the item
+                # stays non-empty — HF still accepts the entry.
+                identifier = m_dict.get("name") or m_dict.get("machine_id")
+                if identifier:
+                    items.append({"machine": identifier, "gracePeriod": grace_period})
+        return {
+            "status": "complete",
+            "message": "Return requests retrieved successfully." if items else "No machines to return.",
+            "requests": items,
+        }
+
     def _build_hf_attributes(self, instance_type: str) -> dict[str, list[str]]:
         """Build IBM HF attributes dict from an instance type string."""
         from orb.providers.aws.utilities.ec2.instances import derive_cpu_ram_from_instance_type
@@ -568,7 +597,6 @@ class HostFactorySchedulerStrategy(BaseSchedulerStrategy):
         return {
             "type": ["String", "X86_64"],
             "ncpus": ["Numeric", str(ncpus)],
-            "ncores": ["Numeric", str(ncpus)],
             "nram": ["Numeric", str(nram)],
         }
 
@@ -652,6 +680,7 @@ class HostFactorySchedulerStrategy(BaseSchedulerStrategy):
                     "templateId": machine.template_id or "",
                     "requestId": machine.request_id or "",
                     "returnRequestId": machine.return_request_id,
+                    "cloudHostId": machine.cloud_host_id,
                     "vmType": str(machine.instance_type),
                     "imageId": machine.image_id or "",
                     "privateIp": machine.private_ip,
@@ -674,7 +703,6 @@ class HostFactorySchedulerStrategy(BaseSchedulerStrategy):
             "name": machine_data.get("name"),
             "status": machine_data.get("status"),
             "provider": machine_data.get("provider_type") or "aws",
-            "region": machine_data.get("region"),
             "machineId": machine_data.get("machine_id"),
             "returnRequestId": machine_data.get("return_request_id"),
             "vmType": machine_data.get("instance_type"),
@@ -812,7 +840,7 @@ class HostFactorySchedulerStrategy(BaseSchedulerStrategy):
                     machine.get("status_reason")
                     or machine.get("error")
                     or machine.get("message")
-                    or ""
+                    or "Machine failed (no detail available)"
                 )
             else:
                 message = machine.get("message", "")
