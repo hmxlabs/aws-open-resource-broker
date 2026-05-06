@@ -73,6 +73,22 @@ class MachineSerializer(BaseEntitySerializer):
             if legacy_tags:
                 data["tags"] = legacy_tags
 
+        # FIELD MIGRATION: vcpus, availability_zone, and region were written to
+        # metadata by the AWS adapter before the provider_data consolidation.
+        # Move them on-read so the aggregate always sees them in provider_data.
+        # Idempotent: only migrates a key when provider_data does not already
+        # have it, so re-reading a migrated record is a no-op.
+        _metadata = dict(data.get("metadata") or {})  # copy — do not mutate caller's dict
+        _provider_data = dict(data.get("provider_data") or {})
+        _migrated = False
+        for _key in ("vcpus", "availability_zone", "region"):
+            if _key in _metadata and _key not in _provider_data:
+                _provider_data[_key] = _metadata.pop(_key)
+                _migrated = True
+        if _migrated:
+            data["metadata"] = _metadata
+            data["provider_data"] = _provider_data
+
         # provider_type: Machine.provider_type now has Field(default="aws"), so
         # model_validate will supply the default when the key is absent.
         # No fixup needed here.

@@ -66,7 +66,13 @@ class TestMachineSerializerRoundTrip:
     """MachineSerializer must preserve every Machine field through to_dict → from_dict."""
 
     def test_round_trip_preserves_all_fields(self):
-        """If a field is added to Machine but not to MachineSerializer, this test fails."""
+        """If a field is added to Machine but not to MachineSerializer, this test fails.
+
+        Note: vcpus, availability_zone, and region are migrated from metadata to
+        provider_data on read (normalize_on_read migration). The round-trip therefore
+        produces a Machine whose metadata no longer contains those keys and whose
+        provider_data does. We compare the post-migration state, not the raw input.
+        """
         machine = _make_fully_populated_machine()
         serializer = MachineSerializer()
 
@@ -76,12 +82,37 @@ class TestMachineSerializerRoundTrip:
         original_dump = machine.model_dump(mode="json")
         restored_dump = restored.model_dump(mode="json")
 
-        # Compare every field individually for clear failure messages
+        # Keys migrated from metadata → provider_data on read; skip direct comparison
+        # and verify the migration happened correctly instead.
+        _migrated_keys = {"vcpus", "availability_zone", "region"}
+
         for field_name in original_dump:
-            assert original_dump[field_name] == restored_dump[field_name], (
-                f"Field '{field_name}' lost in round-trip: "
-                f"{original_dump[field_name]!r} != {restored_dump[field_name]!r}"
-            )
+            if field_name == "metadata":
+                # After migration, migrated keys are removed from metadata
+                expected_metadata = {
+                    k: v
+                    for k, v in original_dump["metadata"].items()
+                    if k not in _migrated_keys
+                }
+                assert restored_dump["metadata"] == expected_metadata, (
+                    f"Field 'metadata' mismatch after migration: "
+                    f"{restored_dump['metadata']!r} != {expected_metadata!r}"
+                )
+            elif field_name == "provider_data":
+                # After migration, migrated keys are added to provider_data
+                expected_provider_data = dict(original_dump["provider_data"])
+                for k in _migrated_keys:
+                    if k in original_dump.get("metadata", {}):
+                        expected_provider_data[k] = original_dump["metadata"][k]
+                assert restored_dump["provider_data"] == expected_provider_data, (
+                    f"Field 'provider_data' mismatch after migration: "
+                    f"{restored_dump['provider_data']!r} != {expected_provider_data!r}"
+                )
+            else:
+                assert original_dump[field_name] == restored_dump[field_name], (
+                    f"Field '{field_name}' lost in round-trip: "
+                    f"{original_dump[field_name]!r} != {restored_dump[field_name]!r}"
+                )
 
     def test_round_trip_vpc_id(self):
         """vpc_id must survive serialization — it is a network field absent from early serializer versions."""

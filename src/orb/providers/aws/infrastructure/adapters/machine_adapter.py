@@ -197,6 +197,22 @@ class AWSMachineAdapter:
                 # return a minimal record rather than failing validation.
                 instance_state = aws_instance_data["State"]["Name"]
                 if instance_state in ("shutting-down", "terminated", "stopping", "stopped"):
+                    _terminal_az = (aws_instance_data.get("Placement") or {}).get(
+                        "AvailabilityZone"
+                    )
+                    _terminal_pd: dict[str, Any] = {
+                        "cloud_host_id": aws_instance_data["InstanceId"],
+                        "vcpus": self._get_vcpus(
+                            aws_instance_data.get("InstanceType", "unknown")
+                        ),
+                        "region": (
+                            _terminal_az[:-1]
+                            if _terminal_az
+                            else self._aws_client.region_name
+                        ),
+                    }
+                    if _terminal_az:
+                        _terminal_pd["availability_zone"] = _terminal_az
                     return {
                         "instance_id": aws_instance_data["InstanceId"],
                         "request_id": request_id,
@@ -225,6 +241,7 @@ class AWSMachineAdapter:
                             if "Key" in tag
                         },
                         "metadata": {},
+                        "provider_data": _terminal_pd,
                     }
 
                 # Validate required fields for PascalCase format
@@ -288,8 +305,6 @@ class AWSMachineAdapter:
                         if "Key" in tag
                     },
                     "metadata": {
-                        "availability_zone": aws_instance_data["Placement"]["AvailabilityZone"],
-                        "vcpus": self._get_vcpus(aws_instance_data["InstanceType"]),
                         "ami_id": aws_instance_data["ImageId"],
                         "ebs_optimized": aws_instance_data.get("EbsOptimized", False),
                         "monitoring": aws_instance_data.get("Monitoring", {}).get(
@@ -329,6 +344,18 @@ class AWSMachineAdapter:
         if "instance_id" in aws_instance_data:
             # snake_case format — always populate cloud_host_id with the instance ID
             provider_data["cloud_host_id"] = aws_instance_data.get("instance_id")
+
+            # Provider-owned placement fields
+            az = (aws_instance_data.get("placement") or {}).get("availability_zone")
+            if az:
+                provider_data["availability_zone"] = az
+                provider_data["region"] = az[:-1]
+            else:
+                provider_data["region"] = self._aws_client.region_name
+            provider_data["vcpus"] = self._get_vcpus(
+                aws_instance_data.get("instance_type", "")
+            )
+
             field_mappings = {
                 "network_interfaces": "network_interfaces",
                 "block_device_mappings": "block_device_mappings",
@@ -347,6 +374,18 @@ class AWSMachineAdapter:
         else:
             # PascalCase format — always populate cloud_host_id with the instance ID
             provider_data["cloud_host_id"] = aws_instance_data.get("InstanceId")
+
+            # Provider-owned placement fields
+            az = (aws_instance_data.get("Placement") or {}).get("AvailabilityZone")
+            if az:
+                provider_data["availability_zone"] = az
+                provider_data["region"] = az[:-1]
+            else:
+                provider_data["region"] = self._aws_client.region_name
+            provider_data["vcpus"] = self._get_vcpus(
+                aws_instance_data.get("InstanceType", "")
+            )
+
             field_mappings = {
                 "network_interfaces": "NetworkInterfaces",
                 "block_device_mappings": "BlockDeviceMappings",
@@ -368,6 +407,32 @@ class AWSMachineAdapter:
             value = aws_instance_data.get(source_field)
             if value is not None:
                 provider_data[target_field] = value
+
+        # Synthesize basic health status from describe_instances data (no extra API call).
+        # Full health checks (system/instance status) require describe_instance_status
+        # which needs additional IAM permissions — available via explicit health command.
+        if "instance_id" in aws_instance_data:
+            instance_state = aws_instance_data.get("status")
+        else:
+            state = aws_instance_data.get("State") or {}
+            instance_state = state.get("Name") if isinstance(state, dict) else state
+
+        if instance_state == "running":
+            state_reason = provider_data.get("state_reason")
+            state_transition_reason = provider_data.get("state_transition_reason")
+            # state_reason from AWS is a dict like {"Code": "...", "Message": "..."}
+            # normalise to a plain string for the health_checks entry
+            if isinstance(state_reason, dict):
+                state_reason = state_reason.get("Message") or state_reason.get("message")
+            has_reason = bool(state_reason or state_transition_reason)
+            provider_data["health_checks"] = {
+                "status": "impaired" if has_reason else "ok",
+                "source": "describe_instances",
+                "details": {
+                    "state_reason": state_reason,
+                    "state_transition_reason": state_transition_reason,
+                } if has_reason else None,
+            }
 
         return provider_data
 
