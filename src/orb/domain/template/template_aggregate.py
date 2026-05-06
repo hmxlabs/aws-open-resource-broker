@@ -63,6 +63,9 @@ class Template(BaseModel):
     tags: dict[str, Any] = Field(default_factory=dict)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
+    # Provider-specific data (keyed by provider name, e.g. {"aws": {...}})
+    provider_data: dict[str, Any] = Field(default_factory=dict)
+
     # Provider configuration (multi-provider support)
     provider_type: Optional[str] = None
     provider_name: Optional[str] = None
