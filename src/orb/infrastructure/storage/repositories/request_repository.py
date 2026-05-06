@@ -95,6 +95,8 @@ class RequestSerializer(BaseEntitySerializer):
                 "created_at": request.created_at.isoformat(),  # type: ignore[union-attr]
                 "started_at": self._dt.serialize_datetime(request.started_at),
                 "completed_at": self._dt.serialize_datetime(request.completed_at),
+                "first_status_check": self._dt.serialize_datetime(request.first_status_check),
+                "last_status_check": self._dt.serialize_datetime(request.last_status_check),
                 # Versioning
                 "version": request.version,
                 # Legacy fields for backward compatibility
@@ -154,6 +156,8 @@ class RequestSerializer(BaseEntitySerializer):
                 "created_at": created_at,
                 "started_at": started_at,
                 "completed_at": completed_at,
+                "first_status_check": self._dt.deserialize_datetime(data.get("first_status_check")),
+                "last_status_check": self._dt.deserialize_datetime(data.get("last_status_check")),
                 # Versioning
                 "version": data.get("version", 0),
             }

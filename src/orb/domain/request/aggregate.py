@@ -77,6 +77,8 @@ class Request(AggregateRoot):
     # Lifecycle timestamps
     started_at: Optional[datetime] = None
     completed_at: Optional[datetime] = None
+    first_status_check: Optional[datetime] = None
+    last_status_check: Optional[datetime] = None
 
     # Request metadata
     metadata: dict[str, Any] = Field(default_factory=dict)
@@ -282,6 +284,19 @@ class Request(AggregateRoot):
     def update_machine_ids(self, machine_ids: list[str]) -> "Request":
         """Update machine IDs (for population)."""
         return self.model_copy(update={"machine_ids": machine_ids})
+
+    def record_status_check(self, now: datetime) -> "Request":
+        """Record that the request was polled for status.
+
+        first_status_check is set on the first poll and never overwritten.
+        last_status_check is updated on every call.
+        """
+        return self.model_copy(
+            update={
+                "first_status_check": self.first_status_check or now,
+                "last_status_check": now,
+            }
+        )
 
     def needs_machine_id_population(self) -> bool:
         """Check if request needs machine ID population."""
