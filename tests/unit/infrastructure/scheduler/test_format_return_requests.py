@@ -4,8 +4,6 @@ Covers Fix 1 (getReturnRequests envelope shape), Fix 3 (mandatory fail message),
 Fix 4 (no ncores in attributes), and Fix 5 (no region in machine details).
 """
 
-from datetime import datetime, timezone
-
 import pytest
 
 from orb.infrastructure.scheduler.hostfactory.hostfactory_strategy import (

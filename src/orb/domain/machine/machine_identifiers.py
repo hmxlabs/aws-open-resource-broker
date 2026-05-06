@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from typing import ClassVar
 
 from pydantic import field_validator
 
@@ -18,7 +19,7 @@ class MachineId(ResourceId):
     - model_validate({'value': 'i-abc'}) also works for backward compatibility
     """
 
-    resource_type: str = "Machine"  # type: ignore[assignment]
+    resource_type: ClassVar[str] = "Machine"
 
     def __str__(self) -> str:
         return self.value
