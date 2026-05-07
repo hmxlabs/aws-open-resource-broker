@@ -893,14 +893,14 @@ class TestCleanup:
         )
         strategy.initialize()
 
-        first_handler = strategy._resolve_handler(AzureProviderApi.VMSS)
+        first_handler = strategy.resolve_handler(AzureProviderApi.VMSS)
         assert first_handler is not None
         assert strategy.azure_client is client_one
 
         strategy.cleanup()
         strategy.initialize()
 
-        second_handler = strategy._resolve_handler(AzureProviderApi.VMSS)
+        second_handler = strategy.resolve_handler(AzureProviderApi.VMSS)
         assert second_handler is not None
         assert strategy.azure_client is client_two
         assert second_handler is not first_handler

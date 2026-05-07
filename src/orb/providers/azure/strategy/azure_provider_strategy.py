@@ -43,12 +43,14 @@ from orb.providers.azure.services.cyclecloud_request_context_service import (
     resolve_cyclecloud_request_metadata,
 )
 from orb.providers.azure.services.inventory_service import (
+    AzureInventoryService,
     build_read_operation_context,
+)
+from orb.providers.azure.services.operation_parsing import (
     group_instance_ids_by_resource,
     resolve_operation_provider_api,
     resolve_operation_resource_group,
 )
-from orb.providers.azure.services.inventory_query_service import AzureInventoryQueryService
 from orb.providers.azure.services.provisioning_service import (
     AzureProvisioningService,
     create_instances_dry_run_result,
@@ -127,11 +129,6 @@ class AzureProviderStrategy(ProviderStrategy):
             default_resource_group=config.resource_group,
             logger=logger,
         )
-        self._inventory_query_service = AzureInventoryQueryService(
-            logger=logger,
-            provider_instance_name=provider_instance_name,
-            resource_metadata_service=self._resource_metadata_service,
-        )
         self._spot_launch_service = AzureSpotLaunchService(
             config=config,
             logger=logger,
@@ -164,6 +161,13 @@ class AzureProviderStrategy(ProviderStrategy):
         self._termination_dispatch_service = AzureTerminationDispatchService(
             logger=logger,
             record_pending_cleanup=self._vmss_cleanup_coordinator.record,
+        )
+        self._inventory_service = AzureInventoryService(
+            logger=logger,
+            provider_instance_name=provider_instance_name,
+            resource_metadata_service=self._resource_metadata_service,
+            handler_provider=self,
+            vmss_cleanup_coordinator=self._vmss_cleanup_coordinator,
         )
 
     # ------------------------------------------------------------------
@@ -212,7 +216,7 @@ class AzureProviderStrategy(ProviderStrategy):
         """Resolve the Azure handler factory lazily using the strategy-owned client."""
         return self._runtime.handler_factory
 
-    def _resolve_handler(
+    def resolve_handler(
         self,
         provider_api: AzureProviderApi,
         *,
@@ -650,7 +654,7 @@ class AzureProviderStrategy(ProviderStrategy):
         try:
             create_context = self._provisioning_service.build_create_operation_context(
                 operation=operation,
-                resolve_handler=self._resolve_handler,
+                resolve_handler=self.resolve_handler,
                 build_template=lambda tc: AzureTemplate.model_validate(
                     self._build_azure_template_config(tc)
                 ),
@@ -676,7 +680,7 @@ class AzureProviderStrategy(ProviderStrategy):
                     template_config=template_config,
                     operation=operation,
                     provider_instance_name=self.provider_instance_name,
-                    handler=self._resolve_handler(create_context.provider_api),
+                    handler=self.resolve_handler(create_context.provider_api),
                     azure_client=self.azure_client,
                     plan_override=plan_override,
                     capacity_like_failure_checker=self._is_capacity_like_failure,
@@ -736,7 +740,7 @@ class AzureProviderStrategy(ProviderStrategy):
                 operation=operation,
                 is_dry_run=is_dry_run,
                 resolve_operation_provider_api=resolve_operation_provider_api,
-                resolve_handler=self._resolve_handler,
+                resolve_handler=self.resolve_handler,
                 group_instance_ids_by_resource=group_instance_ids_by_resource,
                 resolve_operation_resource_group=lambda op: resolve_operation_resource_group(
                     op, self._azure_config.resource_group,
@@ -834,11 +838,7 @@ class AzureProviderStrategy(ProviderStrategy):
                     },
                 )
 
-            return await self._inventory_query_service.get_instance_status_async(
-                read_context=read_context,
-                resolve_handler=self._resolve_handler,
-                vmss_cleanup_coordinator=self._vmss_cleanup_coordinator,
-            )
+            return await self._inventory_service.get_instance_status_async(read_context)
 
         except asyncio.CancelledError:
             raise
@@ -916,10 +916,8 @@ class AzureProviderStrategy(ProviderStrategy):
                         "provider_data": {"dry_run": True},
                     },
                 )
-            return await self._inventory_query_service.describe_resource_instances_async(
+            return await self._inventory_service.describe_resource_instances_async(
                 read_context=read_context,
-                resolve_handler=self._resolve_handler,
-                vmss_cleanup_coordinator=self._vmss_cleanup_coordinator,
                 resource_manager=self.resource_manager,
                 deployment_service=self.deployment_service,
             )

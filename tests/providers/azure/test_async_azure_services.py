@@ -2,6 +2,7 @@
 
 import asyncio
 from types import SimpleNamespace
+from typing import TYPE_CHECKING, cast
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -13,7 +14,7 @@ from orb.providers.azure.infrastructure.services.azure_deployment_service import
     AzureDeploymentService,
 )
 from orb.providers.azure.services.health_check_service import AzureHealthCheckService
-from orb.providers.azure.services.inventory_query_service import AzureInventoryQueryService
+from orb.providers.azure.services.inventory_service import AzureInventoryService
 from orb.providers.azure.services.inventory_service import AzureReadOperationContext
 from orb.providers.azure.services.provisioning_service import (
     AzureProvisioningService,
@@ -24,6 +25,9 @@ from orb.providers.azure.services.termination_dispatch_service import (
 )
 from tests.providers.azure.strategy_test_support import make_azure_template
 
+if TYPE_CHECKING:
+    from orb.providers.azure.strategy.azure_provider_strategy import AzureProviderStrategy
+
 
 def _make_template(**overrides):
     return make_azure_template(
@@ -31,6 +35,19 @@ def _make_template(**overrides):
         provider_api="SingleVM",
         ssh_public_keys=["ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABg service@test"],
         **overrides,
+    )
+
+
+def _handler_provider(handler) -> "AzureProviderStrategy":
+    """Build a strategy stand-in that returns ``handler`` from any ``resolve_handler`` call.
+
+    Cast to ``AzureProviderStrategy`` so the test fixture satisfies the inventory
+    service's annotated dependency without spinning up a real strategy. Duck-typed
+    at runtime via ``SimpleNamespace.resolve_handler``.
+    """
+    return cast(
+        "AzureProviderStrategy",
+        SimpleNamespace(resolve_handler=lambda *_args, **_kwargs: handler),
     )
 
 
@@ -237,14 +254,16 @@ async def test_execute_create_handler_async_returns_provider_error_for_failed_ha
 
 @pytest.mark.asyncio
 async def test_get_instance_status_async_uses_async_handler_dispatch(resource_metadata_service):
-    service = AzureInventoryQueryService(
-        logger=MagicMock(),
-        provider_instance_name="azure-default",
-        resource_metadata_service=resource_metadata_service,
-    )
     handler = MagicMock()
     handler.check_hosts_status_async = AsyncMock(
         return_value=[{"instance_id": "vm-1", "provider_data": {"vm_name": "vm-1"}}]
+    )
+    service = AzureInventoryService(
+        logger=MagicMock(),
+        provider_instance_name="azure-default",
+        resource_metadata_service=resource_metadata_service,
+        handler_provider=_handler_provider(handler),
+        vmss_cleanup_coordinator=MagicMock(),
     )
     read_context = AzureReadOperationContext(
         operation_name="get_instance_status",
@@ -260,11 +279,7 @@ async def test_get_instance_status_async_uses_async_handler_dispatch(resource_me
         direct_resource_id="vm-1",
     )
 
-    result = await service.get_instance_status_async(
-        read_context=read_context,
-        resolve_handler=lambda *_args, **_kwargs: handler,
-        vmss_cleanup_coordinator=MagicMock(),
-    )
+    result = await service.get_instance_status_async(read_context)
 
     assert result.success is True
     assert result.data["instances"][0]["instance_id"] == "vm-1"
@@ -275,10 +290,12 @@ async def test_get_instance_status_async_uses_async_handler_dispatch(resource_me
 async def test_get_instance_status_async_rejects_queries_without_provider_api(
     resource_metadata_service,
 ):
-    service = AzureInventoryQueryService(
+    service = AzureInventoryService(
         logger=MagicMock(),
         provider_instance_name="azure-default",
         resource_metadata_service=resource_metadata_service,
+        handler_provider=_handler_provider(None),
+        vmss_cleanup_coordinator=MagicMock(),
     )
     read_context = AzureReadOperationContext(
         operation_name="get_instance_status",
@@ -292,25 +309,23 @@ async def test_get_instance_status_async_rejects_queries_without_provider_api(
         instance_ids=["vm-1"],
     )
     with pytest.raises(AzureValidationError, match="provider_api-backed handler resolution"):
-        await service.get_instance_status_async(
-            read_context=read_context,
-            resolve_handler=lambda *_args, **_kwargs: None,
-            vmss_cleanup_coordinator=MagicMock(),
-        )
+        await service.get_instance_status_async(read_context)
 
 
 @pytest.mark.asyncio
 async def test_describe_resource_instances_async_builds_result_from_async_handler(
     resource_metadata_service,
 ):
-    service = AzureInventoryQueryService(
-        logger=MagicMock(),
-        provider_instance_name="azure-default",
-        resource_metadata_service=resource_metadata_service,
-    )
     handler = MagicMock()
     handler.check_hosts_status_async = AsyncMock(
         return_value=[{"instance_id": "vm-1", "provider_data": {"vm_name": "vm-1"}}]
+    )
+    service = AzureInventoryService(
+        logger=MagicMock(),
+        provider_instance_name="azure-default",
+        resource_metadata_service=resource_metadata_service,
+        handler_provider=_handler_provider(handler),
+        vmss_cleanup_coordinator=MagicMock(),
     )
     read_context = AzureReadOperationContext(
         operation_name="describe_resource_instances",
@@ -326,8 +341,6 @@ async def test_describe_resource_instances_async_builds_result_from_async_handle
 
     result = await service.describe_resource_instances_async(
         read_context=read_context,
-        resolve_handler=lambda *_args, **_kwargs: handler,
-        vmss_cleanup_coordinator=MagicMock(),
         resource_manager=None,
         deployment_service=None,
     )
@@ -391,11 +404,6 @@ async def test_get_deployment_status_async_extracts_provisioning_and_error_field
 async def test_describe_resource_instances_async_awaits_vmss_async_metadata_and_cleanup(
     resource_metadata_service,
 ):
-    service = AzureInventoryQueryService(
-        logger=MagicMock(),
-        provider_instance_name="azure-default",
-        resource_metadata_service=resource_metadata_service,
-    )
     handler = MagicMock()
     handler.check_hosts_status_async = AsyncMock(return_value=[])
     handler.get_vmss_resource_errors_async = AsyncMock(
@@ -403,6 +411,13 @@ async def test_describe_resource_instances_async_awaits_vmss_async_metadata_and_
     )
     cleanup = MagicMock()
     cleanup.reconcile = AsyncMock()
+    service = AzureInventoryService(
+        logger=MagicMock(),
+        provider_instance_name="azure-default",
+        resource_metadata_service=resource_metadata_service,
+        handler_provider=_handler_provider(handler),
+        vmss_cleanup_coordinator=cleanup,
+    )
     read_context = AzureReadOperationContext(
         operation_name="describe_resource_instances",
         request_id="req-12345678-1234-1234-1234-123456789012",
@@ -417,8 +432,6 @@ async def test_describe_resource_instances_async_awaits_vmss_async_metadata_and_
 
     result = await service.describe_resource_instances_async(
         read_context=read_context,
-        resolve_handler=lambda *_args, **_kwargs: handler,
-        vmss_cleanup_coordinator=cleanup,
         resource_manager=MagicMock(),
         deployment_service=None,
     )
@@ -434,14 +447,16 @@ async def test_describe_resource_instances_async_awaits_vmss_async_metadata_and_
 async def test_describe_resource_instances_async_uses_empty_vmss_error_list_without_override(
     resource_metadata_service,
 ):
-    service = AzureInventoryQueryService(
-        logger=MagicMock(),
-        provider_instance_name="azure-default",
-        resource_metadata_service=resource_metadata_service,
-    )
     handler = MagicMock()
     handler.check_hosts_status_async = AsyncMock(return_value=[])
     handler.get_vmss_resource_errors_async = AsyncMock(return_value=[])
+    service = AzureInventoryService(
+        logger=MagicMock(),
+        provider_instance_name="azure-default",
+        resource_metadata_service=resource_metadata_service,
+        handler_provider=_handler_provider(handler),
+        vmss_cleanup_coordinator=MagicMock(reconcile=AsyncMock()),
+    )
     read_context = AzureReadOperationContext(
         operation_name="describe_resource_instances",
         request_id="req-12345678-1234-1234-1234-123456789012",
@@ -456,8 +471,6 @@ async def test_describe_resource_instances_async_uses_empty_vmss_error_list_with
 
     result = await service.describe_resource_instances_async(
         read_context=read_context,
-        resolve_handler=lambda *_args, **_kwargs: handler,
-        vmss_cleanup_coordinator=MagicMock(reconcile=AsyncMock()),
         resource_manager=MagicMock(),
         deployment_service=None,
     )
@@ -472,13 +485,15 @@ async def test_describe_resource_instances_async_warns_when_vmss_handler_lacks_e
     resource_metadata_service,
 ):
     logger = MagicMock()
-    service = AzureInventoryQueryService(
+    handler = MagicMock(spec=["check_hosts_status_async"])
+    handler.check_hosts_status_async = AsyncMock(return_value=[])
+    service = AzureInventoryService(
         logger=logger,
         provider_instance_name="azure-default",
         resource_metadata_service=resource_metadata_service,
+        handler_provider=_handler_provider(handler),
+        vmss_cleanup_coordinator=MagicMock(reconcile=AsyncMock()),
     )
-    handler = MagicMock(spec=["check_hosts_status_async"])
-    handler.check_hosts_status_async = AsyncMock(return_value=[])
     read_context = AzureReadOperationContext(
         operation_name="describe_resource_instances",
         request_id="req-12345678-1234-1234-1234-123456789012",
@@ -493,8 +508,6 @@ async def test_describe_resource_instances_async_warns_when_vmss_handler_lacks_e
 
     result = await service.describe_resource_instances_async(
         read_context=read_context,
-        resolve_handler=lambda *_args, **_kwargs: handler,
-        vmss_cleanup_coordinator=MagicMock(reconcile=AsyncMock()),
         resource_manager=MagicMock(),
         deployment_service=None,
     )
