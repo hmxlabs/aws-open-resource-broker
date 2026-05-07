@@ -1,11 +1,11 @@
 """Unit tests for RequestDTOFactory."""
 
-import json
 from datetime import datetime, timezone
 
 import pytest
 
 from orb.application.factories.request_dto_factory import RequestDTOFactory
+from orb.application.request.dto import MachineReferenceDTO
 from orb.domain.base.value_objects import InstanceType, Tags
 from orb.domain.machine.aggregate import Machine
 from orb.domain.machine.machine_identifiers import MachineId
@@ -88,15 +88,11 @@ class TestCreateFromDomainFields:
         ref = dto.machine_references[0]
         assert ref.price_type == "spot"
 
-    def test_vcpus_populated(self, factory, sample_request, sample_machine):
-        dto = factory.create_from_domain(sample_request, [sample_machine])
-        ref = dto.machine_references[0]
-        assert ref.vcpus == 2
+    def test_vcpus_not_in_model_fields(self):
+        assert "vcpus" not in MachineReferenceDTO.model_fields
 
-    def test_availability_zone_populated(self, factory, sample_request, sample_machine):
-        dto = factory.create_from_domain(sample_request, [sample_machine])
-        ref = dto.machine_references[0]
-        assert ref.availability_zone == "eu-west-1a"
+    def test_availability_zone_not_in_model_fields(self):
+        assert "availability_zone" not in MachineReferenceDTO.model_fields
 
     def test_missing_metadata_fields_are_none(self, factory, sample_request):
         machine = Machine(
@@ -112,8 +108,6 @@ class TestCreateFromDomainFields:
         )
         dto = factory.create_from_domain(sample_request, [machine])
         ref = dto.machine_references[0]
-        assert ref.vcpus is None
-        assert ref.availability_zone is None
         assert ref.price_type is None
 
 
@@ -154,15 +148,13 @@ class TestCreateFromDomainForwardsHFFields:
         ref = dto.machine_references[0]
         assert ref.instance_type == "m5.large"
         assert ref.price_type == "ondemand"
-        assert ref.instance_tags == json.dumps(
-            {"Environment": "prod", "Owner": "team-x"}, sort_keys=True
-        )
+        assert ref.tags == {"Environment": "prod", "Owner": "team-x"}
 
     def test_empty_tags_serialize_to_none(self, factory):
         machine = _make_machine(tags=Tags(tags={}))
         dto = factory.create_from_domain(_make_request(), [machine])
 
-        assert dto.machine_references[0].instance_tags is None
+        assert dto.machine_references[0].tags is None
 
     def test_missing_price_type_forwarded_as_none(self, factory):
         machine = _make_machine(price_type=None)

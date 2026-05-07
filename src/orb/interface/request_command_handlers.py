@@ -169,7 +169,7 @@ async def handle_get_return_requests(
             limit=getattr(args, "limit", 50),
         )
     )
-    return formatter.format_request_status(result.requests)
+    return formatter.format_return_requests(result.requests)
 
 
 @handle_interface_exceptions(context="request_return_machines", interface_type="cli")

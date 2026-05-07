@@ -3,6 +3,7 @@
 No file I/O, no DI container, no AWS.
 """
 
+import json
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -138,10 +139,11 @@ def test_hf_format_templates_response_attributes_structure():
     dto = _make_template_dto(machine_types={"t3.medium": 1})
     result = strategy.format_templates_response([dto])
     attrs = result["templates"][0]["attributes"]
-    for key in ("type", "ncpus", "ncores", "nram"):
+    for key in ("type", "ncpus", "nram"):
         assert key in attrs
         assert isinstance(attrs[key], list)
         assert len(attrs[key]) == 2
+    assert "ncores" not in attrs, "ncores is LSF-only and must not appear in HF attributes"
 
 
 def test_hf_format_templates_response_instance_tags_serialised_as_string():
@@ -308,7 +310,7 @@ def test_hf_format_request_status_response_hf_extended_fields_present():
         cloud_host_id=None,
         instance_type="m5.large",
         price_type="ondemand",
-        instance_tags='{"Environment":"prod"}',
+        tags={"Environment": "prod"},
     )
     dto = RequestDTO(
         request_id=_VALID_REQUEST_ID,
@@ -322,7 +324,7 @@ def test_hf_format_request_status_response_hf_extended_fields_present():
     m = result["requests"][0]["machines"][0]
     assert m["instanceType"] == "m5.large"
     assert m["priceType"] == "ondemand"
-    assert m["instanceTags"] == '{"Environment":"prod"}'
+    assert json.loads(m["instanceTags"]) == {"Environment": "prod"}
 
 
 def test_hf_format_request_status_response_hf_extended_fields_absent_when_empty():

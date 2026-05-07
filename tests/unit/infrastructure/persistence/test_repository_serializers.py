@@ -35,10 +35,18 @@ class TestLegacyDefaultProviderTypeConstant:
         assert "data.get('provider_type', 'aws')" not in source
         assert 'data.get("provider_type", "aws")' not in source
 
-    def test_machine_repository_imports_constant(self):
-        """machine_repository must import LEGACY_DEFAULT_PROVIDER_TYPE."""
+    def test_machine_repository_does_not_inline_bare_aws_default(self):
+        """machine_repository must not inline a bare 'aws' string as a provider_type default.
+
+        The default now lives on Machine.provider_type = Field(default="aws") in the
+        aggregate, so the repository no longer needs to import or reference the constant.
+        This test guards against re-introducing an inline literal in _normalize_on_read.
+        """
         source = inspect.getsource(_machine_repo_mod)
-        assert "LEGACY_DEFAULT_PROVIDER_TYPE" in source
+        assert "data.get('provider_type', 'aws')" not in source
+        assert 'data.get("provider_type", "aws")' not in source
+        assert "setdefault('provider_type', 'aws')" not in source
+        assert 'setdefault("provider_type", "aws")' not in source
 
     def test_request_repository_imports_constant(self):
         """request_repository must import LEGACY_DEFAULT_PROVIDER_TYPE."""
@@ -202,3 +210,40 @@ class TestMachineSerializerPriceType:
         serializer = _machine_repo_mod.MachineSerializer()
         restored = serializer.from_dict(serializer.to_dict(machine))
         assert restored.price_type == "spot"
+
+
+@pytest.mark.unit
+@pytest.mark.infrastructure
+class TestMachineSerializerTagsMigration:
+    """MachineSerializer.from_dict falls back to metadata.tags for pre-PR-209 records."""
+
+    def _make_minimal_machine_data(self, **overrides):
+        base = {
+            "machine_id": "m-001",
+            "name": "test-machine",
+            "template_id": "tpl-1",
+            "provider_name": "test-provider",
+            "instance_type": "t3.micro",
+            "image_id": "ami-12345678",
+            "status": "pending",
+        }
+        base.update(overrides)
+        return base
+
+    def test_from_dict_reads_metadata_tags_when_top_level_tags_absent(self):
+        """Legacy records with tags only in metadata.tags are migrated transparently."""
+        data = self._make_minimal_machine_data(
+            tags={},
+            metadata={"tags": {"Environment": "prod", "Owner": "team-x"}},
+        )
+        machine = _machine_repo_mod.MachineSerializer().from_dict(data)
+        assert machine.tags.tags == {"Environment": "prod", "Owner": "team-x"}
+
+    def test_from_dict_prefers_top_level_tags_when_both_present(self):
+        """Top-level tags take precedence over metadata.tags when both are present."""
+        data = self._make_minimal_machine_data(
+            tags={"New": "value"},
+            metadata={"tags": {"Old": "value"}},
+        )
+        machine = _machine_repo_mod.MachineSerializer().from_dict(data)
+        assert machine.tags.tags == {"New": "value"}
