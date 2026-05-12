@@ -105,10 +105,8 @@ class ArmPayloadMapper:
         # --- Identity ---
         identity = _build_identity(template)
 
-        # --- Top-level resource ---
+        # --- VMSS SDK body (VirtualMachineScaleSet) ---
         resource: dict[str, Any] = {
-            "type": "Microsoft.Compute/virtualMachineScaleSets",
-            "name": template.vmss_name or f"vmss-{template.template_id}",
             "location": template.location.value,
             "sku": {
                 "name": "Mix" if template.uses_vm_size_mix else template.vm_size,
@@ -124,7 +122,7 @@ class ArmPayloadMapper:
                 sku_profile["allocationStrategy"] = (
                     template.vmss_allocation_strategy.to_arm_value()
                 )
-            resource["skuProfile"] = sku_profile
+            properties["skuProfile"] = sku_profile
 
         if template.zones:
             resource["zones"] = template.zones

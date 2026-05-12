@@ -63,6 +63,8 @@ from orb.providers.azure.infrastructure.services.azure_network_identity_resolver
 from orb.providers.azure.domain.template.value_objects import AzureVMSSOrchestrationMode
 
 if TYPE_CHECKING:
+    from azure.mgmt.compute.models import OrchestrationMode as SdkOrchestrationMode
+
     from orb.domain.base.ports import LoggingPort
     from orb.providers.azure.infrastructure.azure_client import AzureClient
     from orb.providers.azure.infrastructure.services.azure_native_spec_service import (
@@ -214,7 +216,6 @@ class VMSSHandler(AzureHandler):
 
             arm_payload.setdefault("sku", {})
             arm_payload["sku"]["capacity"] = request.requested_count
-            arm_payload["name"] = vmss_name
 
             compute = await self.azure_client.get_async_compute_client()
             if resolved_template.ssh_key_name and not resolved_template.ssh_public_keys:
@@ -1089,9 +1090,18 @@ class VMSSHandler(AzureHandler):
         }
 
     @staticmethod
-    def _coerce_vmss_orchestration_mode(raw_mode: Any) -> AzureVMSSOrchestrationMode:
-        """Coerce Azure's orchestration-mode field into the provider enum."""
-        return AzureVMSSOrchestrationMode(str(raw_mode or "Flexible"))
+    def _coerce_vmss_orchestration_mode(
+        raw_mode: Optional["SdkOrchestrationMode"],
+    ) -> AzureVMSSOrchestrationMode:
+        """Coerce Azure's orchestration-mode field into the provider enum.
+
+        The SDK returns ``Optional[OrchestrationMode]`` (a plain ``Enum``; its
+        ``str()`` is the qualified ``"OrchestrationMode.FLEXIBLE"`` form rather
+        than the wire value, so we read ``.value`` directly).
+        """
+        if raw_mode is None:
+            return AzureVMSSOrchestrationMode.FLEXIBLE
+        return AzureVMSSOrchestrationMode(raw_mode.value)
 
     def _vmss_delete_submission_result(
         self,
