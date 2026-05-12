@@ -163,29 +163,38 @@ class GCPProviderStrategy(ProviderStrategy):
                 operation,
                 is_dry_run,
             )
-            if result.metadata is None:
-                result.metadata = {}
-            result.metadata.update(
-                {
-                    "execution_time_ms": int((time.time() - start_time) * 1000),
-                    "provider": "gcp",
-                    "dry_run": is_dry_run,
+            execution_time_ms = int((time.time() - start_time) * 1000)
+            return result.model_copy(
+                update={
+                    "routing_info": {
+                        "execution_time_ms": execution_time_ms,
+                        "provider": "gcp",
+                    },
+                    "metadata": {
+                        **(result.metadata or {}),
+                        "dry_run": is_dry_run,
+                        "execution_time_ms": execution_time_ms,
+                        "provider": "gcp",
+                    },
                 }
             )
-            return result
         except GCPError as exc:
+            execution_time_ms = int((time.time() - start_time) * 1000)
             self._logger.error("GCP operation failed: %s", exc, exc_info=True)
             return ProviderResult.error_result(
                 str(exc),
                 exc.error_code,
-                {
-                    "execution_time_ms": int((time.time() - start_time) * 1000),
-                    "provider": "gcp",
-                    "dry_run": is_dry_run,
-                    "details": exc.details,
-                },
+                {"dry_run": is_dry_run, "details": exc.details},
+            ).model_copy(
+                update={
+                    "routing_info": {
+                        "execution_time_ms": execution_time_ms,
+                        "provider": "gcp",
+                    }
+                }
             )
         except Exception as exc:
+            execution_time_ms = int((time.time() - start_time) * 1000)
             translated = translate_gcp_exception(
                 exc,
                 operation=operation.operation_type.value,
@@ -194,12 +203,14 @@ class GCPProviderStrategy(ProviderStrategy):
             return ProviderResult.error_result(
                 str(translated),
                 translated.error_code,
-                {
-                    "execution_time_ms": int((time.time() - start_time) * 1000),
-                    "provider": "gcp",
-                    "dry_run": is_dry_run,
-                    "details": translated.details,
-                },
+                {"dry_run": is_dry_run, "details": translated.details},
+            ).model_copy(
+                update={
+                    "routing_info": {
+                        "execution_time_ms": execution_time_ms,
+                        "provider": "gcp",
+                    }
+                }
             )
 
     def _execute_operation_internal(

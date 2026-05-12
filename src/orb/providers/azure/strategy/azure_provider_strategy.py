@@ -373,14 +373,20 @@ class AzureProviderStrategy(ProviderStrategy):
                 result = await self._execute_operation_internal(operation)
 
             execution_time_ms = int((time.time() - start_time) * 1000)
-            if result.metadata is None:
-                result.metadata = {}
-            result.metadata.update({
-                "execution_time_ms": execution_time_ms,
-                "provider": "azure",
-                "dry_run": is_dry_run,
-            })
-            return result
+            return result.model_copy(
+                update={
+                    "routing_info": {
+                        "execution_time_ms": execution_time_ms,
+                        "provider": "azure",
+                    },
+                    "metadata": {
+                        **(result.metadata or {}),
+                        "dry_run": is_dry_run,
+                        "execution_time_ms": execution_time_ms,
+                        "provider": "azure",
+                    },
+                }
+            )
         except asyncio.CancelledError:
             raise
         except Exception as exc:
@@ -389,11 +395,14 @@ class AzureProviderStrategy(ProviderStrategy):
             return ProviderResult.error_result(
                 f"Azure operation failed: {exc!s}",
                 "OPERATION_FAILED",
-                {
-                    "execution_time_ms": execution_time_ms,
-                    "provider": "azure",
-                    "dry_run": is_dry_run,
-                },
+                {"dry_run": is_dry_run},
+            ).model_copy(
+                update={
+                    "routing_info": {
+                        "execution_time_ms": execution_time_ms,
+                        "provider": "azure",
+                    }
+                }
             )
         finally:
             self._end_operation()

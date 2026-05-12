@@ -394,21 +394,24 @@ class AzureInventoryService:
             deployment_service=deployment_service,
         )
 
-        if result.success and is_vmss:
+        if result.success and is_vmss and resource_group:
             instance_details = result.data.get("instances", []) if result.data else []
-            if resource_group:
-                await self._vmss_cleanup_coordinator.reconcile(
-                    resource_group=resource_group,
-                    resource_ids=read_context.resource_ids,
-                    observed_ids=observed_status_ids(instance_details),
-                )
-                if result.metadata is not None:
-                    result.metadata.update(
-                        self._vmss_cleanup_coordinator.status_metadata(
+            await self._vmss_cleanup_coordinator.reconcile(
+                resource_group=resource_group,
+                resource_ids=read_context.resource_ids,
+                observed_ids=observed_status_ids(instance_details),
+            )
+            return result.model_copy(
+                update={
+                    "metadata": {
+                        **(result.metadata or {}),
+                        **self._vmss_cleanup_coordinator.status_metadata(
                             resource_group=resource_group,
                             resource_ids=read_context.resource_ids,
-                        )
-                    )
+                        ),
+                    }
+                }
+            )
 
         return result
 
@@ -540,11 +543,16 @@ class AzureInventoryService:
                 resource_ids=read_context.resource_ids,
                 observed_ids=observed_status_ids(handler_machines),
             )
-            result.metadata.update(
-                self._vmss_cleanup_coordinator.status_metadata(
-                    resource_group=read_context.resource_group,
-                    resource_ids=read_context.resource_ids,
-                )
+            return result.model_copy(
+                update={
+                    "metadata": {
+                        **(result.metadata or {}),
+                        **self._vmss_cleanup_coordinator.status_metadata(
+                            resource_group=read_context.resource_group,
+                            resource_ids=read_context.resource_ids,
+                        ),
+                    }
+                }
             )
         return result
 
