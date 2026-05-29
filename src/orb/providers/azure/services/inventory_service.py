@@ -123,17 +123,13 @@ def normalize_status_result(result: AzureHandlerStatusResult) -> AzureStatusResu
     return normalized
 
 
-def normalize_status_results(results: list[AzureHandlerStatusResult]) -> list[AzureStatusResult]:
-    """Normalize a generic handler status list for Azure status matching."""
-    return [normalize_status_result(result) for result in results]
-
-
-def status_candidate_ids(result: AzureStatusResult) -> set[str]:
+def status_candidate_ids(result: AzureHandlerStatusResult) -> set[str]:
     """Return all plausible instance identifiers from a status result."""
-    provider_data = result.get("provider_data") or {}
+    identity = normalize_status_result(result)
+    provider_data = identity.get("provider_data") or {}
     candidate_ids = {
-        result.get("instance_id", ""),
-        result.get("name", ""),
+        identity.get("instance_id", ""),
+        identity.get("name", ""),
         provider_data.get("vm_id", ""),
         provider_data.get("vmss_instance_id", ""),
         provider_data.get("node_id", ""),
@@ -144,7 +140,7 @@ def status_candidate_ids(result: AzureStatusResult) -> set[str]:
     return candidate_ids
 
 
-def observed_status_ids(instance_details: list[AzureStatusResult]) -> set[str]:
+def observed_status_ids(instance_details: list[AzureHandlerStatusResult]) -> set[str]:
     """Collect all candidate identifiers across a list of instance detail dicts."""
     observed_ids: set[str] = set()
     for instance in instance_details:
@@ -153,12 +149,12 @@ def observed_status_ids(instance_details: list[AzureStatusResult]) -> set[str]:
 
 
 def filter_status_results(
-    results: list[AzureStatusResult],
+    results: list[AzureHandlerStatusResult],
     requested_ids: list[str],
-) -> list[AzureStatusResult]:
+) -> list[AzureHandlerStatusResult]:
     """Return only the results whose candidate IDs overlap with the requested set."""
     requested = {str(item) for item in requested_ids}
-    filtered: list[AzureStatusResult] = []
+    filtered: list[AzureHandlerStatusResult] = []
     for result in results:
         if status_candidate_ids(result) & requested:
             filtered.append(result)
@@ -349,7 +345,7 @@ class AzureInventoryService:
         logger: LoggingPort,
         provider_instance_name: str,
         resource_metadata_service: AzureResourceMetadataService,
-        handler_provider: "AzureProviderStrategy",
+        handler_provider: AzureProviderStrategy,
         vmss_cleanup_coordinator: VmssCleanupCoordinator,
     ) -> None:
         self._logger = logger
@@ -418,7 +414,7 @@ class AzureInventoryService:
     async def _get_instance_status_via_handlers_async(
         self,
         read_context: AzureReadOperationContext,
-    ) -> Optional[list[AzureStatusResult]]:
+    ) -> Optional[list[AzureHandlerStatusResult]]:
         provider_api = read_context.provider_api
         grouped_resource_mapping = read_context.grouped_resource_mapping
 
@@ -435,12 +431,10 @@ class AzureInventoryService:
                 provider_name=self._provider_instance_name,
                 resource_ids=read_context.instance_ids,
             )
-            return normalize_status_results(
-                await handler.check_hosts_status_async(request)
-            )
+            return await handler.check_hosts_status_async(request)
 
         if grouped_resource_mapping:
-            all_results: list[AzureStatusResult] = []
+            all_results: list[AzureHandlerStatusResult] = []
             seen_instance_ids: set[str] = set()
             for resource_id, mapped_ids in grouped_resource_mapping.items():
                 group_handler = handler or self._resolve_status_handler(provider_api)
@@ -456,9 +450,7 @@ class AzureInventoryService:
                         instance_ids=mapped_ids,
                     ),
                 )
-                machines = normalize_status_results(
-                    await group_handler.check_hosts_status_async(request)
-                )
+                machines = await group_handler.check_hosts_status_async(request)
                 self._append_unique_status_results(
                     destination=all_results,
                     seen_instance_ids=seen_instance_ids,
@@ -485,9 +477,7 @@ class AzureInventoryService:
                 instance_ids=read_context.instance_ids,
             ),
         )
-        machines = normalize_status_results(
-            await handler.check_hosts_status_async(request)
-        )
+        machines = await handler.check_hosts_status_async(request)
         if provider_api == AzureProviderApi.SINGLE_VM:
             return machines
         return filter_status_results(machines, read_context.instance_ids)
@@ -519,7 +509,7 @@ class AzureInventoryService:
         self,
         *,
         read_context: AzureReadOperationContext,
-        handler_machines: list[AzureStatusResult],
+        handler_machines: list[AzureHandlerStatusResult],
     ) -> ProviderResult:
         """Build the normalized handler-backed instance-status result."""
         is_vmss = read_context.provider_api in (
@@ -601,17 +591,35 @@ class AzureInventoryService:
     @staticmethod
     def _append_unique_status_results(
         *,
-        destination: list[AzureStatusResult],
+        destination: list[AzureHandlerStatusResult],
         seen_instance_ids: set[str],
-        machines: list[AzureStatusResult],
+        machines: list[AzureHandlerStatusResult],
     ) -> None:
         """Append status results while preserving first-seen instance identities."""
         for machine in machines:
-            machine_id = str(machine.get("instance_id"))
-            if machine_id in seen_instance_ids:
+            identity = normalize_status_result(machine)
+            provider_data = identity.get("provider_data") or {}
+            machine_id = next(
+                (
+                    value
+                    for value in (
+                        identity.get("instance_id"),
+                        identity.get("name"),
+                        provider_data.get("vm_id"),
+                        provider_data.get("vmss_instance_id"),
+                        provider_data.get("node_id"),
+                        provider_data.get("node_name"),
+                        provider_data.get("vm_name"),
+                    )
+                    if value
+                ),
+                "",
+            )
+            if machine_id and machine_id in seen_instance_ids:
                 continue
             destination.append(machine)
-            seen_instance_ids.add(machine_id)
+            if machine_id:
+                seen_instance_ids.add(machine_id)
 
     @staticmethod
     def _handler_status_metadata(

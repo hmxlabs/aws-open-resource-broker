@@ -290,8 +290,13 @@ class TestGetInstanceStatus:
         result = run_operation(strategy.execute_operation(op))
 
         assert result.success
-        assert result.data["instances"][0]["instance_id"] == "vm-1"
-        assert result.data["instances"][0]["provider_data"]["vm_name"] == "vm-1"
+        machine = result.data["instances"][0]
+        assert machine["instance_id"] == "vm-1"
+        assert machine["status"] == "running"
+        assert machine["private_ip"] == "10.0.0.4"
+        assert machine["instance_type"] == "Standard_D4s_v5"
+        assert machine["subnet_id"].endswith("/subnets/default")
+        assert machine["provider_data"]["vm_name"] == "vm-1"
 
     def test_status_query_without_provider_api_is_rejected(self, azure_config, logger):
         strategy_harness = build_strategy_harness(config=azure_config, logger=logger)
