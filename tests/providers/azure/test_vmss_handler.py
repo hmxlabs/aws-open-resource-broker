@@ -3,7 +3,8 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock
 
-import orb.providers.azure.infrastructure.handlers.vmss_handler as vmss_handler_module
+from azure.mgmt.compute.models import OrchestrationMode
+
 from orb.providers.azure.domain.template.value_objects import AzureVMSSOrchestrationMode
 from orb.providers.azure.exceptions.azure_exceptions import AzureValidationError, TerminationError
 from orb.providers.azure.infrastructure.handlers.azure_handler import (
@@ -201,7 +202,7 @@ def test_flexible_vmss_status_returns_only_member_vms():
     handler = VMSSHandler(azure_client=azure_client, logger=logger)
 
     vmss = MagicMock()
-    vmss.orchestration_mode = AzureVMSSOrchestrationMode.FLEXIBLE.value
+    vmss.orchestration_mode = OrchestrationMode.FLEXIBLE
     azure_client.compute_client.virtual_machine_scale_sets.get.return_value = vmss
 
     member_vm = MagicMock()
@@ -286,7 +287,7 @@ def test_flexible_vmss_status_uses_filtered_list_result_directly():
     handler = VMSSHandler(azure_client=azure_client, logger=logger)
 
     vmss = MagicMock()
-    vmss.orchestration_mode = AzureVMSSOrchestrationMode.FLEXIBLE.value
+    vmss.orchestration_mode = OrchestrationMode.FLEXIBLE
     azure_client.compute_client.virtual_machine_scale_sets.get.return_value = vmss
 
     member_vm = MagicMock()
@@ -322,7 +323,7 @@ def test_vmss_instance_status_includes_structured_provisioning_errors():
     handler = VMSSHandler(azure_client=azure_client, logger=logger)
 
     vmss = MagicMock()
-    vmss.orchestration_mode = AzureVMSSOrchestrationMode.UNIFORM.value
+    vmss.orchestration_mode = OrchestrationMode.UNIFORM
     azure_client.compute_client.virtual_machine_scale_sets.get.return_value = vmss
 
     status = MagicMock()
@@ -597,7 +598,7 @@ def test_vmss_status_populates_network_identity():
     handler = VMSSHandler(azure_client=azure_client, logger=logger)
 
     vmss = MagicMock()
-    vmss.orchestration_mode = AzureVMSSOrchestrationMode.UNIFORM.value
+    vmss.orchestration_mode = OrchestrationMode.UNIFORM
     azure_client.compute_client.virtual_machine_scale_sets.get.return_value = vmss
 
     nic_ref = MagicMock()
@@ -653,7 +654,7 @@ def test_vmss_status_still_returns_instance_when_network_identity_resolution_fai
     handler = VMSSHandler(azure_client=azure_client, logger=logger)
 
     vmss = MagicMock()
-    vmss.orchestration_mode = AzureVMSSOrchestrationMode.UNIFORM.value
+    vmss.orchestration_mode = OrchestrationMode.UNIFORM
     azure_client.compute_client.virtual_machine_scale_sets.get.return_value = vmss
     azure_client.resolve_network_identity_from_vm_async = AsyncMock(
         side_effect=AttributeError("missing network property")
@@ -732,7 +733,7 @@ def test_vmss_release_deletes_only_requested_uniform_instances():
     )
 
     vmss = MagicMock()
-    vmss.orchestration_mode = AzureVMSSOrchestrationMode.UNIFORM.value
+    vmss.orchestration_mode = OrchestrationMode.UNIFORM
     azure_client.compute_client.virtual_machine_scale_sets.get.return_value = vmss
 
     delete_poller = MagicMock()
@@ -773,7 +774,7 @@ def test_vmss_release_deletes_flexible_members_without_cleanup_metadata_when_vms
     )
 
     vmss = MagicMock()
-    vmss.orchestration_mode = AzureVMSSOrchestrationMode.FLEXIBLE.value
+    vmss.orchestration_mode = OrchestrationMode.FLEXIBLE
     azure_client.compute_client.virtual_machine_scale_sets.get.return_value = vmss
 
     azure_client.compute_client.virtual_machines.begin_delete.return_value = MagicMock()
@@ -805,7 +806,7 @@ def test_vmss_release_marks_flexible_vmss_for_cleanup_when_last_instance_is_retu
     )
 
     vmss = MagicMock()
-    vmss.orchestration_mode = AzureVMSSOrchestrationMode.FLEXIBLE.value
+    vmss.orchestration_mode = OrchestrationMode.FLEXIBLE
     azure_client.compute_client.virtual_machine_scale_sets.get.return_value = vmss
     azure_client.compute_client.virtual_machines.begin_delete.return_value = MagicMock()
 
@@ -850,7 +851,7 @@ def test_vmss_release_rejects_unresolved_flexible_member_ids():
     )
 
     vmss = MagicMock()
-    vmss.orchestration_mode = AzureVMSSOrchestrationMode.FLEXIBLE.value
+    vmss.orchestration_mode = OrchestrationMode.FLEXIBLE
     azure_client.compute_client.virtual_machine_scale_sets.get.return_value = vmss
     azure_client.compute_client.virtual_machines.begin_delete.return_value = MagicMock()
 
@@ -879,7 +880,7 @@ def test_vmss_release_rejects_unresolved_uniform_member_ids():
     )
 
     vmss = MagicMock()
-    vmss.orchestration_mode = AzureVMSSOrchestrationMode.UNIFORM.value
+    vmss.orchestration_mode = OrchestrationMode.UNIFORM
     azure_client.compute_client.virtual_machine_scale_sets.get.return_value = vmss
 
     with pytest.raises(TerminationError) as exc_info:
@@ -917,7 +918,7 @@ def test_vmss_release_resolves_flexible_vm_ids_to_vm_names():
     )
 
     vmss = MagicMock()
-    vmss.orchestration_mode = AzureVMSSOrchestrationMode.FLEXIBLE.value
+    vmss.orchestration_mode = OrchestrationMode.FLEXIBLE
     azure_client.compute_client.virtual_machine_scale_sets.get.return_value = vmss
     azure_client.compute_client.virtual_machines.begin_delete.return_value = MagicMock()
 
@@ -954,7 +955,7 @@ def test_vmss_release_marks_uniform_vmss_for_cleanup_when_last_instance_is_retur
     )
 
     vmss = MagicMock()
-    vmss.orchestration_mode = AzureVMSSOrchestrationMode.UNIFORM.value
+    vmss.orchestration_mode = OrchestrationMode.UNIFORM
     azure_client.compute_client.virtual_machine_scale_sets.get.return_value = vmss
 
     delete_instances_poller = MagicMock()
@@ -1001,7 +1002,7 @@ def test_vmss_release_surfaces_retry_pending_when_immediate_empty_vmss_delete_fa
     )
 
     vmss = MagicMock()
-    vmss.orchestration_mode = AzureVMSSOrchestrationMode.FLEXIBLE.value
+    vmss.orchestration_mode = OrchestrationMode.FLEXIBLE
     azure_client.compute_client.virtual_machine_scale_sets.get.return_value = vmss
     azure_client.compute_client.virtual_machines.begin_delete.return_value = MagicMock()
     azure_client.compute_client.virtual_machine_scale_sets.begin_delete.side_effect = RuntimeError(
