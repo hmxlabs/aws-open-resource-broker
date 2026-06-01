@@ -51,6 +51,22 @@ class GCPTemplate(Template):
         data["provider_type"] = "gcp"
         super().__init__(**data)
 
+    @model_validator(mode="before")
+    @classmethod
+    def normalise_input(cls, data: object) -> object:
+        """Rewrite external HostFactory/config field names to canonical domain fields."""
+        # `max_number` is the HostFactory/API/storage external name; the
+        # canonical domain field is `max_instances`. AWS and Azure aggregates
+        # apply the same rewrite at this boundary.
+        if not isinstance(data, dict):
+            return data
+        data = dict(data)
+        if "max_number" in data:
+            if "max_instances" not in data:
+                data["max_instances"] = data["max_number"]
+            data.pop("max_number", None)
+        return data
+
     @model_validator(mode="after")
     def validate_gcp_template(self) -> GCPTemplate:
         """Validate GCP-specific template semantics."""
