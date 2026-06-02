@@ -120,9 +120,12 @@ class GCPHandler(ABC):
 
         network_interface = compute_v1.NetworkInterface()
         if template.network:
-            network_interface.network = template.network
+            network_interface.network = self._normalize_network_reference(template.network)
         if template.subnetwork:
-            network_interface.subnetwork = template.subnetwork
+            network_interface.subnetwork = self._normalize_subnetwork_reference(
+                template.subnetwork,
+                region=template.region.value,
+            )
         if template.network or template.subnetwork:
             payload["network_interfaces"] = [network_interface]
 
@@ -154,8 +157,27 @@ class GCPHandler(ABC):
             )
         return None
 
+    @staticmethod
+    def _normalize_network_reference(network: str) -> str:
+        """Return a Compute Engine network reference accepted by insert requests."""
+        if _is_gcp_resource_reference(network):
+            return network
+        return f"global/networks/{network}"
+
+    @staticmethod
+    def _normalize_subnetwork_reference(subnetwork: str, *, region: str) -> str:
+        """Return a Compute Engine subnetwork reference accepted by insert requests."""
+        if _is_gcp_resource_reference(subnetwork):
+            return subnetwork
+        return f"regions/{region}/subnetworks/{subnetwork}"
+
     def _operation_wait_timeout_seconds(self) -> int:
         """Return a bounded wait time for long-running GCP operations."""
         per_attempt_timeout = self._config.connect_timeout + self._config.read_timeout
         retry_budget = max(1, self._config.max_retries)
         return max(1, per_attempt_timeout * retry_budget)
+
+
+def _is_gcp_resource_reference(value: str) -> bool:
+    """Return true when the value is already a GCP resource path or self-link."""
+    return value.startswith(("global/", "regions/", "projects/", "https://", "http://"))

@@ -218,3 +218,35 @@ def test_single_vm_and_mig_payloads_share_common_instance_configuration(monkeypa
     assert template_properties.tags.items == ["orb", "worker"]
     assert instance_payload.scheduling.provisioning_model == "SPOT"
     assert template_properties.scheduling.provisioning_model == "SPOT"
+
+
+def test_short_network_names_expand_to_compute_engine_resource_paths(monkeypatch) -> None:
+    _install_fake_compute_v1(monkeypatch)
+    single_vm_handler = GCPSingleVMHandler(
+        compute_client=_ComputeClientStub(),
+        config=_config(),
+        logger=MagicMock(),
+    )
+    template = GCPTemplate.model_validate(
+        {
+            "template_id": "gcp-single",
+            "provider_type": "gcp",
+            "provider_api": "SingleVM",
+            "project_id": "orb-example-12345",
+            "region": "us-central1",
+            "zones": ["us-central1-a"],
+            "instance_type": "e2-micro",
+            "max_instances": 1,
+            "source_image_family": "debian-12",
+            "source_image_project": "debian-cloud",
+            "network": "default",
+            "subnetwork": "default",
+        }
+    )
+
+    payload = single_vm_handler._build_instance_payload("vm-1", template)
+
+    assert payload.network_interfaces[0].network == "global/networks/default"
+    assert payload.network_interfaces[0].subnetwork == (
+        "regions/us-central1/subnetworks/default"
+    )
