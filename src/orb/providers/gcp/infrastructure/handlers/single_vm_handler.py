@@ -8,6 +8,7 @@ from typing import Callable
 from orb.domain.request.aggregate import Request
 from orb.providers.gcp.domain.template.gcp_template_aggregate import GCPTemplate
 from orb.providers.gcp.exceptions import GCPError, GCPValidationError, translate_gcp_exception
+from orb.providers.gcp.infrastructure.instance_status import normalize_gcp_instance_status
 from orb.providers.gcp.infrastructure.handlers.base_handler import GCPHandler
 from orb.providers.gcp.types import (
     GCPCreateOutcome,
@@ -281,7 +282,7 @@ def _build_gcp_status_result(
     return {
         "instance_id": instance_name,
         "name": record.name or instance_name,
-        "status": _normalize_gcp_instance_status(record.status),
+        "status": normalize_gcp_instance_status(record.status),
         "private_ip": record.private_ip,
         "public_ip": record.public_ip,
         "launch_time": record.creation_timestamp,
@@ -298,21 +299,3 @@ def _build_gcp_status_result(
             "vpc_id": record.vpc_id,
         },
     }
-
-
-def _normalize_gcp_instance_status(status: str | None) -> str:
-    """Map Compute Engine instance statuses to ORB machine statuses."""
-    if status is None:
-        return "unknown"
-
-    status_map = {
-        "PROVISIONING": "pending",
-        "STAGING": "launching",
-        "RUNNING": "running",
-        "STOPPING": "stopping",
-        "SUSPENDING": "stopping",
-        "SUSPENDED": "stopped",
-        "REPAIRING": "pending",
-        "TERMINATED": "terminated",
-    }
-    return status_map.get(status.upper(), "unknown")

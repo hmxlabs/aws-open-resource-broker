@@ -660,7 +660,36 @@ def test_mig_handler_status_checks_multiple_resource_ids() -> None:
     )
 
     assert [item["instance_id"] for item in result] == ["vm-a", "vm-b"]
+    assert [item["status"] for item in result] == ["running", "launching"]
     assert [item["provider_data"]["resource_id"] for item in result] == ["mig-a", "mig-b"]
+    assert result[0]["provider_data"]["gcp_instance_status"] == "RUNNING"
+    assert result[1]["provider_data"]["gcp_current_action"] == "CREATING"
+
+
+def test_mig_handler_status_uses_current_action_when_instance_status_missing() -> None:
+    compute_client = _ComputeClientStub()
+    compute_client.regional_managed_instances = {
+        "mig-a": [
+            SimpleNamespace(
+                instance_url="projects/orb-example-12345/zones/us-central1-a/instances/vm-a",
+                instance_status=None,
+                current_action="CREATING",
+            )
+        ],
+    }
+    handler = GCPManagedInstanceGroupHandler(
+        compute_client=compute_client,
+        config=_config(),
+        logger=MagicMock(),
+    )
+
+    result = handler.check_hosts_status(
+        resource_ids=["mig-a"],
+        instance_ids=[],
+        context={"region": "us-central1", "scope": "regional"},
+    )
+
+    assert result[0]["status"] == "pending"
 
 
 def test_mig_handler_terminates_instances_across_multiple_resource_ids() -> None:

@@ -13,6 +13,9 @@ from orb.providers.gcp.exceptions import (
     GCPNetworkError,
     GCPValidationError,
 )
+from orb.providers.gcp.infrastructure.instance_status import (
+    normalize_gcp_managed_instance_status,
+)
 from orb.providers.gcp.infrastructure.handlers.base_handler import GCPHandler
 from orb.providers.gcp.types import (
     GCPCreateOutcome,
@@ -207,10 +210,14 @@ class GCPManagedInstanceGroupHandler(GCPHandler):
                 instance_name = instance.instance_url.rsplit("/", 1)[-1]
                 if instance_ids and instance_name not in instance_ids:
                     continue
+                status = normalize_gcp_managed_instance_status(
+                    instance_status=instance.instance_status,
+                    current_action=instance.current_action,
+                )
                 results.append(
                     {
                         "instance_id": instance_name,
-                        "status": instance.instance_status or instance.current_action or "UNKNOWN",
+                        "status": status,
                         "provider_data": {
                             # The managed-instances listing exposes the URL but
                             # not the numeric Google instance ID; the name is
@@ -219,6 +226,8 @@ class GCPManagedInstanceGroupHandler(GCPHandler):
                             "resource_id": mig_name,
                             "scope": scope,
                             "instance_url": instance.instance_url,
+                            "gcp_instance_status": instance.instance_status,
+                            "gcp_current_action": instance.current_action,
                         },
                     }
                 )
