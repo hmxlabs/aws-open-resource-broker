@@ -91,6 +91,7 @@ class GCPProvisioningService:
                 "target_size": context.count,
                 "operation_status": "dry_run",
                 "scope": scope,
+                "fulfillment_final": True,
             }
         )
         if context.template.region:
@@ -134,6 +135,8 @@ class GCPProvisioningService:
             **{failure.target_id: False for failure in failed_operations},
         }
         provider_data = dict(outcome.provider_data)
+        if provider_api == "MIG" and outcome.resource_ids:
+            provider_data["fulfillment_final"] = True
         if fleet_errors:
             provider_data["fleet_errors"] = fleet_errors
         return ProviderResult.success_result(

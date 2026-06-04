@@ -185,7 +185,7 @@ class GCPSingleVMHandler(GCPHandler):
                 template=template,
                 machine_type=machine_type,
                 zone=zone,
-                disk_type_payload_context="instance",
+                payload_context="instance",
             ),
         )
 

@@ -51,18 +51,32 @@ class _ComputeClientStub:
         self.fail_delete_instance_for: set[str] = set()
         self.fail_get_instance_for: set[str] = set()
         self.fail_create_regional_mig = False
+        self.fail_regional_mig_operation = False
+        self.timeout_regional_mig_operation = False
         self.template_operation_result_called = False
+        self.mig_operation_result_called = False
         self.deleted_templates: list[str] = []
         self.instances: dict[str, GCPInstanceRecord] = {}
 
     class _OperationStub(SimpleNamespace):
-        def __init__(self, owner: _ComputeClientStub, **kwargs) -> None:
+        def __init__(
+            self,
+            owner: _ComputeClientStub,
+            *,
+            result_flag: str,
+            result_failure: Exception | None = None,
+            **kwargs,
+        ) -> None:
             super().__init__(**kwargs)
             self._owner = owner
+            self._result_flag = result_flag
+            self._result_failure = result_failure
 
         def result(self, timeout: float | None = None) -> _ComputeClientStub._OperationStub:
             _ = timeout
-            self._owner.template_operation_result_called = True
+            setattr(self._owner, self._result_flag, True)
+            if self._result_failure is not None:
+                raise self._result_failure
             return self
 
     def create_instance(self, *, zone: str, body: object) -> object:
@@ -75,6 +89,7 @@ class _ComputeClientStub:
         self.created_templates.append((template_name, body))
         return self._OperationStub(
             self,
+            result_flag="template_operation_result_called",
             name=f"template-op-{template_name}",
             status="PENDING",
             target_link=None,
@@ -90,7 +105,19 @@ class _ComputeClientStub:
         if self.fail_create_regional_mig:
             raise RuntimeError("regional mig create failed")
         self.created_migs.append((region, mig_name, body))
-        return SimpleNamespace(name=f"mig-op-{mig_name}", status="PENDING", target_link=None)
+        result_failure: Exception | None = None
+        if self.fail_regional_mig_operation:
+            result_failure = RuntimeError("regional mig operation failed")
+        if self.timeout_regional_mig_operation:
+            result_failure = FutureTimeoutError("regional mig operation timed out")
+        return self._OperationStub(
+            self,
+            result_flag="mig_operation_result_called",
+            result_failure=result_failure,
+            name=f"mig-op-{mig_name}",
+            status="PENDING",
+            target_link=None,
+        )
 
     def delete_instance_template(self, *, template_name: str) -> object:
         self.deleted_templates.append(template_name)
@@ -394,8 +421,10 @@ def test_mig_handler_acquire_hosts_submits_template_and_group() -> None:
 
     assert len(result.resource_ids) == 1
     assert result.provider_data["target_size"] == 3
+    assert result.provider_data["operation_status"] == "completed"
     assert len(compute_client.created_templates) == 1
     assert compute_client.template_operation_result_called is True
+    assert compute_client.mig_operation_result_called is True
     assert len(compute_client.created_migs) == 1
 
 
@@ -411,6 +440,7 @@ def test_mig_handler_acquire_hosts_times_out_waiting_for_template_operation() ->
         compute_client.created_templates.append((template_name, body))
         return _TimeoutOperationStub(
             compute_client,
+            result_flag="template_operation_result_called",
             name=f"template-op-{template_name}",
             status="PENDING",
             target_link=None,
@@ -494,6 +524,85 @@ def test_mig_handler_rolls_back_instance_template_when_mig_create_fails() -> Non
         handler.acquire_hosts(request, template)
 
     assert compute_client.deleted_templates == [compute_client.created_templates[0][0]]
+
+
+def test_mig_handler_rolls_back_instance_template_when_mig_operation_fails() -> None:
+    compute_client = _ComputeClientStub()
+    compute_client.fail_regional_mig_operation = True
+    handler = GCPManagedInstanceGroupHandler(
+        compute_client=compute_client,
+        config=_config(),
+        logger=MagicMock(),
+    )
+    request = Request.create_new_request(
+        request_type=RequestType.ACQUIRE,
+        template_id="gcp-mig",
+        machine_count=3,
+        provider_type="gcp",
+    )
+    template = GCPTemplate.model_validate(
+        {
+            "template_id": "gcp-mig",
+            "provider_type": "gcp",
+            "provider_api": "MIG",
+            "project_id": "orb-example-12345",
+            "region": "us-central1",
+            "zones": ["us-central1-a", "us-central1-b"],
+            "mig_scope": "regional",
+            "instance_type": "e2-standard-4",
+            "max_instances": 3,
+            "source_image_family": "debian-12",
+            "source_image_project": "debian-cloud",
+        }
+    )
+
+    with pytest.raises(RuntimeError, match="regional mig operation failed"):
+        handler.acquire_hosts(request, template)
+
+    assert compute_client.mig_operation_result_called is True
+    assert compute_client.deleted_templates == [compute_client.created_templates[0][0]]
+
+
+def test_mig_handler_does_not_roll_back_template_when_mig_operation_times_out() -> None:
+    compute_client = _ComputeClientStub()
+    compute_client.timeout_regional_mig_operation = True
+    handler = GCPManagedInstanceGroupHandler(
+        compute_client=compute_client,
+        config=_config(connect_timeout=7, read_timeout=11, max_retries=2),
+        logger=MagicMock(),
+    )
+    request = Request.create_new_request(
+        request_type=RequestType.ACQUIRE,
+        template_id="gcp-mig",
+        machine_count=3,
+        provider_type="gcp",
+    )
+    template = GCPTemplate.model_validate(
+        {
+            "template_id": "gcp-mig",
+            "provider_type": "gcp",
+            "provider_api": "MIG",
+            "project_id": "orb-example-12345",
+            "region": "us-central1",
+            "zones": ["us-central1-a", "us-central1-b"],
+            "mig_scope": "regional",
+            "instance_type": "e2-standard-4",
+            "max_instances": 3,
+            "source_image_family": "debian-12",
+            "source_image_project": "debian-cloud",
+        }
+    )
+
+    with pytest.raises(
+        GCPNetworkError,
+        match="Timed out waiting for GCP managed instance group creation to finish",
+    ) as exc_info:
+        handler.acquire_hosts(request, template)
+
+    assert compute_client.mig_operation_result_called is True
+    assert compute_client.deleted_templates == []
+    assert exc_info.value.details["operation"] == "create_mig"
+    assert exc_info.value.details["timeout_seconds"] == 36
 
 
 def test_provisioning_service_projects_failed_operations_into_fleet_errors() -> None:
@@ -719,25 +828,97 @@ def test_mig_handler_terminates_instances_across_multiple_resource_ids() -> None
     result = handler.terminate_hosts(
         resource_ids=["mig-a", "mig-b"],
         instance_ids=["vm-a", "vm-b"],
-        context={"project_id": "orb-example-12345", "region": "us-central1", "scope": "regional"},
+        context={
+            "project_id": "orb-example-12345",
+            "region": "us-central1",
+            "scope": "regional",
+            "instance_template_name": "orb-template-a",
+        },
     )
 
     assert result.attempted_ids == ["vm-a", "vm-b"]
     assert result.successful_ids == []
     assert result.warning is not None
     assert "completion must be confirmed" in result.warning
+    assert compute_client.deleted_regional_migs == [
+        ("us-central1", "mig-a"),
+        ("us-central1", "mig-b"),
+    ]
+    assert compute_client.deleted_regional_managed_instances == []
+    assert compute_client.deleted_templates == ["orb-template-a"]
+
+
+def test_mig_handler_terminates_subset_with_delete_managed_instances() -> None:
+    compute_client = _ComputeClientStub()
+    compute_client.regional_managed_instances = {
+        "mig-a": [
+            SimpleNamespace(
+                instance_url="projects/orb-example-12345/zones/us-central1-a/instances/vm-a",
+                instance_status="RUNNING",
+                current_action="NONE",
+            ),
+            SimpleNamespace(
+                instance_url="projects/orb-example-12345/zones/us-central1-b/instances/vm-b",
+                instance_status="RUNNING",
+                current_action="NONE",
+            ),
+        ],
+    }
+    handler = GCPManagedInstanceGroupHandler(
+        compute_client=compute_client,
+        config=_config(),
+        logger=MagicMock(),
+    )
+
+    result = handler.terminate_hosts(
+        resource_ids=["mig-a"],
+        instance_ids=["vm-a"],
+        context={
+            "project_id": "orb-example-12345",
+            "region": "us-central1",
+            "scope": "regional",
+            "instance_template_name": "orb-template-a",
+        },
+    )
+
+    assert result.attempted_ids == ["vm-a"]
+    assert result.successful_ids == []
+    assert compute_client.deleted_regional_migs == []
     assert compute_client.deleted_regional_managed_instances == [
         (
             "us-central1",
             "mig-a",
             ["projects/orb-example-12345/zones/us-central1-a/instances/vm-a"],
-        ),
-        (
-            "us-central1",
-            "mig-b",
-            ["projects/orb-example-12345/zones/us-central1-b/instances/vm-b"],
-        ),
+        )
     ]
+    assert compute_client.deleted_templates == []
+
+
+def test_mig_handler_status_treats_missing_mig_as_empty() -> None:
+    class _MissingMigComputeClient(_ComputeClientStub):
+        def list_regional_managed_instances(
+            self,
+            *,
+            region: str,
+            mig_name: str,
+            instance_filter: str | None = None,
+        ) -> list[object]:
+            _ = region, mig_name, instance_filter
+            raise google_exceptions.NotFound("managed instance group was not found")
+
+    handler = GCPManagedInstanceGroupHandler(
+        compute_client=_MissingMigComputeClient(),
+        config=_config(),
+        logger=MagicMock(),
+    )
+
+    result = handler.check_hosts_status(
+        resource_ids=["mig-a"],
+        instance_ids=["vm-a"],
+        context={"region": "us-central1", "scope": "regional"},
+    )
+
+    assert result == []
 
 
 @pytest.mark.asyncio
@@ -776,7 +957,10 @@ async def test_strategy_create_instances_delegates_to_handler() -> None:
 
     assert result.success is True
     assert result.data["resource_ids"] == ["mig-demo"]
-    assert result.metadata["provider_data"] == {"scope": "regional"}
+    assert result.metadata["provider_data"] == {
+        "scope": "regional",
+        "fulfillment_final": True,
+    }
 
 
 @pytest.mark.asyncio
@@ -816,6 +1000,7 @@ async def test_strategy_create_instances_dry_run_short_circuits_handler_calls() 
     assert result.data["provider_api"] == "MIG"
     assert result.data["resource_ids"] == ["dry-run-gcp-mig"]
     assert result.metadata["provider_data"]["dry_run"] is True
+    assert result.metadata["provider_data"]["fulfillment_final"] is True
     assert is_dry_run_active() is False
 
 

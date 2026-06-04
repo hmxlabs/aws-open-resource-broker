@@ -81,7 +81,7 @@ class GCPHandler(ABC):
         template: GCPTemplate,
         machine_type: str,
         zone: str | None,
-        disk_type_payload_context: Literal["instance", "instance_template"],
+        payload_context: Literal["instance", "instance_template"],
     ) -> dict[str, Any]:
         """Return a kwargs dict suitable for both ``Instance`` and ``InstanceProperties``.
 
@@ -107,7 +107,7 @@ class GCPHandler(ABC):
         normalized_disk_type = normalize_boot_disk_type(
             disk_type,
             zone=zone,
-            payload_context=disk_type_payload_context,
+            payload_context=payload_context,
         )
 
         payload: dict[str, Any] = {
@@ -147,10 +147,14 @@ class GCPHandler(ABC):
             ]
 
         if template.provisioning_model == GCPProvisioningModel.SPOT:
-            payload["scheduling"] = compute_v1.Scheduling(
-                provisioning_model="SPOT",
-                instance_termination_action="DELETE",
-            )
+            scheduling: dict[str, Any] = {
+                "automatic_restart": False,
+                "on_host_maintenance": "TERMINATE",
+                "provisioning_model": "SPOT",
+            }
+            if payload_context == "instance":
+                scheduling["instance_termination_action"] = "DELETE"
+            payload["scheduling"] = compute_v1.Scheduling(**scheduling)
 
         return payload
 

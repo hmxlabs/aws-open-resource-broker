@@ -215,7 +215,13 @@ def test_single_vm_and_mig_payloads_share_common_instance_configuration(monkeypa
     assert instance_payload.tags.items == ["orb", "worker"]
     assert template_properties.tags.items == ["orb", "worker"]
     assert instance_payload.scheduling.provisioning_model == "SPOT"
+    assert instance_payload.scheduling.automatic_restart is False
+    assert instance_payload.scheduling.on_host_maintenance == "TERMINATE"
+    assert instance_payload.scheduling.instance_termination_action == "DELETE"
     assert template_properties.scheduling.provisioning_model == "SPOT"
+    assert template_properties.scheduling.automatic_restart is False
+    assert template_properties.scheduling.on_host_maintenance == "TERMINATE"
+    assert not hasattr(template_properties.scheduling, "instance_termination_action")
 
 
 def test_short_network_names_expand_to_compute_engine_resource_paths(monkeypatch) -> None:

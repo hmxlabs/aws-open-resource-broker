@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from concurrent.futures import TimeoutError as FutureTimeoutError
+from typing import Protocol
 import uuid
 
 from orb.domain.request.aggregate import Request
@@ -12,6 +13,7 @@ from orb.providers.gcp.exceptions import (
     GCPEntityNotFoundError,
     GCPNetworkError,
     GCPValidationError,
+    translate_gcp_exception,
 )
 from orb.providers.gcp.infrastructure.instance_status import (
     normalize_gcp_managed_instance_status,
@@ -21,10 +23,14 @@ from orb.providers.gcp.types import (
     GCPCreateOutcome,
     GCPHandlerContext,
     GCPInstanceStatus,
+    GCPManagedInstanceRecord,
     GCPMutationOutcome,
     GCPProviderData,
 )
-from google.cloud.compute_v1.types import InstanceGroupManager, InstanceTemplate
+
+class _GCPOperationWithName(Protocol):
+    @property
+    def name(self) -> str | None: ...
 
 
 class GCPManagedInstanceGroupHandler(GCPHandler):
@@ -63,6 +69,7 @@ class GCPManagedInstanceGroupHandler(GCPHandler):
         try:
             if template.mig_scope == GCPMIGScope.REGIONAL:
                 region = str(template.region)
+                location_context = {"region": region, "scope": template.mig_scope.value}
                 response = self._compute_client.create_regional_mig(
                     region=region,
                     mig_name=mig_name,
@@ -72,9 +79,9 @@ class GCPManagedInstanceGroupHandler(GCPHandler):
                         target_size=request.requested_count,
                     ),
                 )
-                location_context = {"region": region, "scope": template.mig_scope.value}
             else:
                 zone = str(template.zones[0])
+                location_context = {"zone": zone, "scope": template.mig_scope.value}
                 response = self._compute_client.create_zonal_mig(
                     zone=zone,
                     mig_name=mig_name,
@@ -84,16 +91,26 @@ class GCPManagedInstanceGroupHandler(GCPHandler):
                         target_size=request.requested_count,
                     ),
                 )
-                location_context = {"zone": zone, "scope": template.mig_scope.value}
         except Exception:
-            try:
-                self._compute_client.delete_instance_template(template_name=template_name)
-            except Exception as cleanup_exc:
-                self._logger.warning(
-                    "Failed to roll back orphaned instance template %s after MIG create failure: %s",
-                    template_name,
-                    cleanup_exc,
-                )
+            self._rollback_instance_template(template_name)
+            raise
+
+        try:
+            response.result(timeout=wait_timeout_seconds)
+        except FutureTimeoutError as exc:
+            raise GCPNetworkError(
+                "Timed out waiting for GCP managed instance group creation to finish",
+                details={
+                    "operation": "create_mig",
+                    "mig_name": mig_name,
+                    "instance_template_name": template_name,
+                    "operation_name": response.name or "",
+                    "timeout_seconds": wait_timeout_seconds,
+                    **location_context,
+                },
+            ) from exc
+        except Exception:
+            self._rollback_instance_template(template_name)
             raise
 
         provider_data: GCPProviderData = {
@@ -101,7 +118,7 @@ class GCPManagedInstanceGroupHandler(GCPHandler):
             "instance_template_name": template_name,
             "target_size": request.requested_count,
             "operation_name": response.name or "",
-            "operation_status": "submitted",
+            "operation_status": "completed",
             **location_context,
         }
 
@@ -110,6 +127,16 @@ class GCPManagedInstanceGroupHandler(GCPHandler):
             instances=[],
             provider_data=provider_data,
         )
+
+    def _rollback_instance_template(self, template_name: str) -> None:
+        try:
+            self._compute_client.delete_instance_template(template_name=template_name)
+        except Exception as cleanup_exc:
+            self._logger.warning(
+                "Failed to roll back orphaned instance template %s after MIG create failure: %s",
+                template_name,
+                cleanup_exc,
+            )
 
     def terminate_hosts(
         self,
@@ -124,6 +151,14 @@ class GCPManagedInstanceGroupHandler(GCPHandler):
         scope = str(context.get("scope") or GCPMIGScope.REGIONAL.value)
 
         if instance_ids:
+            managed_instances_by_mig = {
+                mig_name: self._list_managed_instances(
+                    scope=scope,
+                    context=context,
+                    mig_name=mig_name,
+                )
+                for mig_name in mig_names
+            }
             grouped_instance_urls = self._group_instance_urls_by_mig(
                 mig_names=mig_names,
                 instance_ids=instance_ids,
@@ -131,20 +166,37 @@ class GCPManagedInstanceGroupHandler(GCPHandler):
                 scope=scope,
             )
             operations: list[dict[str, str | None]] = []
+            deleted_mig_names: list[str] = []
             for mig_name, instance_urls in grouped_instance_urls.items():
-                if scope == GCPMIGScope.ZONAL.value:
-                    response = self._compute_client.delete_zonal_managed_instances(
-                        zone=self._require_zone(context),
-                        mig_name=mig_name,
-                        instance_urls=instance_urls,
+                all_instance_urls = {
+                    str(instance.instance_url) for instance in managed_instances_by_mig[mig_name]
+                }
+                if set(instance_urls) == all_instance_urls:
+                    response = self._delete_mig(scope=scope, context=context, mig_name=mig_name)
+                    deleted_mig_names.append(mig_name)
+                    operations.append(
+                        {
+                            "operation_name": response.name,
+                            "mig_name": mig_name,
+                            "operation_type": "delete_mig",
+                        }
                     )
                 else:
-                    response = self._compute_client.delete_regional_managed_instances(
-                        region=self._require_region(context),
+                    response = self._delete_managed_instances(
+                        scope=scope,
+                        context=context,
                         mig_name=mig_name,
                         instance_urls=instance_urls,
                     )
-                operations.append({"operation_name": response.name, "mig_name": mig_name})
+                    operations.append(
+                        {
+                            "operation_name": response.name,
+                            "mig_name": mig_name,
+                            "operation_type": "delete_managed_instances",
+                        }
+                    )
+            if set(deleted_mig_names) == set(mig_names):
+                self._delete_instance_template(template_name)
             return GCPMutationOutcome(
                 attempted_ids=instance_ids,
                 successful_ids=[],
@@ -154,27 +206,16 @@ class GCPManagedInstanceGroupHandler(GCPHandler):
 
         operations: list[dict[str, str | None]] = []
         for mig_name in mig_names:
-            if scope == GCPMIGScope.ZONAL.value:
-                response = self._compute_client.delete_zonal_mig(
-                    zone=self._require_zone(context),
-                    mig_name=mig_name,
-                )
-            else:
-                response = self._compute_client.delete_regional_mig(
-                    region=self._require_region(context),
-                    mig_name=mig_name,
-                )
-            operations.append({"operation_name": response.name, "mig_name": mig_name})
+            response = self._delete_mig(scope=scope, context=context, mig_name=mig_name)
+            operations.append(
+                {
+                    "operation_name": response.name,
+                    "mig_name": mig_name,
+                    "operation_type": "delete_mig",
+                }
+            )
 
-        if template_name:
-            try:
-                self._compute_client.delete_instance_template(template_name=str(template_name))
-            except Exception as exc:
-                self._logger.warning(
-                    "Best-effort instance template cleanup failed for %s: %s",
-                    template_name,
-                    exc,
-                )
+        self._delete_instance_template(template_name)
 
         return GCPMutationOutcome(
             attempted_ids=mig_names,
@@ -195,16 +236,11 @@ class GCPManagedInstanceGroupHandler(GCPHandler):
         scope = str(context.get("scope") or GCPMIGScope.REGIONAL.value)
         results: list[GCPInstanceStatus] = []
         for mig_name in mig_names:
-            if scope == GCPMIGScope.ZONAL.value:
-                payload = self._compute_client.list_zonal_managed_instances(
-                    zone=self._require_zone(context),
-                    mig_name=mig_name,
-                )
-            else:
-                payload = self._compute_client.list_regional_managed_instances(
-                    region=self._require_region(context),
-                    mig_name=mig_name,
-                )
+            payload = self._list_managed_instances_for_status(
+                scope=scope,
+                context=context,
+                mig_name=mig_name,
+            )
 
             for instance in payload:
                 instance_name = instance.instance_url.rsplit("/", 1)[-1]
@@ -265,7 +301,7 @@ class GCPManagedInstanceGroupHandler(GCPHandler):
         self,
         template: GCPTemplate,
         template_name: str,
-    ) -> InstanceTemplate:
+    ):
         from google.cloud import compute_v1
 
         properties = compute_v1.InstanceProperties(
@@ -273,7 +309,7 @@ class GCPManagedInstanceGroupHandler(GCPHandler):
                 template=template,
                 machine_type=template.instance_type,
                 zone=str(template.zones[0]) if template.zones else None,
-                disk_type_payload_context="instance_template",
+                payload_context="instance_template",
             )
         )
         return compute_v1.InstanceTemplate(properties=properties)
@@ -284,10 +320,10 @@ class GCPManagedInstanceGroupHandler(GCPHandler):
         template: GCPTemplate,
         template_name: str,
         target_size: int,
-    ) -> InstanceGroupManager:
+    ):
         from google.cloud import compute_v1
 
-        distribution: compute_v1.DistributionPolicy | None = None
+        distribution = None
         if template.zones:
             distribution = compute_v1.DistributionPolicy(
                 zones=[
@@ -308,7 +344,7 @@ class GCPManagedInstanceGroupHandler(GCPHandler):
         template: GCPTemplate,
         template_name: str,
         target_size: int,
-    ) -> InstanceGroupManager:
+    ):
         from google.cloud import compute_v1
 
         return compute_v1.InstanceGroupManager(
@@ -316,6 +352,99 @@ class GCPManagedInstanceGroupHandler(GCPHandler):
             instance_template=f"projects/{template.project_id}/global/instanceTemplates/{template_name}",
             target_size=target_size,
         )
+
+    def _delete_mig(
+        self,
+        *,
+        scope: str,
+        context: GCPHandlerContext,
+        mig_name: str,
+    ) -> _GCPOperationWithName:
+        if scope == GCPMIGScope.ZONAL.value:
+            return self._compute_client.delete_zonal_mig(
+                zone=self._require_zone(context),
+                mig_name=mig_name,
+            )
+        return self._compute_client.delete_regional_mig(
+            region=self._require_region(context),
+            mig_name=mig_name,
+        )
+
+    def _delete_managed_instances(
+        self,
+        *,
+        scope: str,
+        context: GCPHandlerContext,
+        mig_name: str,
+        instance_urls: list[str],
+    ) -> _GCPOperationWithName:
+        if scope == GCPMIGScope.ZONAL.value:
+            return self._compute_client.delete_zonal_managed_instances(
+                zone=self._require_zone(context),
+                mig_name=mig_name,
+                instance_urls=instance_urls,
+            )
+        return self._compute_client.delete_regional_managed_instances(
+            region=self._require_region(context),
+            mig_name=mig_name,
+            instance_urls=instance_urls,
+        )
+
+    def _delete_instance_template(self, template_name: object) -> None:
+        if not template_name:
+            return
+        try:
+            self._compute_client.delete_instance_template(template_name=str(template_name))
+        except Exception as exc:
+            self._logger.warning(
+                "Best-effort instance template cleanup failed for %s: %s",
+                template_name,
+                exc,
+            )
+
+    def _list_managed_instances_for_status(
+        self,
+        *,
+        scope: str,
+        context: GCPHandlerContext,
+        mig_name: str,
+    ) -> list[GCPManagedInstanceRecord]:
+        try:
+            return self._list_managed_instances(
+                scope=scope,
+                context=context,
+                mig_name=mig_name,
+            )
+        except GCPEntityNotFoundError:
+            return []
+
+    def _list_managed_instances(
+        self,
+        *,
+        scope: str,
+        context: GCPHandlerContext,
+        mig_name: str,
+        instance_filter: str | None = None,
+    ) -> list[GCPManagedInstanceRecord]:
+        try:
+            if scope == GCPMIGScope.ZONAL.value:
+                return self._compute_client.list_zonal_managed_instances(
+                    zone=self._require_zone(context),
+                    mig_name=mig_name,
+                    instance_filter=instance_filter,
+                )
+            return self._compute_client.list_regional_managed_instances(
+                region=self._require_region(context),
+                mig_name=mig_name,
+                instance_filter=instance_filter,
+            )
+        except Exception as exc:
+            translated = translate_gcp_exception(
+                exc,
+                operation="list_managed_instances",
+                details={"mig_name": mig_name, "scope": scope},
+            )
+            raise translated from exc
 
     @staticmethod
     def _require_mig_names(resource_ids: list[str], context: GCPHandlerContext) -> list[str]:
@@ -342,18 +471,12 @@ class GCPManagedInstanceGroupHandler(GCPHandler):
 
         name_to_membership: dict[str, list[tuple[str, str]]] = {}
         for mig_name in mig_names:
-            if scope == GCPMIGScope.ZONAL.value:
-                members = self._compute_client.list_zonal_managed_instances(
-                    zone=self._require_zone(context),
-                    mig_name=mig_name,
-                    instance_filter=instance_filter,
-                )
-            else:
-                members = self._compute_client.list_regional_managed_instances(
-                    region=self._require_region(context),
-                    mig_name=mig_name,
-                    instance_filter=instance_filter,
-                )
+            members = self._list_managed_instances(
+                scope=scope,
+                context=context,
+                mig_name=mig_name,
+                instance_filter=instance_filter,
+            )
             for member in members:
                 instance_url = str(member.instance_url)
                 instance_name = instance_url.rsplit("/", 1)[-1]
