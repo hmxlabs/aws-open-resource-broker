@@ -688,11 +688,7 @@ class VMSSHandler(AzureHandler):
 
         current_member_ids = {
             str(instance_id)
-            for instance_id in (
-                member.get("instance_id")
-                for member in current_members
-                if isinstance(member, dict)
-            )
+            for instance_id in (member.get("instance_id") for member in current_members)
             if instance_id not in (None, "")
         }
         if len(current_member_ids) != len(current_members):
@@ -727,11 +723,7 @@ class VMSSHandler(AzureHandler):
 
         lookup: dict[str, str] = {}
         for member in current_members:
-            if not isinstance(member, dict):
-                continue
-            provider_data = member.get("provider_data")
-            if not isinstance(provider_data, dict):
-                provider_data = {}
+            provider_data = member.get("provider_data") or {}
 
             vm_name = provider_data.get("vm_name") or member.get("name") or member.get("instance_id")
             if not vm_name:
@@ -788,19 +780,17 @@ class VMSSHandler(AzureHandler):
 
         lookup: dict[str, str] = {}
         for vm in current_members:
-            if not isinstance(vm, dict):
-                continue
             vmss_instance_id = str(vm.get("instance_id", "") or "")
             if not vmss_instance_id:
                 continue
             lookup[vmss_instance_id] = vmss_instance_id
 
-            provider_data = vm.get("provider_data")
-            vm_id = provider_data.get("vm_id") if isinstance(provider_data, dict) else None
+            provider_data = vm.get("provider_data") or {}
+            vm_id = provider_data.get("vm_id")
             if vm_id:
                 lookup[str(vm_id)] = vmss_instance_id
 
-            vm_name = provider_data.get("vm_name") if isinstance(provider_data, dict) else None
+            vm_name = provider_data.get("vm_name")
             if vm_name:
                 lookup[str(vm_name)] = vmss_instance_id
 

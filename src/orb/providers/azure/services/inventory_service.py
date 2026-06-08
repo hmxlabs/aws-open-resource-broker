@@ -111,7 +111,7 @@ def normalize_status_result(result: AzureHandlerStatusResult) -> AzureStatusResu
         normalized["name"] = name
 
     raw_provider_data = result.get("provider_data")
-    if isinstance(raw_provider_data, dict):
+    if raw_provider_data:
         provider_data: AzureStatusProviderData = {}
         for key in ("vm_id", "vmss_instance_id", "node_id", "node_name", "vm_name"):
             value = raw_provider_data.get(key)
