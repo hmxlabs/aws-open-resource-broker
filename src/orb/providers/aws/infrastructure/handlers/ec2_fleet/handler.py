@@ -745,7 +745,7 @@ class EC2FleetHandler(AWSHandler, BaseContextMixin, FleetGroupingMixin):
                 price_type="ondemand",
                 subnet_ids=[],
                 security_group_ids=[],
-                tags={"environment": "dev"},
+                tags={"Environment": "dev"},
                 metadata={"fleet_type": "instant"},
             ),
             AWSTemplate(
@@ -759,7 +759,7 @@ class EC2FleetHandler(AWSHandler, BaseContextMixin, FleetGroupingMixin):
                 max_price=0.10,
                 subnet_ids=[],
                 security_group_ids=[],
-                tags={"environment": "dev"},
+                tags={"Environment": "dev"},
                 metadata={"fleet_type": "instant"},
             ),
             AWSTemplate(
@@ -775,7 +775,7 @@ class EC2FleetHandler(AWSHandler, BaseContextMixin, FleetGroupingMixin):
                 max_price=0.10,
                 subnet_ids=[],
                 security_group_ids=[],
-                tags={"environment": "dev"},
+                tags={"Environment": "dev"},
                 metadata={"fleet_type": "instant", "percent_on_demand": 30},
             ),
             # Request fleet types
@@ -789,7 +789,7 @@ class EC2FleetHandler(AWSHandler, BaseContextMixin, FleetGroupingMixin):
                 price_type="ondemand",
                 subnet_ids=[],
                 security_group_ids=[],
-                tags={"environment": "test"},
+                tags={"Environment": "test"},
                 metadata={"fleet_type": "request"},
             ),
             AWSTemplate(
@@ -804,7 +804,7 @@ class EC2FleetHandler(AWSHandler, BaseContextMixin, FleetGroupingMixin):
                 max_price=0.10,
                 subnet_ids=[],
                 security_group_ids=[],
-                tags={"environment": "test"},
+                tags={"Environment": "test"},
                 metadata={"fleet_type": "request"},
             ),
             AWSTemplate(
@@ -821,7 +821,7 @@ class EC2FleetHandler(AWSHandler, BaseContextMixin, FleetGroupingMixin):
                 max_price=0.10,
                 subnet_ids=[],
                 security_group_ids=[],
-                tags={"environment": "test"},
+                tags={"Environment": "test"},
                 metadata={"fleet_type": "request", "percent_on_demand": 40},
             ),
             # Maintain fleet types
@@ -835,7 +835,7 @@ class EC2FleetHandler(AWSHandler, BaseContextMixin, FleetGroupingMixin):
                 price_type="ondemand",
                 subnet_ids=[],
                 security_group_ids=[],
-                tags={"environment": "prod"},
+                tags={"Environment": "prod"},
                 metadata={"fleet_type": "maintain"},
             ),
             AWSTemplate(
@@ -850,7 +850,7 @@ class EC2FleetHandler(AWSHandler, BaseContextMixin, FleetGroupingMixin):
                 max_price=0.10,
                 subnet_ids=[],
                 security_group_ids=[],
-                tags={"environment": "prod"},
+                tags={"Environment": "prod"},
                 metadata={"fleet_type": "maintain"},
             ),
             AWSTemplate(
@@ -867,7 +867,7 @@ class EC2FleetHandler(AWSHandler, BaseContextMixin, FleetGroupingMixin):
                 max_price=0.10,
                 subnet_ids=[],
                 security_group_ids=[],
-                tags={"environment": "prod"},
+                tags={"Environment": "prod"},
                 metadata={"fleet_type": "maintain", "percent_on_demand": 50},
             ),
         ]
