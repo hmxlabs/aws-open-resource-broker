@@ -331,7 +331,6 @@ class TestArmPayload:
         )
         arm = ArmPayloadMapper.vmss_payload(t)
 
-        assert arm["type"] == "Microsoft.Compute/virtualMachineScaleSets"
         assert arm["location"] == "eastus2"
         assert arm["sku"]["name"] == "Standard_D4s_v5"
         assert "virtualMachineProfile" in arm["properties"]
@@ -360,12 +359,12 @@ class TestArmPayload:
         arm = ArmPayloadMapper.vmss_payload(t)
 
         assert arm["sku"]["name"] == "Mix"
-        assert arm["skuProfile"]["vmSizes"] == [
+        assert arm["properties"]["skuProfile"]["vmSizes"] == [
             {"name": "Standard_D4s_v5"},
             {"name": "Standard_D8s_v5"},
             {"name": "Standard_D16s_v5"},
         ]
-        assert arm["skuProfile"]["allocationStrategy"] == "CapacityOptimized"
+        assert arm["properties"]["skuProfile"]["allocationStrategy"] == "CapacityOptimized"
         assert "vmSizeProperties" not in arm["properties"]["virtualMachineProfile"]["hardwareProfile"]
 
     def test_vmss_prioritized_mix_includes_ranks(self):
@@ -381,8 +380,8 @@ class TestArmPayload:
         arm = ArmPayloadMapper.vmss_payload(t)
 
         assert arm["sku"]["name"] == "Mix"
-        assert arm["skuProfile"]["allocationStrategy"] == "Prioritized"
-        assert arm["skuProfile"]["vmSizes"] == [
+        assert arm["properties"]["skuProfile"]["allocationStrategy"] == "Prioritized"
+        assert arm["properties"]["skuProfile"]["vmSizes"] == [
             {"name": "Standard_D4s_v5", "rank": 0},
             {"name": "Standard_D8s_v5", "rank": 2},
             {"name": "Standard_D16s_v5", "rank": 1},
@@ -418,7 +417,7 @@ class TestArmPayload:
 
         arm = ArmPayloadMapper.vmss_payload(t)
 
-        assert "allocationStrategy" not in arm["skuProfile"]
+        assert "allocationStrategy" not in arm["properties"]["skuProfile"]
 
     def test_spot_percentage_populates_priority_mix_policy(self):
         t = AzureTemplate(

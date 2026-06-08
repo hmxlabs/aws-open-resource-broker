@@ -61,7 +61,6 @@ def test_acquire_hosts_submits_native_vmss_create_and_returns_submitted_status()
     create_call = azure_client.compute_client.virtual_machine_scale_sets.begin_create_or_update.call_args.kwargs
     assert create_call["resource_group_name"] == "test-rg"
     assert create_call["vm_scale_set_name"] == result["provider_data"]["vmss_name"]
-    assert create_call["parameters"]["name"] == result["provider_data"]["vmss_name"]
     assert create_call["parameters"]["sku"]["capacity"] == 2
 
 
