@@ -53,6 +53,30 @@ class TestConfigDrivenProviderRegistration:
         assert azure_config.subscription_id == "11111111-1111-1111-1111-111111111111"
         assert azure_config.region == "uksouth"
 
+    def test_provider_config_builder_accepts_aws_provider_instance_config(self):
+        """AWS config creation must use the provider instance's config mapping."""
+        from orb.providers.config_builder import ProviderConfigBuilder
+        from orb.providers.registration import register_all_provider_types
+        from orb.providers.registry import get_provider_registry
+
+        registry = get_provider_registry()
+        registry.clear_registrations()
+        register_all_provider_types()
+
+        logger = MagicMock()
+        builder = ProviderConfigBuilder(logger, registry)
+        provider_instance = ProviderInstanceConfig(  # type: ignore[call-arg]
+            name="aws-default",
+            type="aws",
+            enabled=True,
+            config={"region": "eu-west-1", "profile": "test-profile"},
+        )
+
+        aws_config = builder.build_config(provider_instance)
+
+        assert aws_config.region == "eu-west-1"
+        assert aws_config.profile == "test-profile"
+
     def test_provider_config_builder_accepts_gcp_provider_instance_config(self):
         """GCP config creation must accept the canonical ProviderInstanceConfig input."""
         from orb.providers.config_builder import ProviderConfigBuilder
