@@ -89,6 +89,7 @@ class TestUpdateRequestStatus:
 
     def test_zero_instances_sets_in_progress(self):
         req = _make_request(requested_count=3)
+        req.resource_ids = ["i-pending"]
         self.svc._update_request_status(
             request=req,
             instance_count=0,
@@ -101,6 +102,7 @@ class TestUpdateRequestStatus:
 
     def test_zero_instances_with_errors_sets_failed(self):
         req = _make_request(requested_count=3)
+        req.resource_ids = []
         errors = [{"error_code": "GCPQuotaExceededError", "error_message": "Quota exceeded"}]
         self.svc._update_request_status(
             request=req,

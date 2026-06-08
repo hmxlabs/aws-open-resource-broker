@@ -332,9 +332,14 @@ class ProvisioningOrchestrationService:
                 has_capacity_error = provider_data.get("capacity_constrained", False)
 
                 # Merge routing telemetry (strategy-level) into provider_data so it
-                # reaches persistence alongside the provider-level data.
+                # reaches persistence alongside the provider-level data. Exclude
+                # the provider_data key itself from metadata, otherwise it would
+                # re-nest the already-extracted dict under provider_data["provider_data"].
                 merged_provider_data: dict[str, Any] = dict(provider_data)
-                merged_provider_data.update(result.metadata or {})
+                metadata_extras = {
+                    k: v for k, v in (result.metadata or {}).items() if k != "provider_data"
+                }
+                merged_provider_data.update(metadata_extras)
                 if result.routing_info:
                     merged_provider_data.update(result.routing_info)
 
@@ -364,6 +369,12 @@ class ProvisioningOrchestrationService:
 
         except CircuitBreakerOpenError:
             raise  # do not swallow — let it propagate to execute_provisioning
+
+        except TimeoutError:
+            # Re-raise so the caller's asyncio.timeout handler can record it as
+            # a timeout result; otherwise the broad `except Exception` below
+            # would catch it and degrade it to a generic "Provisioning failed".
+            raise
 
         except QuotaError as e:
             self._logger.error(

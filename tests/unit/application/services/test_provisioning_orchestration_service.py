@@ -11,7 +11,7 @@ from orb.application.ports.scheduler_port import SchedulerPort
 from orb.application.services.provisioning_orchestration_service import (
     ProvisioningOrchestrationService,
 )
-from orb.domain.base.operations import OperationResult
+from orb.providers.base.strategy.provider_strategy import ProviderResult
 from orb.domain.base.results import ProviderSelectionResult
 from orb.domain.request.aggregate import Request
 from orb.domain.request.value_objects import RequestType
@@ -31,7 +31,7 @@ async def test_async_submitted_create_is_not_retried():
 
     provider_selection_port = MagicMock()
     provider_selection_port.execute_operation = AsyncMock(
-        return_value=OperationResult.success_result(
+        return_value=ProviderResult.success_result(
             data={
                 "resource_ids": ["vmss-azure-vmss-test-1234"],
                 "instances": [],
@@ -104,7 +104,7 @@ async def test_planned_async_submitted_create_is_not_retried():
 
     provider_selection_port = MagicMock()
     provider_selection_port.execute_operation = AsyncMock(
-        return_value=OperationResult.success_result(
+        return_value=ProviderResult.success_result(
             data={
                 "resource_ids": ["vmss-azure-spot-placement-score-vmss-1234"],
                 "instances": [],
@@ -212,7 +212,7 @@ async def test_provider_error_with_no_result_data_preserves_error_message():
 
     provider_selection_port = MagicMock()
     provider_selection_port.execute_operation = AsyncMock(
-        return_value=OperationResult.error_result(
+        return_value=ProviderResult.error_result(
             "Provisioning failed: insufficient capacity",
             "PROVISIONING_ADAPTER_ERROR",
             metadata={"provider_data": {"fleet_errors": [{"error_code": "AllocationFailed"}]}},
