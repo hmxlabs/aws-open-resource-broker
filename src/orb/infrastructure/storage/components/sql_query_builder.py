@@ -73,9 +73,7 @@ class SQLQueryBuilder(QueryManager):
             return sql
         raise ValueError(f"Unknown query type: {query_type}")
 
-    def execute_query(
-        self, query: str, parameters: Optional[dict[str, Any]] = None
-    ) -> Any:
+    def execute_query(self, query: str, parameters: Optional[dict[str, Any]] = None) -> Any:
         """
         Reject direct execution — execution belongs to SQLConnectionManager.
 

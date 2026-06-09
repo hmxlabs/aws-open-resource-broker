@@ -78,9 +78,7 @@ def dynamodb_strategy() -> Iterator:
 
 
 @pytest.fixture(params=["json", "sql", "dynamodb"])
-def storage_strategy(
-    request, json_strategy, sql_strategy, dynamodb_strategy
-):
+def storage_strategy(request, json_strategy, sql_strategy, dynamodb_strategy):
     """Parameterised strategy fixture used by contract tests."""
     return {
         "json": json_strategy,
