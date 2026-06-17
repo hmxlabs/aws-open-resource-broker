@@ -99,7 +99,7 @@ def create_dynamodb_unit_of_work(config: Any) -> Any:
         request_name = collections.get("requests", "requests")
         template_name = collections.get("templates", "templates")
 
-        return DynamoDBUnitOfWork(  # type: ignore[abstract]
+        return DynamoDBUnitOfWork(
             aws_client=aws_client,
             logger=_logger,
             region=dynamodb_config.region,
@@ -115,7 +115,7 @@ def create_dynamodb_unit_of_work(config: Any) -> Any:
         profile = config.get("profile")
         table_prefix = config.get("table_prefix", "hostfactory")
 
-        return DynamoDBUnitOfWork(  # type: ignore[abstract]
+        return DynamoDBUnitOfWork(
             aws_client=None,
             logger=_logger,
             region=region,
@@ -273,7 +273,7 @@ def create_aurora_unit_of_work(config: Any) -> Any:
         connection_string = config.get("connection_string", "mysql+pymysql://localhost/orb")
         engine = create_engine(connection_string)
 
-    return SQLUnitOfWork(engine)  # type: ignore[abstract]
+    return SQLUnitOfWork(engine)
 
 
 def register_aurora_storage(

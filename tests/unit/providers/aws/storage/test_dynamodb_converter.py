@@ -28,41 +28,53 @@ def converter() -> DynamoDBConverter:
 
 
 def test_bool_true_serialized_as_bool(converter):
-    assert converter._convert_to_dynamodb_type(True) is True
+    item = converter.to_dynamodb_item("x", {"id": "x", "flag": True})
+    # On-the-wire form: bool stays BOOL, not Decimal.
+    assert item["flag"] is True
+    back = converter.from_dynamodb_item(item)
+    assert back["flag"] is True
 
 
 def test_bool_false_serialized_as_bool(converter):
-    assert converter._convert_to_dynamodb_type(False) is False
+    item = converter.to_dynamodb_item("x", {"id": "x", "flag": False})
+    assert item["flag"] is False
+    back = converter.from_dynamodb_item(item)
+    assert back["flag"] is False
 
 
 def test_int_serialized_as_decimal(converter):
-    result = converter._convert_to_dynamodb_type(5)
-    assert result == Decimal("5")
-    assert isinstance(result, Decimal)
+    item = converter.to_dynamodb_item("x", {"id": "x", "count": 5})
+    # On-the-wire form: number becomes Decimal.
+    assert item["count"] == Decimal("5")
+    assert isinstance(item["count"], Decimal)
 
 
 def test_float_serialized_as_decimal(converter):
-    result = converter._convert_to_dynamodb_type(1.5)
-    assert result == Decimal("1.5")
-    assert isinstance(result, Decimal)
+    item = converter.to_dynamodb_item("x", {"id": "x", "ratio": 1.5})
+    assert item["ratio"] == Decimal("1.5")
+    assert isinstance(item["ratio"], Decimal)
 
 
 # --- ISO strings returned as-is on read (no eager datetime) -----------------
 
 
 def test_iso_timestamp_returned_as_str_on_read(converter):
-    value = converter._convert_from_dynamodb_type("2026-06-11T10:30:45+00:00")
-    assert isinstance(value, str)
-    assert value == "2026-06-11T10:30:45+00:00"
+    item = converter.to_dynamodb_item("x", {"id": "x", "ts": "2026-06-11T10:30:45+00:00"})
+    back = converter.from_dynamodb_item(item)
+    assert isinstance(back["ts"], str)
+    assert back["ts"] == "2026-06-11T10:30:45+00:00"
 
 
 def test_zulu_timestamp_returned_as_str_on_read(converter):
-    value = converter._convert_from_dynamodb_type("2026-06-11T10:30:45Z")
-    assert isinstance(value, str)
+    item = converter.to_dynamodb_item("x", {"id": "x", "ts": "2026-06-11T10:30:45Z"})
+    back = converter.from_dynamodb_item(item)
+    assert isinstance(back["ts"], str)
 
 
 def test_plain_string_returned_as_str_on_read(converter):
-    assert converter._convert_from_dynamodb_type("RunInstances") == "RunInstances"
+    item = converter.to_dynamodb_item("x", {"id": "x", "provider_api": "RunInstances"})
+    back = converter.from_dynamodb_item(item)
+    assert back["provider_api"] == "RunInstances"
 
 
 # --- write path still serialises datetime objects to ISO strings ------------
@@ -70,7 +82,8 @@ def test_plain_string_returned_as_str_on_read(converter):
 
 def test_datetime_object_serialized_to_iso_on_write(converter):
     dt = datetime(2026, 6, 11, 10, 30, 45, tzinfo=timezone.utc)
-    assert converter._convert_to_dynamodb_type(dt) == dt.isoformat()
+    item = converter.to_dynamodb_item("x", {"id": "x", "ts": dt})
+    assert item["ts"] == dt.isoformat()
 
 
 # --- full request-shaped round-trip integrity -------------------------------
