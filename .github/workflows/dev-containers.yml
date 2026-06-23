@@ -289,6 +289,9 @@ jobs:
           done
         fi
 
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5  # v4
+
     - name: Test multi-architecture support
       env:
         REGISTRY: ${{ needs.config.outputs.container-registry }}
@@ -296,13 +299,17 @@ jobs:
         VERSION: ${{ needs.config.outputs.package-version }}
         DEFAULT_PYTHON: ${{ needs.config.outputs.default-python-version }}
       run: |
-        # Test that multi-arch manifests exist
-        echo "Testing multi-arch manifest for $VERSION-python$DEFAULT_PYTHON"
-        docker manifest inspect "$REGISTRY/$IMAGE:$VERSION-python$DEFAULT_PYTHON"
-        
-        # Verify both amd64 and arm64 are present
-        if docker manifest inspect "$REGISTRY/$IMAGE:$VERSION-python$DEFAULT_PYTHON" | grep -q "amd64" && \
-           docker manifest inspect "$REGISTRY/$IMAGE:$VERSION-python$DEFAULT_PYTHON" | grep -q "arm64"; then
+        # Use buildx imagetools rather than `docker manifest inspect`:
+        # imagetools authenticates via the existing docker login session and
+        # handles both OCI and Docker manifest media types consistently for
+        # GHCR-hosted images.
+        REF="$REGISTRY/$IMAGE:$VERSION-python$DEFAULT_PYTHON"
+        echo "Testing multi-arch manifest for $REF"
+        INSPECT=$(docker buildx imagetools inspect --raw "$REF")
+        echo "$INSPECT"
+
+        if echo "$INSPECT" | grep -q '"architecture": "amd64"' && \
+           echo "$INSPECT" | grep -q '"architecture": "arm64"'; then
           echo "Multi-arch manifest contains both amd64 and arm64"
         else
           echo "Multi-arch manifest missing architectures"
