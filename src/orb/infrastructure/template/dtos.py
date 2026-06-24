@@ -145,7 +145,13 @@ class TemplateDTO(BaseDTO):
         if provider_type_name:
             extension_class = TemplateExtensionRegistry.get_extension_class(provider_type_name)
             if extension_class is not None:
-                provider_config = extension_class(**template_dump)
+                dto_fields = set(cls.model_fields)
+                provider_specific_config = {
+                    key: value
+                    for key, value in template_dump.items()
+                    if key not in dto_fields and key != "metadata"
+                }
+                provider_config = extension_class(**provider_specific_config)
 
         return cls(
             # Core fields
