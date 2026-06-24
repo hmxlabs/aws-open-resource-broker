@@ -1,5 +1,7 @@
 """Template command handlers for CQRS pattern."""
 
+from typing import Any
+
 from orb.application.base.handlers import BaseCommandHandler
 from orb.application.decorators import command_handler
 from orb.application.template.commands import (
@@ -155,9 +157,6 @@ class UpdateTemplateHandler(BaseCommandHandler[UpdateTemplateCommand, None]):  #
         if not existing:
             raise EntityNotFoundError("Template", command.template_id)
 
-        # Apply updates onto the existing DTO
-        from typing import Any
-
         update_fields: dict[str, Any] = {}
 
         # Apply configuration as field overrides first
@@ -188,13 +187,19 @@ class UpdateTemplateHandler(BaseCommandHandler[UpdateTemplateCommand, None]):  #
         if command.instance_type is not None and "machine_types" not in update_fields:
             update_fields["machine_types"] = {command.instance_type: 1}
         if provider_specific_updates:
+            existing_provider_config = (
+                existing.provider_config.model_dump(exclude_none=True)
+                if existing.provider_config is not None
+                else {}
+            )
             update_fields["provider_config"] = {
-                **existing.provider_config,
+                **existing_provider_config,
                 **provider_specific_updates,
             }
 
         if update_fields:
-            updated = existing.model_copy(update=update_fields)
+            current_fields = {field: getattr(existing, field) for field in type(existing).model_fields}
+            updated = TemplateDTO(**{**current_fields, **update_fields})
         else:
             updated = existing
 

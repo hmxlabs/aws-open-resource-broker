@@ -4,14 +4,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, Optional
+from typing import Any, Optional
 
-from pydantic import Field, model_validator
+from pydantic import BaseModel, Field, field_serializer, model_validator
 
 from orb.application.dto.base import BaseDTO
-
-if TYPE_CHECKING:
-    from orb.domain.template.template_aggregate import Template
+from orb.domain.template.extensions import TemplateExtensionRegistry
+from orb.domain.template.template_aggregate import Template as DomainTemplate
 
 
 class TemplateDTO(BaseDTO):
@@ -72,7 +71,7 @@ class TemplateDTO(BaseDTO):
     # Tags and metadata
     tags: dict[str, Any] = Field(default_factory=dict)
     metadata: dict[str, Any] = Field(default_factory=dict)
-    provider_config: dict[str, Any] = Field(default_factory=dict)
+    provider_config: Optional[BaseModel] = None
 
     # Provider-specific data (keyed by provider name, e.g. {"aws": {...}})
     provider_data: dict[str, Any] = Field(default_factory=dict)
@@ -92,25 +91,61 @@ class TemplateDTO(BaseDTO):
     # Legacy fields
     version: Optional[str] = None
 
+    @field_serializer("provider_config")
+    def _serialize_provider_config(self, value: Optional[BaseModel]) -> Optional[dict[str, Any]]:
+        if value is None:
+            return None
+        return value.model_dump(exclude_none=True)
+
     @model_validator(mode="before")
     @classmethod
     def _set_defaults(cls, data: Any) -> Any:
         """Set default values for optional fields derived from other fields."""
         if isinstance(data, dict):
+            data = dict(data)
             if not data.get("name"):
                 data["name"] = data.get("template_id")
+            provider_config = data.get("provider_config")
+            provider_type = data.get("provider_type")
+            if isinstance(provider_config, dict):
+                typed_provider_config = (
+                    TemplateExtensionRegistry.create_extension_config(
+                        str(provider_type), provider_config
+                    )
+                    if provider_type
+                    else None
+                )
+                if typed_provider_config is None:
+                    raise ValueError(
+                        "provider_config requires a registered provider template extension"
+                    )
+                data["provider_config"] = typed_provider_config
         return data
 
+    @model_validator(mode="after")
+    def _validate_provider_config_registration(self) -> TemplateDTO:
+        if self.provider_config is None:
+            return self
+
+        provider_type = str(self.provider_type) if self.provider_type else None
+        extension_class = (
+            TemplateExtensionRegistry.get_extension_class(provider_type) if provider_type else None
+        )
+        if extension_class is None or not isinstance(self.provider_config, extension_class):
+            raise ValueError("provider_config requires a registered provider template extension")
+        return self
+
     @classmethod
-    def from_domain(cls, template: Template) -> TemplateDTO:
+    def from_domain(cls, template: DomainTemplate) -> TemplateDTO:
         """Convert domain template to DTO."""
         template_dump = template.model_dump(mode="json", exclude_none=True)
-        dto_fields = set(cls.model_fields.keys())
-        provider_specific_config = {
-            key: value
-            for key, value in template_dump.items()
-            if key not in dto_fields and key != "metadata"
-        }
+        provider_type = getattr(template, "provider_type", None)
+        provider_type_name = str(provider_type) if provider_type else None
+        provider_config = None
+        if provider_type_name:
+            extension_class = TemplateExtensionRegistry.get_extension_class(provider_type_name)
+            if extension_class is not None:
+                provider_config = extension_class(**template_dump)
 
         return cls(
             # Core fields
@@ -154,10 +189,10 @@ class TemplateDTO(BaseDTO):
             # Tags and metadata
             tags=getattr(template, "tags", {}),
             metadata=getattr(template, "metadata", {}),
-            provider_config=provider_specific_config,
+            provider_config=provider_config,
             provider_data=getattr(template, "provider_data", {}),
             # Provider configuration
-            provider_type=getattr(template, "provider_type", None),
+            provider_type=provider_type,
             provider_name=getattr(template, "provider_name", None),
             provider_api=getattr(template, "provider_api", None),
             # Timestamps

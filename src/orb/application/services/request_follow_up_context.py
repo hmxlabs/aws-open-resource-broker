@@ -3,9 +3,24 @@
 from __future__ import annotations
 
 from orb.domain.request.aggregate import Request
+from orb.domain.base.follow_up_context import (
+    DeploymentPollingFollowUpContext,
+    FollowUpContext,
+    TerminationFollowUpContext,
+)
 from typing import Any
 
 FOLLOW_UP_CONTEXT_KEY = "follow_up_context"
+
+__all__ = [
+    "DeploymentPollingFollowUpContext",
+    "FOLLOW_UP_CONTEXT_KEY",
+    "FollowUpContext",
+    "TerminationFollowUpContext",
+    "get_request_follow_up_context",
+    "merge_request_metadata_with_follow_up_context",
+    "with_request_follow_up_context",
+]
 
 
 def get_request_follow_up_context(request: Request) -> dict[str, Any]:

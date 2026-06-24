@@ -1,6 +1,7 @@
 """Unit tests for template command handlers — TDD for store-unification fix."""
 
 from unittest.mock import AsyncMock, Mock
+from typing import Any
 
 import pytest
 
@@ -21,6 +22,12 @@ from orb.domain.base.ports import (
     LoggingPort,
 )
 from orb.infrastructure.template.dtos import TemplateDTO
+from orb.providers.aws.configuration.template_extension import AWSTemplateExtensionConfig
+
+
+def _provider_config_dict(dto: TemplateDTO) -> dict[str, Any]:
+    assert isinstance(dto.provider_config, AWSTemplateExtensionConfig)
+    return dto.provider_config.model_dump(exclude_none=True)
 
 
 def _make_dto(**kwargs: object) -> TemplateDTO:
@@ -110,30 +117,24 @@ async def test_create_preserves_provider_specific_configuration_in_provider_conf
     handler = _make_create_handler(port)
 
     command = CreateTemplateCommand(
-        template_id="azure-vmss",
-        provider_api="VMSS",
-        image_id="ignored-by-azure-command-contract",
+        template_id="aws-ec2-fleet",
+        provider_api="EC2Fleet",
+        image_id="ami-000",
         configuration={
-            "provider_type": "azure",
-            "provider_name": "azure-default",
-            "vm_size": "Standard_D4s_v5",
-            "resource_group": "rg-test",
-            "location": "eastus2",
-            "image": {
-                "publisher": "Canonical",
-                "offer": "0001-com-ubuntu-server-jammy",
-                "sku": "22_04-lts-gen2",
-                "version": "latest",
-            },
+            "provider_type": "aws",
+            "provider_name": "aws-default",
+            "fleet_type": "maintain",
+            "fleet_role": "arn:aws:iam::123456789012:role/SpotFleetRole",
         },
     )
 
     await handler.handle(command)
 
     saved: TemplateDTO = manager.save_template.call_args[0][0]
-    assert saved.vm_size == "Standard_D4s_v5"
-    assert saved.provider_config["resource_group"] == "rg-test"
-    assert saved.provider_config["image"]["publisher"] == "Canonical"
+    provider_config = _provider_config_dict(saved)
+    assert saved.provider_type == "aws"
+    assert provider_config["fleet_type"] == "maintain"
+    assert provider_config["fleet_role"] == "arn:aws:iam::123456789012:role/SpotFleetRole"
 
 
 @pytest.mark.asyncio
@@ -264,7 +265,7 @@ async def test_update_validation_errors_sets_updated_false() -> None:
 
     command = UpdateTemplateCommand(
         template_id="tpl-1",
-        configuration={"bad_field": "x"},
+        image_id="ami-invalid",
     )
     await handler.handle(command)
 
@@ -275,25 +276,27 @@ async def test_update_validation_errors_sets_updated_false() -> None:
 
 @pytest.mark.asyncio
 async def test_update_validates_promoted_provider_specific_configuration() -> None:
-    existing = TemplateDTO(
-        template_id="azure-vmss",
-        name="azure-vmss",
-        provider_api="VMSS",
-        provider_type="azure",
-        provider_name="azure-default",
-        vm_size="Standard_D4s_v5",
-        provider_config={"resource_group": "rg-old", "location": "eastus2"},
+    existing = TemplateDTO.model_validate(
+        {
+            "template_id": "aws-ec2-fleet",
+            "name": "aws-ec2-fleet",
+            "provider_api": "EC2Fleet",
+            "provider_type": "aws",
+            "provider_name": "aws-default",
+            "provider_config": {"fleet_type": "maintain", "fleet_role": "old-role"},
+        }
     )
     manager = _make_manager(existing=existing)
     port = _make_template_port(manager)
     handler = _make_update_handler(port)
 
     command = UpdateTemplateCommand(
-        template_id="azure-vmss",
-        configuration={"resource_group": "rg-new"},
+        template_id="aws-ec2-fleet",
+        configuration={"fleet_role": "new-role"},
     )
     await handler.handle(command)
 
     validated_config = port.validate_template_config.call_args.args[0]
-    assert validated_config["resource_group"] == "rg-new"
+    assert validated_config["fleet_type"] == "maintain"
+    assert validated_config["fleet_role"] == "new-role"
     assert "provider_config" not in validated_config

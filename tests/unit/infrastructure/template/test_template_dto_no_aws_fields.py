@@ -3,7 +3,11 @@
 import ast
 import os
 
+import pytest
+from pydantic import ValidationError
+
 from orb.infrastructure.template.dtos import TemplateDTO
+from orb.providers.aws.configuration.template_extension import AWSTemplateExtensionConfig
 from orb.providers.aws.domain.template.aws_template_aggregate import (
     ABISInstanceRequirements,
     AWSFleetType,
@@ -89,25 +93,35 @@ def _make_aws_template(**kwargs) -> AWSTemplate:
     return AWSTemplate(**defaults)
 
 
+def _provider_config_dict(dto: TemplateDTO) -> dict:
+    assert isinstance(dto.provider_config, AWSTemplateExtensionConfig)
+    return dto.provider_config.model_dump(exclude_none=True)
+
+
 class TestFromDomainPacksAWSFieldsIntoProviderConfig:
     """TemplateDTO.from_domain() must move AWS fields into provider_config."""
+
+    def test_provider_config_is_typed(self):
+        template = _make_aws_template(fleet_type=AWSFleetType.MAINTAIN)
+        dto = TemplateDTO.from_domain(template)
+        assert isinstance(dto.provider_config, AWSTemplateExtensionConfig)
 
     def test_fleet_type_in_metadata(self):
         template = _make_aws_template(fleet_type=AWSFleetType.MAINTAIN)
         dto = TemplateDTO.from_domain(template)
-        assert dto.provider_config.get("fleet_type") == "maintain", (
+        assert _provider_config_dict(dto).get("fleet_type") == "maintain", (
             "fleet_type must be stored in provider_config, not as a top-level field"
         )
 
     def test_fleet_role_in_metadata(self):
         template = _make_aws_template(fleet_role="arn:aws:iam::123:role/MyRole")
         dto = TemplateDTO.from_domain(template)
-        assert dto.provider_config.get("fleet_role") == "arn:aws:iam::123:role/MyRole"
+        assert _provider_config_dict(dto).get("fleet_role") == "arn:aws:iam::123:role/MyRole"
 
     def test_percent_on_demand_in_metadata(self):
         template = _make_aws_template(price_type="heterogeneous", percent_on_demand=40)
         dto = TemplateDTO.from_domain(template)
-        assert dto.provider_config.get("percent_on_demand") == 40
+        assert _provider_config_dict(dto).get("percent_on_demand") == 40
 
     def test_abis_instance_requirements_in_metadata(self):
         abis = ABISInstanceRequirements(
@@ -116,7 +130,7 @@ class TestFromDomainPacksAWSFieldsIntoProviderConfig:
         )
         template = _make_aws_template(abis_instance_requirements=abis)
         dto = TemplateDTO.from_domain(template)
-        stored = dto.provider_config.get("abis_instance_requirements")
+        stored = _provider_config_dict(dto).get("abis_instance_requirements")
         assert stored is not None, "abis_instance_requirements must be stored in provider_config"
         assert stored["vcpu_count"]["min"] == 2
 
@@ -124,7 +138,7 @@ class TestFromDomainPacksAWSFieldsIntoProviderConfig:
         """When fleet_type is None it must not pollute provider_config."""
         template = _make_aws_template(provider_api="RunInstances")
         dto = TemplateDTO.from_domain(template)
-        assert "fleet_type" not in dto.provider_config
+        assert "fleet_type" not in _provider_config_dict(dto)
         assert not hasattr(dto, "fleet_type") or "fleet_type" not in dto.model_fields
 
     def test_existing_metadata_preserved(self):
@@ -135,7 +149,29 @@ class TestFromDomainPacksAWSFieldsIntoProviderConfig:
         )
         dto = TemplateDTO.from_domain(template)
         assert dto.metadata.get("custom_key") == "custom_value"
-        assert dto.provider_config.get("fleet_type") == "request"
+        assert _provider_config_dict(dto).get("fleet_type") == "request"
+
+
+class TestProviderConfigValidation:
+    """Provider config must be backed by a registered provider extension model."""
+
+    def test_unregistered_provider_config_dict_fails_validation(self):
+        with pytest.raises(ValidationError):
+            TemplateDTO.model_validate(
+                {
+                    "template_id": "tpl-unregistered",
+                    "provider_type": "unregistered-provider",
+                    "provider_config": {"provider_specific_field": "value"},
+                }
+            )
+
+    def test_typed_provider_config_must_match_registered_provider_type(self):
+        with pytest.raises(ValidationError):
+            TemplateDTO(
+                template_id="tpl-unregistered",
+                provider_type="unregistered-provider",
+                provider_config=AWSTemplateExtensionConfig.model_validate({}),
+            )
 
 
 # ---------------------------------------------------------------------------
