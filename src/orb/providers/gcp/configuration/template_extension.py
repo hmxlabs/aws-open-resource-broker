@@ -6,7 +6,12 @@ from typing import Any, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from orb.providers.gcp.constants import DEFAULT_GCP_SERVICE_ACCOUNT_SCOPES
+from orb.providers.gcp.constants import (
+    DEFAULT_GCP_SERVICE_ACCOUNT_SCOPES,
+)
+from orb.providers.gcp.domain.template.service_account_scopes import (
+    GCPServiceAccountScopes,
+)
 
 
 class GCPTemplateExtensionConfig(BaseModel):
@@ -27,7 +32,7 @@ class GCPTemplateExtensionConfig(BaseModel):
     service_account_email: Optional[str] = Field(
         default=None, description="Default service account email"
     )
-    service_account_scopes: list[str] = Field(
+    service_account_scopes: GCPServiceAccountScopes = Field(
         default_factory=lambda: list(DEFAULT_GCP_SERVICE_ACCOUNT_SCOPES),
         description="Default OAuth scopes for attached service accounts",
     )

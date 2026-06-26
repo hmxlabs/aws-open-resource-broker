@@ -2834,7 +2834,7 @@ requires-dist = [
     { name = "fastapi", marker = "extra == 'ci'", specifier = ">=0.128.0" },
     { name = "filelock", specifier = ">=3.20.1" },
     { name = "git-changelog", marker = "extra == 'dev'", specifier = ">=2.6.0,<3.0.0" },
-    { name = "google-cloud-compute", specifier = ">=1.39.0" },
+    { name = "google-cloud-compute", specifier = ">=1.39.0,<2.0.0" },
     { name = "httpx", marker = "extra == 'ci'", specifier = ">=0.27.0" },
     { name = "ipdb", marker = "extra == 'dev'", specifier = ">=0.13.13,<1.0.0" },
     { name = "ipython", marker = "extra == 'dev'", specifier = ">=8.16.1,<9.0.0" },

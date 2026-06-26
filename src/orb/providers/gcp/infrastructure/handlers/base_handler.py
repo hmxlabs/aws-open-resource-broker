@@ -193,4 +193,4 @@ class GCPHandler(ABC):
 
 def _is_gcp_resource_reference(value: str) -> bool:
     """Return true when the value is already a GCP resource path or self-link."""
-    return value.startswith(("global/", "regions/", "projects/", "https://", "http://"))
+    return value.startswith(("global/", "regions/", "projects/", "https://"))

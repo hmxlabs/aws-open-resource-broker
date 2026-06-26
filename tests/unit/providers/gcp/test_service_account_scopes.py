@@ -6,6 +6,11 @@ import sys
 from types import ModuleType
 from unittest.mock import MagicMock
 
+import pytest
+from pydantic import ValidationError
+
+from orb.providers.gcp.configuration.template_extension import GCPTemplateExtensionConfig
+from orb.providers.gcp.constants import DEFAULT_GCP_SERVICE_ACCOUNT_SCOPES
 from orb.providers.gcp.configuration.config import GCPProviderConfig
 from orb.providers.gcp.domain.template.gcp_template_aggregate import GCPTemplate
 from orb.providers.gcp.infrastructure.handlers.mig_handler import GCPManagedInstanceGroupHandler
@@ -147,6 +152,71 @@ def test_mig_template_payload_uses_configured_service_account_scopes(monkeypatch
         "https://www.googleapis.com/auth/compute.readonly",
         "https://www.googleapis.com/auth/devstorage.read_only",
     ]
+
+
+def test_gcp_template_defaults_to_compute_service_account_scope() -> None:
+    template = GCPTemplate.model_validate(
+        {
+            "template_id": "gcp-mig",
+            "provider_type": "gcp",
+            "provider_api": "MIG",
+            "project_id": "orb-example-12345",
+            "region": "us-central1",
+            "zones": ["us-central1-a", "us-central1-b"],
+            "mig_scope": "regional",
+            "instance_type": "e2-standard-4",
+            "max_instances": 2,
+            "source_image_family": "debian-12",
+            "source_image_project": "debian-cloud",
+        }
+    )
+
+    assert DEFAULT_GCP_SERVICE_ACCOUNT_SCOPES == ("https://www.googleapis.com/auth/compute",)
+    assert template.service_account_scopes == ["https://www.googleapis.com/auth/compute"]
+
+
+@pytest.mark.parametrize(
+    "scope",
+    [
+        "",
+        " https://www.googleapis.com/auth/compute",
+        "http://www.googleapis.com/auth/compute",
+        "https://example.com/auth/compute",
+        "https://www.googleapis.com/auth/",
+    ],
+)
+def test_gcp_template_rejects_invalid_service_account_scope(scope: str) -> None:
+    with pytest.raises(ValidationError, match="service_account_scopes"):
+        GCPTemplate.model_validate(
+            {
+                "template_id": "gcp-mig",
+                "provider_type": "gcp",
+                "provider_api": "MIG",
+                "project_id": "orb-example-12345",
+                "region": "us-central1",
+                "zones": ["us-central1-a", "us-central1-b"],
+                "mig_scope": "regional",
+                "instance_type": "e2-standard-4",
+                "max_instances": 2,
+                "source_image_family": "debian-12",
+                "source_image_project": "debian-cloud",
+                "service_account_scopes": [scope],
+            }
+        )
+
+
+@pytest.mark.parametrize(
+    "scopes",
+    [
+        [],
+        ["http://www.googleapis.com/auth/compute"],
+    ],
+)
+def test_gcp_template_extension_rejects_invalid_service_account_scopes(
+    scopes: list[str],
+) -> None:
+    with pytest.raises(ValidationError, match="service_account_scopes"):
+        GCPTemplateExtensionConfig(service_account_scopes=scopes)
 
 
 def test_single_vm_and_mig_payloads_share_common_instance_configuration(monkeypatch) -> None:
