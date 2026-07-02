@@ -235,6 +235,27 @@ class ProviderStrategy(ABC):
         with concurrent.futures.ThreadPoolExecutor() as executor:
             return await loop.run_in_executor(executor, self.execute_operation, operation)  # type: ignore[arg-type]
 
+    async def start_daemon_services(self) -> None:
+        """Start background services that require an asyncio event loop.
+
+        Default implementation is a no-op.  Providers that maintain background
+        tasks (watch streams, periodic reconcilers, garbage collectors) override
+        this to start them.
+
+        Lifecycle contract:
+
+        * ``initialize`` must be cheap and synchronous: validate config, set up
+          lazy state, return ``True``.  No I/O, no event-loop work, no
+          background tasks.
+        * ``start_daemon_services`` runs after ``initialize`` succeeds and only
+          in long-lived daemon contexts (the REST API server).  CLI commands
+          never call it because they don't keep a loop running long enough for
+          background tasks to be useful and shouldn't pay the cost.
+
+        Implementations must be idempotent: calling more than once is safe.
+        """
+        return
+
     @abstractmethod
     def get_capabilities(self) -> ProviderCapabilities:
         """
@@ -257,8 +278,9 @@ class ProviderStrategy(ABC):
             Current health status of the provider
         """
 
+    @classmethod
     @abstractmethod
-    def generate_provider_name(self, config: dict[str, Any]) -> str:
+    def generate_provider_name(cls, config: dict[str, Any]) -> str:
         """Generate provider name based on provider-specific components.
 
         Args:
@@ -287,7 +309,8 @@ class ProviderStrategy(ABC):
             Pattern string (e.g., "{type}_{profile}_{region}")
         """
 
-    def get_available_credential_sources(self) -> list[dict]:
+    @classmethod
+    def get_available_credential_sources(cls) -> list[dict]:
         """Get available credential sources for this provider.
 
         Returns:
@@ -296,7 +319,8 @@ class ProviderStrategy(ABC):
         """
         return []
 
-    def test_credentials(self, credential_source: Optional[str] = None, **kwargs) -> dict:
+    @classmethod
+    def test_credentials(cls, credential_source: Optional[str] = None, **kwargs) -> dict:
         """Test credentials and return metadata.
 
         Args:
@@ -309,7 +333,8 @@ class ProviderStrategy(ABC):
         """
         return {"success": False, "error": "Credential testing not implemented"}
 
-    def get_credential_requirements(self) -> dict:
+    @classmethod
+    def get_credential_requirements(cls) -> dict:
         """Get required credential parameters for this provider.
 
         Returns:
@@ -318,7 +343,8 @@ class ProviderStrategy(ABC):
         """
         return {}
 
-    def get_operational_requirements(self) -> dict:
+    @classmethod
+    def get_operational_requirements(cls) -> dict:
         """What's needed to operate after authentication (e.g. region, project).
 
         Returns a dict of param_name -> {"required": bool, "description": str}.
@@ -326,7 +352,8 @@ class ProviderStrategy(ABC):
         """
         return {}
 
-    def get_available_regions(self) -> list[tuple[str, str]]:
+    @classmethod
+    def get_available_regions(cls) -> list[tuple[str, str]]:
         """Get available regions as (region_id, display_name) tuples.
 
         Returns:
@@ -335,14 +362,16 @@ class ProviderStrategy(ABC):
         """
         return []
 
-    def get_default_region(self) -> str:
+    @classmethod
+    def get_default_region(cls) -> str:
         """Return the default region string for CLI prompts.
 
         Override in provider-specific strategies.
         """
         return ""
 
-    def get_cli_extra_config_keys(self) -> set[str]:
+    @classmethod
+    def get_cli_extra_config_keys(cls) -> set[str]:
         """Return the set of infrastructure_defaults keys that belong in provider
         config rather than template_defaults.
 
@@ -351,7 +380,8 @@ class ProviderStrategy(ABC):
         """
         return set()
 
-    def get_cli_infrastructure_defaults(self, args: Any) -> dict[str, Any]:
+    @classmethod
+    def get_cli_infrastructure_defaults(cls, args: Any) -> dict[str, Any]:
         """Extract provider-specific infrastructure defaults from parsed CLI args.
 
         Override in provider-specific strategies.
