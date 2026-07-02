@@ -259,9 +259,15 @@ class AWSProviderStrategy(ProviderStrategy):
         """Check AWS provider health status."""
         return self._get_health_service().check_health()
 
-    def generate_provider_name(self, config: dict[str, Any]) -> str:
+    @classmethod
+    def generate_provider_name(cls, config: dict[str, Any]) -> str:
         """Generate AWS provider name: aws_{profile}_{region}"""
-        return self._get_capability_service().generate_provider_name(config)
+        import re
+
+        profile = config.get("profile") or "instance-profile"
+        region = config.get("region", "us-east-1")
+        sanitized_profile = re.sub(r"[^a-zA-Z0-9\-_]", "-", str(profile))
+        return f"aws_{sanitized_profile}_{region}"
 
     def parse_provider_name(self, provider_name: str) -> dict[str, str]:
         """Parse AWS provider name back to components."""
@@ -524,24 +530,35 @@ class AWSProviderStrategy(ProviderStrategy):
         """Validate AWS infrastructure configuration."""
         return self._get_infrastructure_service().validate_infrastructure(provider_config)
 
-    # Credential methods (delegated to health service)
-    def get_available_credential_sources(self) -> list[dict]:
-        """Get available AWS credential sources."""
-        return self._get_health_service().get_available_credential_sources()
+    # Credential methods — classmethods: read only from the local environment
+    # (boto3 credential chain, profile files) and require no instance state.
+    @classmethod
+    def get_available_credential_sources(cls) -> list[dict]:
+        """Get available AWS credential sources from the local boto3 profile chain."""
+        from orb.providers.aws.profile_discovery import get_available_profiles
 
-    def test_credentials(self, credential_source: Optional[str] = None, **kwargs) -> dict:
-        """Test AWS credentials."""
-        return self._get_health_service().test_credentials(credential_source, **kwargs)
+        return get_available_profiles()
 
-    def get_credential_requirements(self) -> dict:
-        """AWS requires region."""
-        return self._get_health_service().get_credential_requirements()
+    @classmethod
+    def test_credentials(cls, credential_source: Optional[str] = None, **kwargs) -> dict:
+        """Test AWS credentials using the boto3 session factory."""
+        from orb.providers.aws.session_factory import AWSSessionFactory
 
-    def get_operational_requirements(self) -> dict:
-        """Get operational requirements for AWS."""
-        return self._get_health_service().get_operational_requirements()
+        region = kwargs.get("region")
+        return AWSSessionFactory.discover_credentials(credential_source, region)
 
-    def get_available_regions(self) -> list[tuple[str, str]]:
+    @classmethod
+    def get_credential_requirements(cls) -> dict:
+        """AWS profiles are region-independent; region is collected separately."""
+        return {}
+
+    @classmethod
+    def get_operational_requirements(cls) -> dict:
+        """AWS requires a region to operate."""
+        return {"region": {"required": True, "description": "AWS region"}}
+
+    @classmethod
+    def get_available_regions(cls) -> list[tuple[str, str]]:
         """Get common AWS regions as (region_id, display_name) tuples."""
         return [
             ("us-east-1", "N. Virginia"),
@@ -558,15 +575,18 @@ class AWSProviderStrategy(ProviderStrategy):
             ("sa-east-1", "São Paulo"),
         ]
 
-    def get_default_region(self) -> str:
+    @classmethod
+    def get_default_region(cls) -> str:
         """Return the default AWS region for CLI prompts."""
         return "us-east-1"
 
-    def get_cli_extra_config_keys(self) -> set[str]:
+    @classmethod
+    def get_cli_extra_config_keys(cls) -> set[str]:
         """Return AWS keys that belong in provider config, not template_defaults."""
         return {"fleet_role"}
 
-    def get_cli_infrastructure_defaults(self, args: Any) -> dict[str, Any]:
+    @classmethod
+    def get_cli_infrastructure_defaults(cls, args: Any) -> dict[str, Any]:
         """Extract AWS-specific infrastructure defaults from parsed CLI args."""
         result: dict[str, Any] = {}
         if getattr(args, "subnet_ids", None):
