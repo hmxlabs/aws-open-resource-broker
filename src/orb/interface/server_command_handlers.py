@@ -81,11 +81,19 @@ def _resolve_configs(args) -> tuple[Any, Any | None]:
 
 
 async def _initialize_application() -> None:
-    """Initialise the DI container's providers — same as serve handler."""
+    """Initialise the DI container's providers — same as serve handler.
+
+    Also starts provider daemon services (watch streams, startup reconcilers,
+    orphan GC, etc). Only the REST/daemon path calls this — CLI commands
+    explicitly skip it so they stay synchronous and don't issue per-command
+    cluster sweeps.
+    """
     from orb.bootstrap import Application
     from orb.domain.base.ports.configuration_port import ConfigurationPort
     from orb.infrastructure.di.container import get_container
+    from orb.infrastructure.logging.logger import get_logger
 
+    logger = get_logger(__name__)
     container = get_container()
     config_manager = container.get(ConfigurationPort)
     orb_app = Application(
@@ -93,7 +101,14 @@ async def _initialize_application() -> None:
         skip_validation=True,
         container=container,
     )
-    await orb_app.initialize()
+    if not await orb_app.initialize():
+        logger.error("Failed to initialize application; providers may not be available")
+        return
+    if not await orb_app.start_daemon_services():
+        logger.warning(
+            "One or more provider daemon services failed to start; "
+            "the REST API will continue with reduced functionality."
+        )
 
 
 def _build_runtime(args):
