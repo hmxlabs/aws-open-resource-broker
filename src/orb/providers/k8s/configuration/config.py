@@ -7,6 +7,7 @@ integrates with the configuration loader and the provider settings registry.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 from pathlib import Path
 from typing import Any, Optional
@@ -28,14 +29,11 @@ def _read_in_cluster_namespace() -> Optional[str]:
     ORB is running inside a Kubernetes pod.  Returns the trimmed content, or
     ``None`` if the file is absent or unreadable (out-of-cluster case).
     """
-    try:
+    with contextlib.suppress(OSError):
         if _SA_NAMESPACE_FILE.exists():
             ns = _SA_NAMESPACE_FILE.read_text(encoding="utf-8").strip()
-            return ns if ns else None
-    except OSError:
-        # ServiceAccount file unreadable (permissions, deleted mid-read);
-        # fall back to None so the caller uses the configured default.
-        pass
+            if ns:
+                return ns
     return None
 
 

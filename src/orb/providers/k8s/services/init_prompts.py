@@ -93,10 +93,8 @@ def pick_context(
         if 0 <= idx < len(contexts):
             return contexts[idx].name
     except ValueError:
-        # Non-numeric input; fall through to return the default context below.
-        pass
+        return contexts[default_index - 1].name
 
-    # Unrecognised — fall back to the default.
     return contexts[default_index - 1].name
 
 
@@ -141,8 +139,7 @@ def pick_namespace(
         if 0 <= idx < len(namespaces):
             return namespaces[idx].name
     except ValueError:
-        # Non-numeric input; fall through to return the default namespace below.
-        pass
+        return namespaces[default_index - 1].name
 
     return namespaces[default_index - 1].name
 
@@ -188,8 +185,7 @@ def pick_service_account(
         if 0 <= idx < len(sas):
             return sas[idx].name
     except ValueError:
-        # Non-numeric input; fall through to return empty string (no SA selected).
-        pass
+        return ""
 
     return ""
 
@@ -229,8 +225,7 @@ def pick_image_pull_secret(
         if 0 <= idx < len(secrets):
             return secrets[idx]
     except ValueError:
-        # Non-numeric input; fall through to return None (no pull secret selected).
-        pass
+        return None
 
     return None
 

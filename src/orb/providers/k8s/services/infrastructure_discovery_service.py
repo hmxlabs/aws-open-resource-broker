@@ -21,6 +21,7 @@ supplied):
 
 from __future__ import annotations
 
+import contextlib
 import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional
@@ -573,15 +574,11 @@ class K8sInfrastructureDiscoveryService:
         if not default_namespace or default_namespace == "default":
             # Try to do better from discovery results.
             if in_cluster:
-                try:
+                with contextlib.suppress(OSError):
                     if _SA_NAMESPACE_FILE.exists():
                         sa_ns = _SA_NAMESPACE_FILE.read_text(encoding="utf-8").strip()
                         if sa_ns:
                             default_namespace = sa_ns
-                except OSError:
-                    # ServiceAccount file unreadable (permissions, deleted mid-read);
-                    # default_namespace keeps its previous value.
-                    pass
             if default_namespace == "default" and namespace_names:
                 active = [n for n in namespace_infos if n.status in ("Active", "active")]
                 if active:
@@ -767,13 +764,9 @@ class K8sInfrastructureDiscoveryService:
         # ------------------------------------------------------------------
         # Read SA-bound namespace from the kubelet file (in-cluster fallback).
         sa_bound_ns: Optional[str] = None
-        try:
+        with contextlib.suppress(OSError):
             if _SA_NAMESPACE_FILE.exists():
                 sa_bound_ns = _SA_NAMESPACE_FILE.read_text(encoding="utf-8").strip() or None
-        except OSError:
-            # ServiceAccount file unreadable (permissions, deleted mid-read);
-            # sa_bound_ns remains None and namespace auto-selection falls back.
-            pass
 
         namespace_infos = self.discover_namespaces()
 

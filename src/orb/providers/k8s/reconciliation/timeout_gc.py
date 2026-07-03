@@ -140,7 +140,7 @@ async def delete_timed_out_pod_async(
     name: str,
     namespace: str,
     reason: str,
-    logger: "LoggingPort",
+    logger: LoggingPort,
 ) -> None:
     """Delete a single timed-out pod via ``CoreV1Api.delete_namespaced_pod``.
 
