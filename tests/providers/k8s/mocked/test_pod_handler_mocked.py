@@ -442,3 +442,85 @@ async def test_return_request_completes_when_pod_deleted(
         f"got {type(outcome).__name__}: {outcome!r}"
     )
     assert pod_name in outcome.resource_ids
+
+
+# ---------------------------------------------------------------------------
+# F4 — Fatal waiting reasons (InvalidImageName etc.) surfaced as errors
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_pod_handler_invalid_image_name_surfaced_as_failed(
+    kmock_k8s: KubernetesEmulator,
+    k8s_client_facade: Any,
+    k8s_config: Any,
+) -> None:
+    """A pod stuck in Pending with reason=InvalidImageName must be classified as failed.
+
+    Regression for the bug where templates with invalid image names produced
+    pods that stayed in Pending forever with an empty message. After the fix,
+    check_hosts_status must return status='failed' and status_reason='InvalidImageName'
+    so the operator receives a visible, actionable error.
+    """
+    from kmock import resource  # noqa: PLC0415
+
+    request_id = f"req-{uuid.uuid4()}"
+    pod_name = f"orb-{request_id[4:12]}-0000"
+
+    # Seed a Pending pod with InvalidImageName waiting reason in containerStatuses.
+    pod_res = resource("", "v1", "pods")
+    kmock_k8s.objects[pod_res, "orb-test", pod_name] = {
+        "apiVersion": "v1",
+        "kind": "Pod",
+        "metadata": {
+            "name": pod_name,
+            "namespace": "orb-test",
+            "labels": {
+                "orb.io/managed": "true",
+                "orb.io/request-id": request_id,
+            },
+        },
+        "spec": {
+            "containers": [{"name": "app", "image": "INVALID IMAGE NAME WITH SPACES!!!"}],
+        },
+        "status": {
+            "phase": "Pending",
+            "podIP": None,
+            "hostIP": None,
+            "conditions": [{"type": "Ready", "status": "False"}],
+            "containerStatuses": [
+                {
+                    "name": "app",
+                    "ready": False,
+                    "restartCount": 0,
+                    "image": "INVALID IMAGE NAME WITH SPACES!!!",
+                    "imageID": "",
+                    "state": {
+                        "waiting": {
+                            "reason": "InvalidImageName",
+                            "message": "invalid image name",
+                        }
+                    },
+                }
+            ],
+        },
+    }
+
+    handler = _make_pod_handler(k8s_client_facade, k8s_config)
+    request = _make_request(requested_count=1, request_id=request_id)
+
+    result = await asyncio.to_thread(handler.check_hosts_status, request)
+
+    assert len(result.instances) == 1
+    inst = result.instances[0]
+    # InvalidImageName waiting reason must be escalated to 'failed'.
+    assert inst["status"] == "failed", (
+        f"Expected 'failed' for InvalidImageName pod, got {inst['status']!r}"
+    )
+    assert inst["status_reason"] == "InvalidImageName", (
+        f"Expected status_reason='InvalidImageName', got {inst['status_reason']!r}"
+    )
+    assert result.fulfilment.state == "failed", (
+        f"Expected failed fulfilment for InvalidImageName pod, "
+        f"got {result.fulfilment.state!r} (message: {result.fulfilment.message!r})"
+    )

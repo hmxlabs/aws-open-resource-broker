@@ -24,6 +24,17 @@ from typing import Any, Optional
 # ``terminated`` so the fulfilment math and status display reflect reality.
 _CONTROLLER_RESPAWNS_SUCCEEDED: frozenset[str] = frozenset({"Deployment", "StatefulSet"})
 
+# Container waiting reasons that indicate a terminal configuration error.
+FATAL_WAITING_REASONS: frozenset[str] = frozenset(
+    {
+        "InvalidImageName",
+        "ImagePullBackOff",
+        "ErrImagePull",
+        "CreateContainerConfigError",
+        "CreateContainerError",
+    }
+)
+
 
 def is_pod_ready(conditions: list[Any]) -> bool:
     """Return ``True`` iff ``conditions`` has a ``Ready=True`` entry."""
@@ -109,8 +120,15 @@ def extract_status_reason(
     return None
 
 
+def is_fatal_waiting_reason(reason: Optional[str]) -> bool:
+    """Return ``True`` when ``reason`` is a terminal container waiting error."""
+    return bool(reason) and reason in FATAL_WAITING_REASONS
+
+
 __all__ = [
+    "FATAL_WAITING_REASONS",
     "extract_status_reason",
+    "is_fatal_waiting_reason",
     "is_pod_ready",
     "pod_status_string",
 ]

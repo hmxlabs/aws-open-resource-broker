@@ -58,6 +58,37 @@ def test_resolve_container_image_returns_image_id() -> None:
     assert t.resolve_container_image() == "ghcr.io/example/worker:1"
 
 
+# ---------------------------------------------------------------------------
+# F4 — image_id validation rejects invalid Docker image names
+# ---------------------------------------------------------------------------
+
+
+def test_k8s_template_rejects_image_with_spaces() -> None:
+    """K8sTemplate must reject image names containing whitespace at construction."""
+    with pytest.raises(ValidationError, match="Invalid container image name"):
+        K8sTemplate(
+            template_id="tpl",
+            image_id="INVALID IMAGE NAME WITH SPACES!!!",
+        )
+
+
+def test_k8s_template_accepts_valid_image_names() -> None:
+    """K8sTemplate must accept common Docker image name patterns."""
+    for image in [
+        "busybox:latest",
+        "gcr.io/google-containers/pause:3.1",
+        "123456789012.dkr.ecr.us-east-1.amazonaws.com/my-image:tag",
+    ]:
+        t = K8sTemplate(template_id="tpl", image_id=image)
+        assert t.image_id == image
+
+
+def test_k8s_template_accepts_none_image_id() -> None:
+    """None image_id is allowed."""
+    t = K8sTemplate(template_id="tpl", image_id=None)
+    assert t.image_id is None
+
+
 def test_extension_config_does_not_define_container_image() -> None:
     """The shadow field is gone — ``container_image`` lives on no extension surface."""
     from orb.providers.k8s.configuration.template_extension import (

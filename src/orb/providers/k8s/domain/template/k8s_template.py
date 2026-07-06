@@ -25,11 +25,16 @@ on the parent type is preserved and every k8s-specific field is
 
 from __future__ import annotations
 
+import re
 from typing import Any, Optional, Union
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from orb.domain.template.template_aggregate import Template
+
+# Docker image name must start with an alphanumeric character and must not
+# contain whitespace.  Spaces cause kubelet to report InvalidImageName.
+_DOCKER_IMAGE_NAME_RE = re.compile(r"^[a-zA-Z0-9][^\s]*$")
 
 # ---------------------------------------------------------------------------
 # Supporting value-object models
@@ -426,6 +431,20 @@ class K8sTemplate(Template):
     # ------------------------------------------------------------------
     # Field coercion validators
     # ------------------------------------------------------------------
+
+    @field_validator("image_id")
+    @classmethod
+    def _validate_image_id(cls, value: Optional[str]) -> Optional[str]:
+        """Reject image names that contain whitespace (causes kubelet InvalidImageName)."""
+        if value is None or not str(value).strip():
+            return value
+        if not _DOCKER_IMAGE_NAME_RE.match(str(value)):
+            raise ValueError(
+                f"Invalid container image name: {value!r}. "
+                "Image names must start with an alphanumeric character and "
+                "must not contain whitespace."
+            )
+        return value
 
     @field_validator("tolerations", mode="before")
     @classmethod

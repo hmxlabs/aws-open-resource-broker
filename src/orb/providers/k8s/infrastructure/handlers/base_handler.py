@@ -34,6 +34,17 @@ from orb.providers.k8s.utilities.pod_state import (
     pod_status_string,
 )
 from orb.providers.k8s.watch.node_state_cache import K8sNodeStateCache
+from orb.providers.k8s.infrastructure.handlers.shared.label_stamper import (
+    stamp_native_workload_body as _stamp_workload_body,
+)
+from orb.providers.k8s.infrastructure.handlers.shared.namespace_resolver import (
+    resolve_namespace as _resolve_ns,
+    resolve_namespace_from_provider_data as _resolve_ns_from_provider_data,
+)
+from orb.providers.k8s.infrastructure.handlers.shared.pod_state_translator import (
+    instance_dict_for_pod as _instance_dict_for_pod,
+    instance_dict_for_state as _instance_dict_for_state,
+)
 
 if TYPE_CHECKING:  # pragma: no cover — type-checking only
     from orb.providers.k8s.watch.pod_state_cache import PodState, PodStateCache
@@ -172,48 +183,12 @@ class K8sHandlerBase(ABC):
     def resolve_namespace(self, template: Template) -> str:
         """Return the namespace this request should target.
 
-        Resolution order:
-
-        1. :attr:`K8sTemplate.namespace` if set (per-template override).
-        2. ``K8sProviderConfig.namespace`` (provider default).
-
-        When the provider config has an explicit ``namespaces`` list (the
-        multi-namespace mode), the resolved namespace MUST appear in the
-        list — otherwise a :class:`ValueError` is raised so the operator
-        gets a clear submit-time signal.  ``namespaces=["*"]`` is treated
-        as a wildcard and never rejected.
+        Delegates to
+        :func:`~orb.providers.k8s.infrastructure.handlers.shared.namespace_resolver.resolve_namespace`
+        which applies the full resolution chain (template override →
+        provider default → allowlist validation → RFC 1123 safety check).
         """
-        from orb.providers.k8s.domain.template.k8s_template import (  # noqa: PLC0415
-            upcast_to_k8s_template,
-        )
-
-        k8s_template = upcast_to_k8s_template(template)
-        candidate: Optional[str] = k8s_template.namespace if k8s_template.namespace else None
-        if candidate is None:
-            candidate = self._config.namespace
-
-        # _resolve_namespace model_validator guarantees this is always a str.
-        assert candidate is not None, "namespace must be resolved by model_validator"
-
-        # Validate the resolved namespace against RFC 1123 DNS label rules
-        # before constructing any API request.  This guards against requests
-        # that carry a malformed or injection-capable namespace string.
-        try:
-            _validate_namespace(candidate)
-        except Exception as _ns_err:
-            from orb.providers.k8s.exceptions.k8s_errors import K8sError  # noqa: PLC0415
-            raise K8sError(
-                f"Resolved namespace {candidate!r} is not a valid Kubernetes namespace: {_ns_err}"
-            ) from _ns_err
-
-        allowed = self._config.namespaces
-        if allowed and allowed != ["*"] and candidate not in allowed:
-            raise ValueError(
-                f"Namespace {candidate!r} is not in the provider's configured "
-                f"namespaces list {allowed!r}.  Update the template or the "
-                "provider config."
-            )
-        return candidate
+        return _resolve_ns(template, self._config)
 
     def build_label_selector(self, request: Request) -> str:
         """Convenience: build the ``label_selector=orb.io/request-id=<id>`` string."""
@@ -230,52 +205,17 @@ class K8sHandlerBase(ABC):
     ) -> dict[str, Any]:
         """Stamp per-request identity onto a rendered native workload body.
 
-        Used by the Deployment / StatefulSet / Job handlers when the
-        native-spec escape hatch is active.  Overwrites the fields that
-        ORB owns at acquire time (name / namespace / replicas, request-id
-        and managed labels) so the workload remains discoverable by the
-        provider's label-selector reads regardless of what the operator
-        rendered.  Operator-controlled fields (pod-template selector
-        match labels, container spec, ...) are preserved as-is when the
-        operator set them.
+        Delegates to
+        :func:`~orb.providers.k8s.infrastructure.handlers.shared.label_stamper.stamp_native_workload_body`.
         """
-        body = copy.deepcopy(native_body)
-
-        metadata = body.setdefault("metadata", {})
-        metadata["name"] = workload_name
-        metadata["namespace"] = namespace
-        labels = dict(metadata.get("labels", {}) or {})
-        prefix = self._config.label_prefix
-        labels[f"{prefix}/managed"] = "true"
-        labels[f"{prefix}/request-id"] = str(request.request_id)
-        labels[f"{prefix}/template-id"] = str(request.template_id)
-        metadata["labels"] = labels
-
-        spec = body.setdefault("spec", {})
-        # Stamp the replica count under the field name the workload kind
-        # uses.  Job uses ``parallelism`` / ``completions`` (and Jobs do
-        # not have a ``replicas`` key), Deployment / StatefulSet use
-        # ``replicas``.  We respect whichever key the operator's body
-        # already uses; only the present keys are overwritten so that an
-        # operator who explicitly set a different value gets the new one.
-        if "parallelism" in spec or "completions" in spec:
-            spec["parallelism"] = replicas
-            spec["completions"] = replicas
-        else:
-            spec["replicas"] = replicas
-
-        # Always ensure the request-id label is in the pod-template
-        # labels too — without it the controller's selector cannot match
-        # the pods.  Keep operator-supplied template labels intact.
-        template_section = spec.setdefault("template", {})
-        template_metadata = template_section.setdefault("metadata", {})
-        template_labels = dict(template_metadata.get("labels", {}) or {})
-        template_labels[f"{prefix}/request-id"] = str(request.request_id)
-        template_labels[f"{prefix}/managed"] = "true"
-        template_labels[f"{prefix}/template-id"] = str(request.template_id)
-        template_metadata["labels"] = template_labels
-
-        return body
+        return _stamp_workload_body(
+            native_body,
+            workload_name=workload_name,
+            namespace=namespace,
+            replicas=replicas,
+            request=request,
+            label_prefix=self._config.label_prefix,
+        )
 
     def apply_pod_timeouts(
         self,
@@ -475,109 +415,16 @@ class K8sHandlerBase(ABC):
     def _instance_dict_for_pod(self, pod: Any, namespace: str) -> dict[str, Any]:
         """Convert a ``V1Pod`` to the per-instance dict shape ORB expects.
 
-        The dict mirrors the AWS provider's ``_format_instance_data``
-        output — flat snake_case fields plus a ``provider_data`` block
-        for per-handler bookkeeping.  Shared by every concrete handler
-        so the list-fed read path produces identical dicts regardless of
-        which workload kind owns the pod.
+        Delegates to
+        :func:`~orb.providers.k8s.infrastructure.handlers.shared.pod_state_translator.instance_dict_for_pod`.
         """
-        metadata = getattr(pod, "metadata", None)
-        status = getattr(pod, "status", None)
-        spec = getattr(pod, "spec", None)
-
-        name = getattr(metadata, "name", "") if metadata is not None else ""
-        labels = dict(getattr(metadata, "labels", None) or {}) if metadata is not None else {}
-        phase = getattr(status, "phase", None) if status is not None else None
-        pod_ip = getattr(status, "pod_ip", None) if status is not None else None
-        host_ip = getattr(status, "host_ip", None) if status is not None else None
-        node_name = getattr(spec, "node_name", None) if spec is not None else None
-        start_time = getattr(status, "start_time", None) if status is not None else None
-        conditions = list(getattr(status, "conditions", None) or []) if status is not None else []
-        container_statuses = (
-            list(getattr(status, "container_statuses", None) or []) if status is not None else []
+        return _instance_dict_for_pod(
+            pod,
+            namespace,
+            provider_api=self.PROVIDER_API,
+            node_state_cache=self._node_state_cache,
+            logger=self._logger,
         )
-
-        ready = is_pod_ready(conditions)
-        status_str = pod_status_string(phase, ready, provider_api=self.PROVIDER_API)
-        status_reason = extract_status_reason(container_statuses, conditions)
-
-        # Escalate Pending pods with a fatal waiting reason to "failed".
-        if status_str in ("pending", "starting") and is_fatal_waiting_reason(status_reason):
-            status_str = "failed"
-
-        if phase == "Succeeded":
-            if status_str == "running":
-                # Deployment / StatefulSet pods that reach Succeeded are in a
-                # transient state — the controller will respawn them.  Log a
-                # warning so operators can investigate unexpected pod completions
-                # without being misled by a silent status flip.
-                self._logger.warning(
-                    "Pod %s reached Succeeded under %s — controller will respawn; "
-                    "treating as running until the new pod is ready",
-                    name,
-                    self.PROVIDER_API,
-                )
-            else:
-                # Bare pod or Job: run-to-completion semantics.  Supply a
-                # human-readable fallback reason when kubernetes did not set one.
-                if status_reason is None:
-                    status_reason = "Container completed successfully"
-
-        # DisruptionTarget condition — Karpenter preemption signal.
-        disrupted_reason: Optional[str] = None
-        disrupted_message: Optional[str] = None
-        for cond in conditions:
-            if (
-                getattr(cond, "type", None) == "DisruptionTarget"
-                and getattr(cond, "status", None) == "True"
-            ):
-                disrupted_reason = str(getattr(cond, "reason", None) or "")
-                disrupted_message = str(getattr(cond, "message", None) or "")
-                break
-
-        # Sum restart_count across all containers.
-        restart_count: int = sum(
-            int(getattr(cs, "restart_count", 0) or 0) for cs in container_statuses
-        )
-
-        provider_data: dict[str, Any] = {
-            "namespace": namespace,
-            "node_name": node_name,
-            "phase": phase,
-            "ready": ready,
-            "restart_count": restart_count,
-            "disrupted_reason": disrupted_reason,
-            "disrupted_message": disrupted_message,
-        }
-        # Enrich with node metadata when the node watcher is active and the
-        # pod has been scheduled to a node.
-        if node_name and self._node_state_cache is not None:
-            node_state = self._node_state_cache.get(node_name)
-            if node_state is not None:
-                provider_data["node_instance_type"] = node_state.instance_type
-                provider_data["node_zone"] = node_state.zone
-                provider_data["node_capacity_type"] = node_state.capacity_type
-
-        return {
-            "instance_id": name,
-            "resource_id": name,
-            "name": name,
-            "status": status_str,
-            "status_reason": status_reason,
-            "private_ip": pod_ip,
-            "public_ip": host_ip,
-            "launch_time": str(start_time) if start_time is not None else None,
-            "instance_type": "",
-            "image_id": "",
-            "subnet_id": None,
-            "security_group_ids": [],
-            "vpc_id": None,
-            "tags": labels,
-            "price_type": None,
-            "provider_api": self.PROVIDER_API,
-            "provider_data": provider_data,
-            "metadata": {},
-        }
 
     def _instance_dict_for_state(self, state: PodState) -> dict[str, Any]:
         """Convert a cached :class:`PodState` into the instance-dict shape.
@@ -627,17 +474,10 @@ class K8sHandlerBase(ABC):
     def _resolve_namespace_from_provider_data(self, provider_data: dict[str, Any]) -> str:
         """Resolve a namespace from a ``provider_data`` dict.
 
-        Reads the ``namespace`` key written by ``acquire_hosts``; falls back
-        to the provider's default namespace when the key is absent or empty.
-        The ``_resolve_namespace`` model_validator on :class:`K8sProviderConfig`
-        guarantees the default is always a non-empty string.
+        Delegates to
+        :func:`~orb.providers.k8s.infrastructure.handlers.shared.namespace_resolver.resolve_namespace_from_provider_data`.
         """
-        ns = provider_data.get("namespace")
-        if isinstance(ns, str) and ns:
-            return ns
-        namespace = self._config.namespace
-        assert namespace is not None, "namespace must be resolved by model_validator"
-        return namespace
+        return _resolve_ns_from_provider_data(provider_data, self._config)
 
     def _resolve_request_namespace(self, request: Request) -> str:
         """Resolve a request's namespace using saved provider_data when present.

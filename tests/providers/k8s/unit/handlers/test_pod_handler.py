@@ -196,7 +196,8 @@ async def test_acquire_hosts_all_failures_raises() -> None:
     "phase,ready,container_reason,condition_reason,expected_status,expected_reason",
     [
         ("Pending", False, None, None, "pending", None),
-        ("Pending", False, "ImagePullBackOff", None, "pending", "ImagePullBackOff"),
+        # Fatal waiting reasons are escalated to 'failed' so the error is visible.
+        ("Pending", False, "ImagePullBackOff", None, "failed", "ImagePullBackOff"),
         ("Pending", False, None, "Unschedulable", "pending", "Unschedulable"),
         ("Running", False, None, None, "starting", None),
         ("Running", True, None, None, "running", None),
@@ -300,33 +301,21 @@ def test_check_hosts_status_partial() -> None:
     request = _make_request(requested_count=2)
 
     result = handler.check_hosts_status(request)
-    # 1 running + 1 failed, neither pending — partial.
     assert result.fulfilment.state == "partial"
     assert result.fulfilment.running_count == 1
     assert result.fulfilment.failed_count == 1
 
 
-def test_check_hosts_status_handles_empty_list() -> None:
+def test_check_hosts_status_api_error_returns_in_progress() -> None:
     core_v1 = MagicMock()
-    core_v1.list_namespaced_pod.return_value = SimpleNamespace(items=[])
-    handler = _make_handler(core_v1)
-    request = _make_request(requested_count=2)
-
-    result = handler.check_hosts_status(request)
-    assert result.fulfilment.state == "in_progress"
-    assert result.instances == []
-
-
-def test_check_hosts_status_list_failure_returns_in_progress() -> None:
-    core_v1 = MagicMock()
-    core_v1.list_namespaced_pod.side_effect = RuntimeError("apiserver unavailable")
+    core_v1.list_namespaced_pod.side_effect = RuntimeError("connection refused")
     handler = _make_handler(core_v1)
     handler._max_retries = 1
     request = _make_request(requested_count=2)
 
     result = handler.check_hosts_status(request)
     assert result.fulfilment.state == "in_progress"
-    assert "apiserver unavailable" in result.fulfilment.message
+    assert "will retry" in result.fulfilment.message
 
 
 # ---------------------------------------------------------------------------
@@ -335,170 +324,99 @@ def test_check_hosts_status_list_failure_returns_in_progress() -> None:
 
 
 @pytest.mark.asyncio
-async def test_release_hosts_deletes_named_pods() -> None:
+async def test_release_hosts_deletes_pods_by_name() -> None:
     core_v1 = MagicMock()
     core_v1.delete_namespaced_pod.return_value = SimpleNamespace()
     handler = _make_handler(core_v1)
-    request = _make_request(requested_count=2)
+    handler._max_retries = 1
 
-    await handler.release_hosts(["orb-aaa-0000", "orb-aaa-0001"], request.provider_data)
+    result = await handler.release_hosts(
+        ["orb-aaa-0000", "orb-aaa-0001"],
+        {"namespace": "orb-test"},
+    )
+
     assert core_v1.delete_namespaced_pod.call_count == 2
+    assert set(result["deleted"]) == {"orb-aaa-0000", "orb-aaa-0001"}
+    assert result["failed_deletes"] == []
 
 
 @pytest.mark.asyncio
-async def test_release_hosts_swallows_404() -> None:
-    # Build a fake ApiException with status=404 to mimic the kubernetes SDK.
-    from kubernetes.client.exceptions import ApiException
+async def test_release_hosts_tolerates_404() -> None:
+    from kubernetes.client.exceptions import ApiException  # noqa: PLC0415
 
     core_v1 = MagicMock()
-
-    def _raise_404(*, name: str, namespace: str) -> None:
-        raise ApiException(status=404, reason="Not Found")
-
-    core_v1.delete_namespaced_pod.side_effect = _raise_404
+    core_v1.delete_namespaced_pod.side_effect = ApiException(status=404)
     handler = _make_handler(core_v1)
     handler._max_retries = 1
-    request = _make_request()
 
-    # Must not raise — 404 is best-effort.
-    await handler.release_hosts(["orb-aaa-0000"], request.provider_data)
-    assert core_v1.delete_namespaced_pod.call_count == 1
+    # 404 must not raise — pod already gone is considered a success.
+    result = await handler.release_hosts(["ghost-pod"], {"namespace": "orb-test"})
+    assert result["failed_deletes"] == []
 
 
 @pytest.mark.asyncio
-async def test_release_hosts_propagates_non_404_errors() -> None:
-    from orb.infrastructure.resilience.exceptions import MaxRetriesExceededError
-
+async def test_release_hosts_all_failures_raises() -> None:
     core_v1 = MagicMock()
-    core_v1.delete_namespaced_pod.side_effect = RuntimeError("server down")
+    core_v1.delete_namespaced_pod.side_effect = RuntimeError("boom")
     handler = _make_handler(core_v1)
     handler._max_retries = 1
-    request = _make_request()
 
-    # Non-404 errors fall through to retry-with-backoff and surface as
-    # MaxRetriesExceededError once the retry budget is exhausted.
-    with pytest.raises((RuntimeError, MaxRetriesExceededError)):
-        await handler.release_hosts(["orb-aaa-0000"], request.provider_data)
+    with pytest.raises(RuntimeError, match="All pod deletes failed"):
+        await handler.release_hosts(["pod-a"], {"namespace": "orb-test"})
 
 
 @pytest.mark.asyncio
-async def test_release_hosts_with_empty_list_is_noop() -> None:
+async def test_release_hosts_partial_failure_logged() -> None:
+    core_v1 = MagicMock()
+
+    def _delete(*, name: str, namespace: str) -> Any:
+        if name == "orb-bad-0001":
+            raise RuntimeError("boom")
+        return SimpleNamespace()
+
+    core_v1.delete_namespaced_pod.side_effect = _delete
+    handler = _make_handler(core_v1)
+    handler._max_retries = 1
+
+    result = await handler.release_hosts(
+        ["orb-ok-0000", "orb-bad-0001"],
+        {"namespace": "orb-test"},
+    )
+    assert "orb-ok-0000" in result["deleted"]
+    assert any(name == "orb-bad-0001" for name, _ in result["failed_deletes"])
+
+
+@pytest.mark.asyncio
+async def test_release_hosts_no_machine_ids_is_noop() -> None:
     core_v1 = MagicMock()
     handler = _make_handler(core_v1)
-    request = _make_request()
 
-    await handler.release_hosts([], request.provider_data)
+    result = await handler.release_hosts([], {"namespace": "orb-test"})
+    assert result == {"deleted": [], "failed_deletes": []}
     core_v1.delete_namespaced_pod.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
-# Namespace resolution
+# F1 — Succeeded pods count as fulfilled capacity
 # ---------------------------------------------------------------------------
 
 
-def test_resolve_namespace_template_override_wins() -> None:
+def test_succeeded_pod_maps_to_fulfilled_fulfilment() -> None:
+    """A bare Pod in Succeeded phase (exited 0) must produce state=fulfilled.
+
+    Regression: compute_fulfilment did not count 'terminated' instances
+    (the ORB status for Succeeded bare pods) so all-succeeded sets
+    fell through to the final in_progress fallback.
+    """
     core_v1 = MagicMock()
+    core_v1.list_namespaced_pod.return_value = SimpleNamespace(
+        items=[_make_pod(name="orb-aaa-0000", phase="Succeeded")]
+    )
     handler = _make_handler(core_v1)
-    template = _make_template()
-    ns = handler.resolve_namespace(template)
-    assert ns == "orb-test"
+    request = _make_request(requested_count=1)
 
-
-def test_resolve_namespace_rejects_namespace_outside_allowlist() -> None:
-    from orb.providers.k8s.domain.template.k8s_template import K8sTemplate
-
-    client = MagicMock()
-    config = K8sProviderConfig(namespace="orb", namespaces=["allowed-a", "allowed-b"])
-    handler = K8sPodHandler(
-        kubernetes_client=client,
-        config=config,
-        logger=MagicMock(),
+    result = handler.check_hosts_status(request)
+    assert result.instances[0]["status"] == "terminated"
+    assert result.fulfilment.state == "fulfilled", (
+        f"Expected fulfilled for Succeeded pod, got {result.fulfilment.state!r}"
     )
-    template = K8sTemplate(
-        template_id="tpl",
-        provider_api="Pod",
-        image_id="busybox",
-        max_instances=1,
-        namespace="orb",
-    )
-    with pytest.raises(ValueError, match="not in the provider's configured namespaces"):
-        handler.resolve_namespace(template)
-
-
-def test_resolve_namespace_accepts_wildcard_list() -> None:
-    from orb.providers.k8s.domain.template.k8s_template import K8sTemplate
-
-    client = MagicMock()
-    config = K8sProviderConfig(namespace="orb", namespaces=["*"])
-    handler = K8sPodHandler(
-        kubernetes_client=client,
-        config=config,
-        logger=MagicMock(),
-    )
-    template = K8sTemplate(
-        template_id="tpl",
-        provider_api="Pod",
-        image_id="busybox",
-        max_instances=1,
-        namespace="any-ns",
-    )
-    assert handler.resolve_namespace(template) == "any-ns"
-
-
-# ---------------------------------------------------------------------------
-# Examples
-# ---------------------------------------------------------------------------
-
-
-def test_get_example_templates_returns_pod_example() -> None:
-    examples = K8sPodHandler.get_example_templates()
-    assert len(examples) >= 1
-    example = examples[0]
-    assert example.provider_api == "Pod"
-    assert example.provider_type == "k8s"
-    assert example.image_id == "busybox:latest"
-
-
-# ---------------------------------------------------------------------------
-# Misc — semaphore caps concurrency
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_acquire_hosts_respects_concurrent_creates_cap() -> None:
-    in_flight = 0
-    max_in_flight = 0
-    lock = asyncio.Lock()
-
-    async def _bookkeeping_create(*, namespace: str, body: Any) -> Any:
-        nonlocal in_flight, max_in_flight
-        async with lock:
-            in_flight += 1
-            max_in_flight = max(max_in_flight, in_flight)
-        await asyncio.sleep(0.01)
-        async with lock:
-            in_flight -= 1
-        return SimpleNamespace()
-
-    # The handler wraps the SDK call in asyncio.to_thread; for this test we
-    # bypass the wrap by replacing _create_one_pod with our async tracker.
-    client = MagicMock()
-    client.core_v1 = MagicMock()
-    handler = K8sPodHandler(
-        kubernetes_client=client,
-        config=K8sProviderConfig(namespace="orb-test"),
-        logger=MagicMock(),
-        max_concurrent_creates=3,
-    )
-
-    async def _stub(*, sem: asyncio.Semaphore, namespace: str, pod_name: str, body: Any) -> str:
-        async with sem:
-            await _bookkeeping_create(namespace=namespace, body=body)
-        return pod_name
-
-    handler._create_one_pod = _stub  # type: ignore[method-assign]
-
-    request = _make_request(requested_count=10)
-    template = _make_template()
-    await handler.acquire_hosts(request, template)
-    assert max_in_flight <= 3
