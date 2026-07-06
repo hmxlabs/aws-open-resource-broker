@@ -202,6 +202,7 @@ class K8sDeploymentHandler(K8sHandlerBase):
         )
 
         return {
+            "success": True,
             "resource_ids": [deployment_name],
             "machine_ids": [],
             "provider_data": {

@@ -166,6 +166,7 @@ class K8sJobHandler(K8sHandlerBase):
         )
 
         return {
+            "success": True,
             "resource_ids": [job_name],
             "machine_ids": [],
             "provider_data": {

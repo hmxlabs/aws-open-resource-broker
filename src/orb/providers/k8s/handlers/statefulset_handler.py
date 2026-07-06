@@ -184,6 +184,7 @@ class K8sStatefulSetHandler(K8sHandlerBase):
         )
 
         return {
+            "success": True,
             "resource_ids": [statefulset_name],
             "machine_ids": [],
             "provider_data": {

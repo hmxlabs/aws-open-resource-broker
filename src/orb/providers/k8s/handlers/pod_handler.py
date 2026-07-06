@@ -180,6 +180,7 @@ class K8sPodHandler(K8sHandlerBase):
             )
 
         return {
+            "success": True,
             "resource_ids": created,
             "machine_ids": created,
             "provider_data": {
