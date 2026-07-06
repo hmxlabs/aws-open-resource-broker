@@ -2325,7 +2325,6 @@ def _toolbar() -> rx.Component:
             align="center",
         ),
         align="center",
-        margin_top="0.5rem",
         margin_bottom="1rem",
         width="100%",
         flex_wrap="wrap",

@@ -1128,7 +1128,12 @@ def dashboard_page() -> rx.Component:
         # LocalStorage bool so the flag survives reload but stays per-browser
         # (no server-side write path needed).
         rx.cond(
-            (DashboardState.total_templates == 0)
+            # ``last_refresh != ""`` gates on the FIRST successful load
+            # so the banner doesn't flash between initial render and the
+            # first API round-trip (during which ``total_templates`` is
+            # still 0 by state-default).
+            (DashboardState.last_refresh != "")
+            & (DashboardState.total_templates == 0)
             & ~DashboardState.loading
             & ~AppState.onboarding_dismissed,
             rx.box(
@@ -1214,7 +1219,9 @@ def dashboard_page() -> rx.Component:
             spacing="3",
             align="center",
             width="100%",
-            margin_bottom="1rem",
+            padding_bottom="0.5rem",
+            margin_bottom="1.5rem",
+            border_bottom=f"1px solid {rx.color('gray', 4)}",
         ),
         # Stat cards — grouped by resource type and ordered by workflow
         # direction: Templates define the shape → Requests ask for the

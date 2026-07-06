@@ -499,7 +499,10 @@ class ConfigState(rx.State):
 # Config table — column definitions + formatters
 # ---------------------------------------------------------------------------
 
-_ORIGIN_COLOR_MAP = {
+# Colour tokens per origin — file (on-disk), default (compiled-in),
+# effective (resolved merge).  Single source of truth for the badge
+# and any future filter chips that want to colour-match.
+_ORIGIN_COLOR_MAP: dict[str, str] = {
     "file": "green",
     "default": "gray",
     "effective": "blue",
@@ -512,9 +515,8 @@ def _origin_badge(row: Any) -> rx.Component:
         row["origin"],
         color_scheme=rx.match(
             row["origin"],
-            ("file", "green"),
-            ("default", "gray"),
-            "blue",
+            *[(k, v) for k, v in _ORIGIN_COLOR_MAP.items() if k != "effective"],
+            _ORIGIN_COLOR_MAP["effective"],
         ),
         variant="soft",
         size="1",

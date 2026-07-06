@@ -339,12 +339,17 @@ class UIColumnDescriptor(BaseDTO):
         description="Which resource type this column belongs to"
     )
     provider: Optional[str] = Field(
-        None, description="Provider name for provider-declared columns; None for base columns"
+        default=None,
+        description="Provider name for provider-declared columns; None for base columns",
     )
-    sortable: bool = Field(False, description="Whether the column supports server-side sorting")
-    default_visible: bool = Field(False, description="Whether the column is visible by default")
-    lockable: bool = Field(False, description="Whether the column can be locked/pinned")
+    sortable: bool = Field(
+        default=False, description="Whether the column supports server-side sorting"
+    )
+    default_visible: bool = Field(
+        default=False, description="Whether the column is visible by default"
+    )
+    lockable: bool = Field(default=False, description="Whether the column can be locked/pinned")
     badge_color_map: Optional[dict[str, str]] = Field(
-        None,
+        default=None,
         description="Mapping of cell value to badge colour token, used when kind='badge'",
     )

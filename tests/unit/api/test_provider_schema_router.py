@@ -101,7 +101,7 @@ class TestUIColumnDescriptorDTO:
                 key="bad",
                 path="x",
                 label="Bad",
-                kind="unknown_kind",  # not in Literal
+                kind="unknown_kind",  # type: ignore[arg-type]  # deliberately invalid Literal
                 resource_type="machines",
             )
 
@@ -116,7 +116,7 @@ class TestUIColumnDescriptorDTO:
                 path="x",
                 label="Bad",
                 kind="text",
-                resource_type="pods",  # not in Literal
+                resource_type="pods",  # type: ignore[arg-type]  # deliberately invalid Literal
             )
 
     def test_to_dict_excludes_none_fields(self):
