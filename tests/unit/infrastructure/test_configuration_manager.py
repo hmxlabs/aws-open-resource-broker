@@ -198,58 +198,6 @@ class TestConfigurationManager:
         stats = manager.get_cache_stats()
         assert isinstance(stats, dict)
 
-    def test_override_provider_region(self, tmp_path):
-        """Test overriding provider region."""
-        config_file = tmp_path / "config.json"
-        config_file.write_text(json.dumps({"aws": {"region": "us-east-1"}}))
-
-        manager = ConfigurationManager(config_file=str(config_file))
-        manager.override_provider_region("eu-west-1")
-        assert manager.get_region_override() == "eu-west-1"
-        assert manager.get_effective_region("us-east-1") == "eu-west-1"
-
-    def test_override_provider_profile(self, tmp_path):
-        """Test overriding provider profile."""
-        config_file = tmp_path / "config.json"
-        config_file.write_text(json.dumps({"aws": {"region": "us-east-1"}}))
-
-        manager = ConfigurationManager(config_file=str(config_file))
-        manager.override_provider_profile("my-profile")
-        assert manager.get_profile_override() == "my-profile"
-        assert manager.get_effective_profile("default") == "my-profile"
-
-    def test_effective_region_uses_default(self, tmp_path):
-        """Test effective region uses caller-supplied default when no override."""
-        config_file = tmp_path / "config.json"
-        config_file.write_text(json.dumps({}))
-
-        manager = ConfigurationManager(config_file=str(config_file))
-        assert manager.get_effective_region("us-east-1") == "us-east-1"
-
-    def test_effective_region_empty_default(self, tmp_path):
-        """Test effective region returns empty string when no override and no default."""
-        config_file = tmp_path / "config.json"
-        config_file.write_text(json.dumps({}))
-
-        manager = ConfigurationManager(config_file=str(config_file))
-        assert manager.get_effective_region() == ""
-
-    def test_effective_profile_uses_default(self, tmp_path):
-        """Test effective profile uses caller-supplied default when no override."""
-        config_file = tmp_path / "config.json"
-        config_file.write_text(json.dumps({}))
-
-        manager = ConfigurationManager(config_file=str(config_file))
-        assert manager.get_effective_profile("default") == "default"
-
-    def test_effective_profile_empty_default(self, tmp_path):
-        """Test effective profile returns empty string when no override and no default."""
-        config_file = tmp_path / "config.json"
-        config_file.write_text(json.dumps({}))
-
-        manager = ConfigurationManager(config_file=str(config_file))
-        assert manager.get_effective_profile() == ""
-
     def test_no_aws_prefixed_methods_on_configuration_manager(self, tmp_path):
         """Assert no aws_ prefixed override/getter methods exist on ConfigurationManager."""
         config_file = tmp_path / "config.json"
@@ -268,15 +216,6 @@ class TestConfigurationManager:
         assert aws_methods == [], (
             f"Found AWS-specific methods that should be renamed: {aws_methods}"
         )
-
-    def test_override_provider_instance(self, tmp_path):
-        """Test overriding provider instance."""
-        config_file = tmp_path / "config.json"
-        config_file.write_text(json.dumps({}))
-
-        manager = ConfigurationManager(config_file=str(config_file))
-        manager.override_provider_instance("aws-us-east-1")
-        assert manager.get_active_provider_override() == "aws-us-east-1"
 
     def test_override_scheduler_strategy(self, tmp_path):
         """Test overriding scheduler strategy."""

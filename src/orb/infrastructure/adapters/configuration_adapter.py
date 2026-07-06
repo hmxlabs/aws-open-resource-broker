@@ -380,26 +380,6 @@ class ConfigurationAdapter(ConfigurationPort):
         """Override scheduler strategy - delegate to ConfigurationManager."""
         self._config_manager.override_scheduler_strategy(strategy)
 
-    def override_provider_instance(self, provider_name: str) -> None:
-        """Override provider instance - delegate to ConfigurationManager."""
-        self._config_manager.override_provider_instance(provider_name)
-
-    def override_provider_region(self, region: str) -> None:
-        """Override provider region - delegate to ConfigurationManager."""
-        self._config_manager.override_provider_region(region)
-
-    def override_provider_profile(self, profile: str) -> None:
-        """Override provider credential profile - delegate to ConfigurationManager."""
-        self._config_manager.override_provider_profile(profile)
-
-    def get_effective_region(self, default_region: str = "") -> str:
-        """Get effective provider region - delegate to ConfigurationManager."""
-        return self._config_manager.get_effective_region(default_region)
-
-    def get_effective_profile(self, default_profile: str = "") -> str:
-        """Get effective provider credential profile - delegate to ConfigurationManager."""
-        return self._config_manager.get_effective_profile(default_profile)
-
     def get_resource_prefix(self, resource_type: str) -> str:
         """Get resource naming prefix for the given resource type."""
         try:
@@ -412,10 +392,6 @@ class ConfigurationAdapter(ConfigurationPort):
                 "Failed to get resource prefix for '%s', using empty prefix: %s", resource_type, e
             )
             return ""
-
-    def get_active_provider_override(self) -> str | None:
-        """Get current provider override from CLI."""
-        return self._config_manager.get_active_provider_override()
 
     def get_configuration_value(self, key: str, default: Any = None) -> Any:
         """Get configuration value."""

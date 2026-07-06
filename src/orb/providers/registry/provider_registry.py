@@ -114,9 +114,38 @@ class ProviderRegistry(BaseRegistry, ProviderRegistryPort):
                         )
 
             strategy = self.create_strategy_by_instance(provider_identifier, config)
-        # Fall back to type creation
+        # Fall back to type creation when the identifier itself is the type.
         elif self.is_provider_registered(provider_identifier):
             strategy = self.create_strategy_by_type(provider_identifier, config)
+        # Fall back to type creation when the identifier is an instance name
+        # whose configured instance has been removed from config (e.g. terminating
+        # leftover AWS machines after the operator switched the active provider
+        # to k8s).  The provider type is still known, so the strategy can boot
+        # with provider-side defaults (boto3 reads ~/.aws/credentials, etc.).
+        else:
+            provider_type = extract_provider_type(provider_identifier)
+            if provider_type != provider_identifier and self.is_provider_registered(provider_type):
+                if self._logger:
+                    self._logger.info(
+                        "Provider instance %r not registered; falling back to "
+                        "%r type strategy with provider-side defaults so historical "
+                        "machines for this instance can still be queried/terminated.",
+                        provider_identifier,
+                        provider_type,
+                    )
+                try:
+                    strategy = self.create_strategy_by_type(provider_type, config)
+                except Exception as fallback_exc:
+                    if self._logger:
+                        self._logger.warning(
+                            "Type-level fallback strategy for instance %r (type %r) could not "
+                            "be created; the instance will be treated as not found. "
+                            "Reason: %s",
+                            provider_identifier,
+                            provider_type,
+                            fallback_exc,
+                        )
+                    strategy = None
 
         if strategy:
             # Initialize strategy
@@ -541,7 +570,7 @@ class ProviderRegistry(BaseRegistry, ProviderRegistryPort):
         """Select provider instance for template requirements.
 
         Selection hierarchy:
-        1. CLI override (--provider flag)
+        1. CLI override (--provider-name flag)
         2. Explicit provider instance (template.provider_name)
         3. Provider type with load balancing (template.provider_type)
         4. Auto-selection based on API capabilities (template.provider_api)
@@ -576,10 +605,41 @@ class ProviderRegistry(BaseRegistry, ProviderRegistryPort):
         # Strategy 5: Fallback to default
         return self._select_default_provider(template, logger)
 
-    def select_active_provider(self, logger: Optional[Any] = None) -> ProviderSelectionResult:
-        """Select active provider instance from configuration."""
+    def select_active_provider(
+        self,
+        logger: Optional[Any] = None,
+        *,
+        provider_name: Optional[str] = None,
+        provider_type: Optional[str] = None,
+    ) -> ProviderSelectionResult:
+        """Select active provider instance from configuration.
+
+        Precedence:
+        1. provider_name argument — exact instance lookup.
+        2. provider_type argument — filter active instances by type,
+           then apply load-balancing over the filtered set.
+        3. Default behaviour — load-balance across all active instances.
+        """
         if logger:
             logger.debug("Selecting active provider using selection policy")
+
+        name_override = provider_name
+        type_override = provider_type
+
+        if name_override:
+            provider_instance = self._get_provider_instance_config(name_override)
+            if not provider_instance:
+                raise ValueError(f"Provider instance '{name_override}' not found in configuration")
+            if not provider_instance.enabled:
+                raise ValueError(f"Provider instance '{name_override}' is disabled")
+            if logger:
+                logger.info("Selected provider by name override: %s", name_override)
+            return ProviderSelectionResult(
+                provider_type=provider_instance.type,
+                provider_name=name_override,
+                selection_reason="CLI name override (--provider-name)",
+                confidence=1.0,
+            )
 
         provider_config = self._get_provider_config()
         if not provider_config:
@@ -588,6 +648,33 @@ class ProviderRegistry(BaseRegistry, ProviderRegistryPort):
         active_providers = provider_config.get_active_providers()
         if not active_providers:
             raise ValueError("No active providers found in configuration")
+
+        if type_override:
+            filtered = [p for p in active_providers if p.type == type_override]
+            if not filtered:
+                raise ValueError(f"No active providers of type '{type_override}'")
+            if len(filtered) == 1:
+                selected = filtered[0]
+                reason = f"CLI type override (--provider-type {type_override}) single_active_match"
+            else:
+                selected = self._apply_load_balancing_strategy(
+                    filtered, provider_config.selection_policy
+                )
+                reason = (
+                    f"CLI type override (--provider-type {type_override}) "
+                    f"load_balanced_{provider_config.selection_policy.lower()}"
+                )
+            if logger:
+                logger.info(
+                    "Selected provider by type override '%s': %s", type_override, selected.name
+                )
+            return ProviderSelectionResult(
+                provider_type=selected.type,
+                provider_name=selected.name,
+                selection_reason=reason,
+                confidence=1.0,
+                alternatives=[p.name for p in filtered if p.name != selected.name],
+            )
 
         if len(active_providers) == 1:
             selected = active_providers[0]
@@ -624,7 +711,7 @@ class ProviderRegistry(BaseRegistry, ProviderRegistryPort):
         return ProviderSelectionResult(
             provider_type=provider_instance.type,
             provider_name=provider_name,
-            selection_reason=f"CLI override (--provider {provider_name})",
+            selection_reason=f"CLI name override (--provider-name {provider_name})",
             confidence=1.0,
         )
 

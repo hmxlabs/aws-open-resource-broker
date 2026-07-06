@@ -148,7 +148,7 @@ class TestSelectProviderForTemplate:
 
         assert isinstance(result, ProviderSelectionResult)
         assert result.provider_name == "aws-primary"
-        assert "CLI override" in result.selection_reason
+        assert "CLI name override" in result.selection_reason
 
     def test_strategy1_cli_override_disabled_provider_raises(self):
         p = _make_provider_instance("aws-disabled", enabled=False)

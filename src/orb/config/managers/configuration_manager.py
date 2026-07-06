@@ -73,9 +73,6 @@ class ConfigurationManager:
 
         # Scheduler override support
         self._scheduler_override: Optional[str] = None
-        self._provider_override: Optional[str] = None
-        self._region_override: Optional[str] = None
-        self._profile_override: Optional[str] = None
 
     @property
     def loader(self) -> ConfigurationLoader:
@@ -283,38 +280,6 @@ class ConfigurationManager:
     def restore_scheduler_strategy(self) -> None:
         """Restore original scheduler strategy."""
         self._scheduler_override = None
-
-    def override_provider_instance(self, provider_name: str) -> None:
-        """Temporarily override provider instance."""
-        self._provider_override = provider_name
-
-    def override_provider_region(self, region: str) -> None:
-        """Temporarily override provider region."""
-        self._region_override = region
-
-    def override_provider_profile(self, profile: str) -> None:
-        """Temporarily override provider credential profile."""
-        self._profile_override = profile
-
-    def get_region_override(self) -> Optional[str]:
-        """Get current provider region override."""
-        return self._region_override
-
-    def get_profile_override(self) -> Optional[str]:
-        """Get current provider credential profile override."""
-        return self._profile_override
-
-    def get_effective_region(self, default_region: str = "") -> str:
-        """Get effective provider region (override or default)."""
-        return self._region_override or default_region
-
-    def get_effective_profile(self, default_profile: str = "") -> str:
-        """Get effective provider credential profile (override or default)."""
-        return self._profile_override or default_profile
-
-    def get_active_provider_override(self) -> Optional[str]:
-        """Get current provider override."""
-        return self._provider_override
 
     def get_loaded_config_file(self) -> str | None:
         """Get the actual config file that was loaded."""

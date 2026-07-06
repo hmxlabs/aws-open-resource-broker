@@ -71,40 +71,6 @@ class ConfigurationPort(ProviderConfigPort):
     def get_metrics_config(self) -> dict[str, Any]:
         """Get metrics configuration."""
 
-    @abstractmethod
-    def get_active_provider_override(self) -> str | None:
-        """Get current provider override from CLI."""
-
-    @abstractmethod
-    def override_provider_instance(self, provider_name: str) -> None:
-        """Override the active provider instance."""
-
-    def override_provider_region(self, region: str) -> None:  # pyright: ignore[reportUnusedParameter]
-        """Override the provider region for this session.
-
-        Provider-specific concern — concrete adapters override this.
-        """
-
-    def override_provider_profile(self, profile: str) -> None:  # pyright: ignore[reportUnusedParameter]
-        """Override the provider credential profile for this session.
-
-        Provider-specific concern — concrete adapters override this.
-        """
-
-    def get_effective_region(self, default_region: str = "") -> str:
-        """Get effective provider region (override or configured).
-
-        Provider-specific concern — concrete adapters override this.
-        """
-        return default_region
-
-    def get_effective_profile(self, default_profile: str = "") -> str:
-        """Get effective provider credential profile (override or configured).
-
-        Provider-specific concern — concrete adapters override this.
-        """
-        return default_profile
-
     # get_provider_instance_config inherited from ProviderConfigPort
 
     @abstractmethod

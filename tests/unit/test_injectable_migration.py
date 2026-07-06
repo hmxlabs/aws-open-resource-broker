@@ -96,13 +96,6 @@ class MockConfigurationPort(ConfigurationPort):
         """Get metrics configuration."""
         return self._config.get("metrics", {})
 
-    def get_active_provider_override(self) -> str | None:
-        """Get current provider override from CLI."""
-        return None
-
-    def override_provider_instance(self, provider_name: str) -> None:
-        """Override the active provider instance."""
-
     def override_provider_region(self, region: str) -> None:
         """Override the provider region for this session."""
 

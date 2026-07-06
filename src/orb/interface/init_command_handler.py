@@ -250,22 +250,10 @@ def _interactive_setup() -> Dict[str, Any]:
             console.error(f"        {error_msg}")
             return {}
 
-        # Step 4: operational params (region for AWS)
-        op_requirements = _get_operational_requirements(provider_type)
-        strategy = _get_provider_strategy(provider_type)
-        regions = strategy.get_available_regions() if strategy is not None else []
-        default_region = strategy.get_default_region() if strategy is not None else ""
-        for param, info in op_requirements.items():
-            if info.get("required"):
-                if param == "region":
-                    provider_config[param] = _pick_region(regions, default_region)
-                else:
-                    prompt = f"  {info['description']}: "
-                    provider_config[param] = input(prompt).strip()
-
-        # Step 5: extract final values
-        region = provider_config.get("region") or default_region
-        profile = provider_config.get("profile") or None
+        # Step 4: operational params (provider-specific, e.g. region, project, namespace)
+        strategy_class = _get_provider_strategy(provider_type)
+        op_params = _prompt_operational_params(strategy_class)
+        provider_config.update(op_params)
 
         console.info("")
         console.separator(char="-", color="cyan")
@@ -275,7 +263,7 @@ def _interactive_setup() -> Dict[str, Any]:
         console.info("[4/4] Infrastructure Discovery")
         console.separator(char="-", color="cyan")
         console.info("  Discover infrastructure for template defaults?")
-        console.info("  This will help create generic templates that work across regions/accounts.")
+        console.info("  This will help create generic templates that work across provider setups.")
         console.info("")
         discover_choice = input("  Discover infrastructure? (y/N): ").strip().lower()
 
@@ -283,14 +271,14 @@ def _interactive_setup() -> Dict[str, Any]:
         if discover_choice in ["y", "yes"]:
             registry = get_container().get(ProviderRegistryPort)
             infrastructure_defaults = _discover_infrastructure(
-                provider_type, region, profile, registry
+                provider_type, provider_config, registry
             )
 
-        # Create first provider instance
+        # Create first provider instance — provider_config is treated as opaque;
+        # provider-specific layers unpack the individual keys they need.
         first_provider = {
             "type": provider_type,
-            "profile": profile,
-            "region": region,
+            "config": {k: v for k, v in provider_config.items() if k != "type"},
             "infrastructure_defaults": infrastructure_defaults,
         }
 
@@ -321,7 +309,10 @@ def _interactive_setup() -> Dict[str, Any]:
             console.info("  Which provider should be used as the default?")
             console.info("")
             for i, p in enumerate(providers, 1):
-                console.info(f"  ({i}) {p['type']} - {p['region']} ({p['profile']})")
+                config_summary = ", ".join(
+                    f"{k}={v}" for k, v in p.get("config", {}).items() if v is not None
+                )
+                console.info(f"  ({i}) {p['type']} - {config_summary}")
             console.info("")
             default_choice = input("  Select default provider (1): ").strip() or "1"
             try:
@@ -413,22 +404,10 @@ def _configure_additional_provider() -> Optional[Dict[str, Any]]:
             console.error(f"Authentication failed: {error_msg}")
             return None
 
-        # Step 4: operational params (region for AWS)
-        op_requirements = _get_operational_requirements(provider_type)
-        strategy = _get_provider_strategy(provider_type)
-        regions = strategy.get_available_regions() if strategy is not None else []
-        default_region = strategy.get_default_region() if strategy is not None else ""
-        for param, info in op_requirements.items():
-            if info.get("required"):
-                if param == "region":
-                    provider_config[param] = _pick_region(regions, default_region)
-                else:
-                    prompt = f"  {info['description']}: "
-                    provider_config[param] = input(prompt).strip()
-
-        # Step 5: extract final values
-        region = provider_config.get("region") or default_region
-        profile = provider_config.get("profile") or None
+        # Step 4: operational params (provider-specific, e.g. region, project, namespace)
+        strategy_class = _get_provider_strategy(provider_type)
+        op_params = _prompt_operational_params(strategy_class)
+        provider_config.update(op_params)
 
         # Infrastructure discovery
         console.info("")
@@ -440,13 +419,12 @@ def _configure_additional_provider() -> Optional[Dict[str, Any]]:
         if discover_choice in ["y", "yes"]:
             registry = get_container().get(ProviderRegistryPort)
             infrastructure_defaults = _discover_infrastructure(
-                provider_type, region, profile, registry
+                provider_type, provider_config, registry
             )
 
         return {
             "type": provider_type,
-            "profile": provider_config.get("profile") or None,
-            "region": provider_config.get("region") or default_region,
+            "config": {k: v for k, v in provider_config.items() if k != "type"},
             "infrastructure_defaults": infrastructure_defaults,
         }
 
@@ -458,50 +436,104 @@ def _configure_additional_provider() -> Optional[Dict[str, Any]]:
         return None
 
 
-def _get_provider_strategy(provider_type: str, registry: Any = None) -> Optional[Any]:
-    """Get a lightweight provider strategy instance for credential/region queries."""
+def _get_provider_strategy(provider_type: str, registry: Any = None) -> Optional[type]:
+    """Return the strategy CLASS for a provider type.
+
+    The credential inquiry methods (``get_available_credential_sources``,
+    ``test_credentials``, ``get_credential_requirements``,
+    ``get_operational_requirements``, ``generate_provider_name``) are all
+    classmethods and do not require an instance.  Returning the class directly
+    avoids constructing a strategy before any provider configuration exists on
+    disk.
+    """
     try:
         if registry is None:
             from orb.domain.base.ports.provider_registry_port import ProviderRegistryPort
 
             registry = get_container().get(ProviderRegistryPort)
+        # Ensure the provider type is registered so its class is available.
         registry.ensure_provider_type_registered(provider_type)
-        return registry.get_or_create_strategy(provider_type)
+        reg = registry._get_type_registration(provider_type)
+        strategy_class = getattr(reg, "strategy_class", None)
+        return strategy_class
     except Exception:
         return None
 
 
-def _pick_region(regions: list[tuple[str, str]], default_region: str = "") -> str:
-    """Prompt user to select a region.
+def _prompt_operational_params(strategy_class: Optional[type]) -> dict[str, Any]:
+    """Interactively collect operational parameters from the operator.
 
-    If regions is non-empty, show a numbered list with an 'Other' option.
-    If regions is empty, prompt for free-text input.
+    Calls ``get_operational_requirements()`` on the strategy class to discover
+    what parameters are needed (e.g. region, project, namespace).  For each
+    required parameter the strategy class may optionally supply a list of
+    choices and a default via ``get_operational_param_choices(param)`` and
+    ``get_operational_param_default(param)`` — if those classmethods are absent
+    the field degrades to free-text input.
+
+    Returns an opaque ``dict[str, Any]`` that the caller merges into the
+    provider config without inspecting individual keys.
     """
+    if strategy_class is None:
+        return {}
+
     console = get_container().get(ConsolePort)
-    console.info("")
-    if not regions:
-        custom = input("  Enter region: ").strip()
-        return custom if custom else default_region
-
-    console.info("  Select region:")
-    for i, (region_id, region_name) in enumerate(regions, 1):
-        console.info(f"  ({i:2}) {region_id:<20} {region_name}")
-    other_num = len(regions) + 1
-    console.info(f"  ({other_num:2}) Other (type custom)")
-    console.info("")
-
-    choice = input("  Select region (1): ").strip() or "1"
+    op_requirements: dict[str, Any] = {}
     try:
-        idx = int(choice) - 1
-        if 0 <= idx < len(regions):
-            return regions[idx][0]
-        elif idx == len(regions):
-            custom = input("  Enter custom region: ").strip()
-            return custom if custom else default_region
+        op_requirements = strategy_class.get_operational_requirements()
+    except Exception as e:
+        logger.debug("Could not get provider operational requirements from strategy: %s", e)
+
+    result: dict[str, Any] = {}
+    for param, info in op_requirements.items():
+        if not info.get("required"):
+            continue
+
+        description = info.get("description", param)
+
+        # Provider strategies may expose a list of (value, label) choices for
+        # a given parameter.  If the classmethod is absent fall back to free text.
+        choices: list[tuple[str, str]] = []
+        default_value: str = ""
+        try:
+            if hasattr(strategy_class, "get_operational_param_choices"):
+                choices = strategy_class.get_operational_param_choices(param) or []
+        except Exception:
+            # Strategy hook raised or returned a broken shape; free-text prompt
+            # is the safe fallback so init keeps working with degraded UX.
+            choices = []
+        try:
+            if hasattr(strategy_class, "get_operational_param_default"):
+                default_value = strategy_class.get_operational_param_default(param) or ""
+        except Exception:
+            # Strategy hook raised or returned a broken shape; empty default
+            # is safe fallback so the operator still gets prompted.
+            default_value = ""
+
+        console.info("")
+        if not choices:
+            raw = input(f"  {description}: ").strip()
+            result[param] = raw if raw else default_value
         else:
-            return default_region
-    except ValueError:
-        return default_region
+            console.info(f"  Select {description}:")
+            for i, (val, label) in enumerate(choices, 1):
+                console.info(f"  ({i:2}) {val:<20} {label}")
+            other_num = len(choices) + 1
+            console.info(f"  ({other_num:2}) Other (enter custom value)")
+            console.info("")
+            choice = input("  Select (1): ").strip() or "1"
+            try:
+                idx = int(choice) - 1
+                if 0 <= idx < len(choices):
+                    result[param] = choices[idx][0]
+                elif idx == len(choices):
+                    raw = input(f"  Enter custom {description}: ").strip()
+                    result[param] = raw if raw else default_value
+                else:
+                    result[param] = default_value
+            except ValueError:
+                result[param] = default_value
+
+    return result
 
 
 def _get_available_credential_sources(provider_type: str) -> list[dict]:
@@ -556,31 +588,35 @@ def _get_operational_requirements(provider_type: str) -> dict:
 
 
 def _discover_infrastructure(
-    provider_type: str, region: str, profile: str | None, registry: ProviderRegistryPort
+    provider_type: str, provider_config: Dict[str, Any], registry: ProviderRegistryPort
 ) -> Dict[str, Any]:
-    """Discover infrastructure interactively using provider strategy."""
+    """Discover infrastructure interactively using the provider strategy.
+
+    Discovery requires a live provider instance (cluster / account access).
+    The instance is constructed via ``create_strategy_by_type`` using the
+    credentials and region the operator already confirmed in the init flow.
+    All provider config keys collected during the init flow are forwarded
+    together as a single dict; providers that only use a subset of them are
+    unaffected.
+
+    Args:
+        provider_type: The provider type identifier (e.g. ``"aws"``).
+        provider_config: Dict of provider config key/value pairs already
+            collected from the operator (e.g. ``{"region": ..., "profile": ...}``).
+        registry: Live provider registry used to construct the strategy.
+    """
     console = get_container().get(ConsolePort)
     try:
-        # Ensure provider type is registered
-        if not registry.ensure_provider_type_registered(provider_type):
-            console.error(f"Failed to register provider type: {provider_type}")
+        strategy = registry.create_strategy_by_type(provider_type, provider_config)
+        if strategy is None:
+            console.error(f"Failed to construct strategy for provider type: {provider_type}")
             return {}
 
-        # Create provider config for discovery
-        provider_config = {"region": region, "profile": profile}
-
-        # Get strategy from registry — bypass cache so discovery uses the correct region/profile
-        strategy = registry.create_strategy_by_type(provider_type, provider_config)
-
-        # Check if provider strategy supports infrastructure discovery
         if hasattr(strategy, "discover_infrastructure_interactive"):
             full_config = {"type": provider_type, "config": provider_config}
-            return strategy.discover_infrastructure_interactive(full_config)  # type: ignore[union-attr]
-        else:
-            console.info(
-                f"Infrastructure discovery not supported for provider type: {provider_type}"
-            )
-            return {}
+            return strategy.discover_infrastructure_interactive(full_config)
+        console.info(f"Infrastructure discovery not supported for provider type: {provider_type}")
+        return {}
 
     except Exception as e:
         console.error(f"Failed to discover infrastructure: {e}")
@@ -592,33 +628,34 @@ def _get_default_config(args) -> Dict[str, Any]:
     """Get default configuration from args."""
     # Get first available provider as default
     providers = _get_available_providers()
-    if not providers and not args.provider:
+    if not providers and not args.provider_type:
         raise ValueError("No providers registered. Install a provider plugin to continue.")
-    default_provider = providers[0]["type"] if providers else args.provider
+    default_provider = providers[0]["type"] if providers else args.provider_type
 
-    provider_type = args.provider or default_provider
-    strategy = _get_provider_strategy(provider_type)
-    default_region = strategy.get_default_region() if strategy is not None else ""
+    provider_type = args.provider_type or default_provider
+    strategy_class = _get_provider_strategy(provider_type)
     infrastructure_defaults = (
-        strategy.get_cli_infrastructure_defaults(args) if strategy is not None else {}
+        strategy_class.get_cli_infrastructure_defaults(args) if strategy_class is not None else {}
     )
 
-    # Use the registered CLI spec to extract provider config when available.
-    # Fall back to the init-level --profile / --region flags for backward
-    # compatibility with callers that have not yet adopted provider-specific flags.
+    # Provider-agnostic config extraction. The strategy classmethod owns the
+    # shape of the provider config block; the CLI spec registry contributes any
+    # additional provider-specific keys (fleet_role, subscription_id, project
+    # etc.) that the classmethod does not itself surface.  Neither source reads
+    # global --region / --profile flags — those are AWS-scoped args and no
+    # longer exist at the global CLI level.
+    provider_config = (
+        strategy_class.get_cli_provider_config(args) if strategy_class is not None else {}
+    )
     spec = CLISpecRegistry.get(provider_type)
     if spec is not None:
-        spec_config = spec.extract_config(args)
-        profile = spec_config.get("profile") or getattr(args, "profile", None) or None
-        region = spec_config.get("region") or getattr(args, "region", None) or default_region
-    else:
-        profile = getattr(args, "profile", None) or None
-        region = getattr(args, "region", None) or default_region
+        for key, value in spec.extract_config(args).items():
+            if provider_config.get(key) in (None, ""):
+                provider_config[key] = value
 
     first_provider = {
         "type": provider_type,
-        "profile": profile,
-        "region": region,
+        "config": provider_config,
         "infrastructure_defaults": infrastructure_defaults,
     }
 
@@ -642,6 +679,21 @@ def _create_directories(config_dir: Path, work_dir: Path, logs_dir: Path):
         logger.info("Created directory: %s", dir_path)
 
 
+def _fallback_provider_name(provider_type: str, provider_data: Dict[str, Any]) -> str:
+    """Generate a provider instance name when the strategy is unavailable.
+
+    Produces a short, stable, provider-agnostic identifier by hashing the
+    non-empty config values.  This avoids encoding provider-specific field
+    names (region, profile, project, …) into the base-layer fallback.
+    """
+    import hashlib
+
+    config = provider_data.get("config", {})
+    payload = json.dumps(config, sort_keys=True, default=str)
+    digest = hashlib.sha256(payload.encode()).hexdigest()[:8]
+    return f"{provider_type}_{digest}"
+
+
 def _write_config_file(
     config_file: Path, user_config: Dict[str, Any], extra_paths: Optional[Dict[str, Any]] = None
 ):
@@ -650,15 +702,33 @@ def _write_config_file(
     providers_list = []
     default_provider_name: str | None = None
     for provider_data in user_config.get("providers", []):
-        provider_config = {"profile": provider_data["profile"], "region": provider_data["region"]}
+        # provider_data["config"] is the opaque provider config dict produced by
+        # get_cli_provider_config (or the interactive flow).  Pass it through
+        # without unpacking provider-specific keys.
+        provider_config: dict[str, Any] = dict(provider_data.get("config", {}))
         provider_type = provider_data["type"]
 
-        # Generate provider name
-        import re
+        # Resolve the strategy CLASS (best-effort; None if unavailable).
+        # Used for name generation and for routing infrastructure defaults.
+        # The classmethod-based inquiry methods require no instance and no
+        # provider config on disk, so no scaffolding is needed here.
+        strategy_class = None
+        try:
+            registry = get_container().get(ProviderRegistryPort)
+            strategy_class = _get_provider_strategy(provider_type, registry=registry)
+        except Exception:
+            pass  # best-effort; fall back to generic name and all-defaults-in-template
 
-        profile_for_name = provider_data["profile"] or "instance-profile"
-        sanitized_profile = re.sub(r"[^a-zA-Z0-9\-_]", "-", profile_for_name)
-        provider_name = f"{provider_type}_{sanitized_profile}_{provider_data['region']}"
+        # Generate provider name via the strategy class so each provider type
+        # can apply its own naming convention.  Fall back to the generic
+        # AWS-style shape when no strategy class is available.
+        if strategy_class is not None:
+            try:
+                provider_name = strategy_class.generate_provider_name(provider_data)
+            except Exception:
+                provider_name = _fallback_provider_name(provider_type, provider_data)
+        else:
+            provider_name = _fallback_provider_name(provider_type, provider_data)
 
         # Create provider instance
         provider_instance = {
@@ -675,16 +745,10 @@ def _write_config_file(
         # Add template_defaults if infrastructure was discovered.
         # Promote all infrastructure_defaults to template_defaults except for keys
         # that belong in provider config — determined by the provider strategy.
-        strategy = None
-        try:
-            registry = get_container().get(ProviderRegistryPort)
-            strategy = registry.create_strategy_by_type(provider_type, provider_config)
-        except Exception:
-            pass  # best-effort; fall back to putting all defaults in template_defaults
         infrastructure_defaults = provider_data.get("infrastructure_defaults", {})
         if infrastructure_defaults:
             config_only_keys = (
-                strategy.get_cli_extra_config_keys() if strategy is not None else set()
+                strategy_class.get_cli_extra_config_keys() if strategy_class is not None else set()
             )
             template_level = {
                 k: v for k, v in infrastructure_defaults.items() if k not in config_only_keys
