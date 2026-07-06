@@ -35,6 +35,7 @@ from orb.domain.base.ports import LoggingPort
 from orb.providers.k8s.configuration.config import K8sProviderConfig
 from orb.providers.k8s.infrastructure.k8s_client import K8sClient
 from orb.providers.k8s.reconciliation.startup_reconciler import OrphanPod
+from orb.providers.k8s.utilities.labels import build_label_selector as _build_label_selector
 
 if TYPE_CHECKING:  # pragma: no cover — type-checking only
     from kubernetes.client import V1Pod
@@ -161,7 +162,7 @@ class OrphanGarbageCollector:
 
         namespaces = self._resolve_namespaces()
         self.stats.namespaces_checked = [ns if ns is not None else "*" for ns in namespaces]
-        label_selector = f"{self._config.label_prefix}/managed=true"
+        label_selector = _build_label_selector(self._config.label_prefix, "managed", "true")
         request_id_label = f"{self._config.label_prefix}/request-id"
 
         orphans: list[OrphanPod] = []

@@ -38,6 +38,7 @@ from orb.domain.base.dependency_injection import injectable
 from orb.domain.base.ports import LoggingPort
 from orb.providers.k8s.configuration.config import K8sProviderConfig
 from orb.providers.k8s.infrastructure.k8s_client import K8sClient
+from orb.providers.k8s.utilities.labels import build_label_selector as _build_label_selector
 from orb.providers.k8s.utilities.pod_state import pod_status_string as _canonical_pod_status_string
 from orb.providers.k8s.watch.pod_state_cache import PodState, PodStateCache
 
@@ -154,7 +155,7 @@ class StartupReconciler:
                 )
                 known_ids = set()
 
-            label_selector = f"{self._config.label_prefix}/managed=true"
+            label_selector = _build_label_selector(self._config.label_prefix, "managed", "true")
             request_id_label = f"{self._config.label_prefix}/request-id"
 
             for ns in namespaces:

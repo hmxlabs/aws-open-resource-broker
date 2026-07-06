@@ -24,10 +24,12 @@ from orb.domain.template.template_aggregate import Template
 from orb.infrastructure.resilience import retry
 from orb.providers.k8s.configuration.config import K8sProviderConfig
 from orb.providers.k8s.infrastructure.k8s_client import K8sClient
+from orb.providers.k8s.utilities.labels import validate_namespace as _validate_namespace
 from orb.providers.k8s.utilities.pod_spec import request_id_label_selector
 from orb.providers.k8s.utilities.pod_spec_audit import audit_pod_spec
 from orb.providers.k8s.utilities.pod_state import (
     extract_status_reason,
+    is_fatal_waiting_reason,
     is_pod_ready,
     pod_status_string,
 )
@@ -192,6 +194,17 @@ class K8sHandlerBase(ABC):
 
         # _resolve_namespace model_validator guarantees this is always a str.
         assert candidate is not None, "namespace must be resolved by model_validator"
+
+        # Validate the resolved namespace against RFC 1123 DNS label rules
+        # before constructing any API request.  This guards against requests
+        # that carry a malformed or injection-capable namespace string.
+        try:
+            _validate_namespace(candidate)
+        except Exception as _ns_err:
+            from orb.providers.k8s.exceptions.k8s_errors import K8sError  # noqa: PLC0415
+            raise K8sError(
+                f"Resolved namespace {candidate!r} is not a valid Kubernetes namespace: {_ns_err}"
+            ) from _ns_err
 
         allowed = self._config.namespaces
         if allowed and allowed != ["*"] and candidate not in allowed:
@@ -487,6 +500,10 @@ class K8sHandlerBase(ABC):
         ready = is_pod_ready(conditions)
         status_str = pod_status_string(phase, ready, provider_api=self.PROVIDER_API)
         status_reason = extract_status_reason(container_statuses, conditions)
+
+        # Escalate Pending pods with a fatal waiting reason to "failed".
+        if status_str in ("pending", "starting") and is_fatal_waiting_reason(status_reason):
+            status_str = "failed"
 
         if phase == "Succeeded":
             if status_str == "running":
