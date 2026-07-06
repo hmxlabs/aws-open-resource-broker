@@ -152,6 +152,14 @@ ci-tests-infrastructure:  ## Run infrastructure tests only (matches ci.yml infra
 	@echo "Running infrastructure tests (parallel)..."
 	$(call run-tool,pytest,$(TESTS_INFRASTRUCTURE) $(PYTEST_PARALLEL) $(PYTEST_ARGS) $(PYTEST_COV_ARGS) --cov-report=xml:coverage-infrastructure.xml --junitxml=junit-infrastructure.xml)
 
+# @SECTION UI Build
+
+ui-build:  ## Build the Reflex static bundle into src/orb/ui/_static
+	@./dev-tools/package/build_ui.sh
+
+ci-tests-ui-smoke:  ## Boot embedded UI + curl each page + shut down (matches ci.yml ui-smoke job)
+	@./dev-tools/ci/run_ui_smoke.sh
+
 ci-check:  ## Run comprehensive CI checks (matches GitHub Actions exactly)
 	@echo "Running comprehensive CI checks that match GitHub Actions pipeline..."
 	$(MAKE) ci-quality

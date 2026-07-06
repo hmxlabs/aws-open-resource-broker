@@ -156,6 +156,10 @@ RestartSec=10
 WantedBy=multi-user.target
 ```
 
+### [UI] Optional Embedded Web Dashboard
+
+- **[Embedded UI](embedded-ui.md)** — optional Reflex-based web dashboard
+
 ## Configuration Management
 
 ### Environment Variables
