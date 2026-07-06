@@ -20,12 +20,17 @@ import pytest
 from kubernetes.client.exceptions import ApiException
 
 from orb.infrastructure.resilience import CircuitBreakerOpenError
+from orb.infrastructure.resilience.retry_classifier_registry import (
+    clear_classifiers,
+    register_retry_classifier,
+)
 from orb.infrastructure.resilience.strategy.circuit_breaker import (
     CircuitBreakerStrategy,
     CircuitState,
 )
 from orb.providers.k8s.configuration.config import K8sProviderConfig
 from orb.providers.k8s.handlers.base_handler import K8sHandlerBase
+from orb.providers.k8s.resilience.retry_classifier import K8sRetryClassifier
 
 # ---------------------------------------------------------------------------
 # Minimal concrete subclass — required because K8sHandlerBase is abstract.
@@ -78,6 +83,14 @@ def _make_handler(
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def _register_k8s_classifier():
+    """Register the K8s retry classifier for the duration of each test."""
+    register_retry_classifier(K8sRetryClassifier())
+    yield
+    clear_classifiers()
 
 
 def _unique_handler() -> _ConcreteHandler:

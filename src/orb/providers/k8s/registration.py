@@ -493,6 +493,16 @@ def initialize_k8s_provider(
         if template_factory is not None:
             register_k8s_template_factory(template_factory, logger)
 
+        # Retry classifier — routes k8s non-retryable 4xx codes through the
+        # provider-agnostic registry so the resilience layer needs no direct
+        # kubernetes SDK import.
+        from orb.infrastructure.resilience.retry_classifier_registry import (
+            register_retry_classifier,
+        )
+        from orb.providers.k8s.resilience.retry_classifier import K8sRetryClassifier
+
+        register_retry_classifier(K8sRetryClassifier())
+
         # CLI spec
         from orb.infrastructure.registry.cli_spec_registry import CLISpecRegistry
         from orb.providers.k8s.cli.k8s_cli_spec import K8sCLISpec
