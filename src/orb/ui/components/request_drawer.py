@@ -297,9 +297,9 @@ def request_drawer(state: type) -> rx.Component:
                 rx.fragment(),
             ),
             rx.cond(
-                state.last_sync_time != "",
+                state.last_refresh != "",
                 rx.text(
-                    "Last sync at " + state.last_sync_time,
+                    "Last refreshed at " + state.last_refresh,
                     size="1",
                     color=rx.color("gray", 11),
                     margin_bottom="0.5rem",
