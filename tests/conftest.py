@@ -194,24 +194,23 @@ from tests.utilities.reset_singletons import reset_all_singletons
 
 @pytest.fixture(scope="session", autouse=True)
 def setup_test_environment():
-    """Set up test environment variables."""
-    # Set up PYTHONPATH first
+    """Set generic (provider-agnostic) test environment variables.
+
+    Provider-specific fake credentials live under the corresponding
+    ``tests/providers/<name>/mocked/conftest.py`` — each provider owns
+    whatever env its mocked SDK needs.  The root conftest deliberately does
+    not touch cloud-provider env vars so live suites (any provider, any
+    auth mechanism: cloud IAM, kube tokens, OIDC, mTLS, on-prem HTTP
+    basic) run in the operator's real environment untouched.
+    """
     project_root = Path(__file__).parent.parent
     src_path = project_root / "src"
 
-    # Add src to Python path
     if str(src_path) not in sys.path:
         sys.path.insert(0, str(src_path))
 
-    # Set environment variables
     os.environ.update(
         {
-            "AWS_DEFAULT_REGION": "us-east-1",
-            "AWS_ACCESS_KEY_ID": "testing",
-            "AWS_SECRET_ACCESS_KEY": "testing",  # nosec B105
-            "AWS_SECURITY_TOKEN": "testing",  # nosec B105
-            "AWS_SESSION_TOKEN": "testing",  # nosec B105
-            "ENVIRONMENT": "testing",
             "LOG_LEVEL": "DEBUG",
             "TESTING": "true",
             "PYTHONPATH": f"{src_path}:{os.environ.get('PYTHONPATH', '')}",

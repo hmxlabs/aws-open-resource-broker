@@ -83,6 +83,7 @@ class K8sClient:
                 load_kubeconfig(
                     config_file=self._config.kubeconfig_path,
                     context=self._config.context,
+                    logger=self._logger,
                 )
             elif is_in_cluster():
                 self._logger.debug("In-cluster sentinel present; loading in-cluster config.")
@@ -96,6 +97,7 @@ class K8sClient:
                 load_kubeconfig(
                     config_file=self._config.kubeconfig_path,
                     context=self._config.context,
+                    logger=self._logger,
                 )
         except K8sAuthError:
             raise

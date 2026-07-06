@@ -34,7 +34,7 @@ _POLL_INTERVAL = 5  # seconds
 def _build_statefulset_handler(k8s_provider_config: dict):
     """Construct a live :class:`K8sStatefulSetHandler`."""
     from orb.providers.k8s.configuration.config import K8sProviderConfig
-    from orb.providers.k8s.handlers.statefulset_handler import K8sStatefulSetHandler
+    from orb.providers.k8s.infrastructure.handlers.statefulset_handler import K8sStatefulSetHandler
     from orb.providers.k8s.infrastructure.k8s_client import K8sClient
 
     config = K8sProviderConfig(

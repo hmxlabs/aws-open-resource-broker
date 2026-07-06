@@ -121,25 +121,55 @@ def pytest_sessionstart(session: pytest.Session) -> None:
         )
 
     k8s_cfg = _get_k8s_provider_config(orb_config)
+    kubeconfig_path = k8s_cfg.get("kubeconfig_path")
+    context = k8s_cfg.get("context")
 
-    try:
-        from kubernetes import client as k8s_client_mod, config as k8s_config_mod
+    # Kubeconfig exec plugins (e.g. ``aws eks get-token``) cache tokens on
+    # disk with short TTLs.  A cached-but-expired token gives 401 on first
+    # call — retry once after clearing the cache so operators don't need to
+    # manually prime the exec plugin between runs.
+    last_exc: Exception | None = None
+    for attempt in (1, 2):
+        try:
+            from kubernetes import client as k8s_client_mod, config as k8s_config_mod
 
-        kubeconfig_path = k8s_cfg.get("kubeconfig_path")
-        context = k8s_cfg.get("context")
+            k8s_config_mod.load_kube_config(config_file=kubeconfig_path, context=context)
+            core_v1 = k8s_client_mod.CoreV1Api()
+            core_v1.list_namespace(limit=1)
+            print(
+                f"\nk8s credentials valid "
+                f"(kubeconfig={kubeconfig_path!r}, context={context!r})"
+            )
+            return
+        except Exception as exc:
+            last_exc = exc
+            if attempt == 1 and "401" in str(exc):
+                _refresh_exec_plugin_cache()
+                continue
+            break
+    pytest.exit(
+        f"k8s live pre-flight failed: cannot reach cluster: {last_exc}",
+        returncode=1,
+    )
 
-        k8s_config_mod.load_kube_config(
-            config_file=kubeconfig_path,
-            context=context,
-        )
-        core_v1 = k8s_client_mod.CoreV1Api()
-        core_v1.list_namespace(limit=1)
-        print(f"\nk8s credentials valid (kubeconfig={kubeconfig_path!r}, context={context!r})")
-    except Exception as exc:
-        pytest.exit(
-            f"k8s live pre-flight failed: cannot reach cluster: {exc}",
-            returncode=1,
-        )
+
+def _refresh_exec_plugin_cache() -> None:
+    """Force kubeconfig exec plugins to reissue their auth token.
+
+    Deletes the AWS EKS token cache (default ``~/.kube/cache/token/``) so
+    ``aws eks get-token`` re-executes on the next SDK call.  Best-effort:
+    missing files or unknown providers are silently ignored — the
+    subsequent SDK call will surface any real auth failure.  Extend this
+    with per-provider cache paths as new managed-cluster exec plugins
+    (GKE, AKS, ...) join the mix.
+    """
+    import os
+    import shutil
+    from pathlib import Path
+
+    aws_token_cache = Path(os.path.expanduser("~/.kube/cache/token"))
+    if aws_token_cache.exists():
+        shutil.rmtree(aws_token_cache, ignore_errors=True)
 
 
 # ---------------------------------------------------------------------------
@@ -232,14 +262,31 @@ def request_id_tracker() -> list[str]:
 # ---------------------------------------------------------------------------
 
 
+@pytest.fixture(scope="session")
+def request_id_prefix(k8s_live_config: dict) -> str:
+    """Config-driven request-id prefix (default 'req-').
+
+    Reads ``naming.prefixes.request`` from the ORB config so tests honour
+    whatever prefix operators have configured; the ``RequestId`` domain
+    value object validates against ``naming.patterns.request_id``.
+    """
+    return (
+        k8s_live_config.get("naming", {})
+        .get("prefixes", {})
+        .get("request", "req-")
+    )
+
+
 @pytest.fixture
-def live_request_id(request_id_tracker: list[str]) -> Generator[str, None, None]:
+def live_request_id(
+    request_id_tracker: list[str], request_id_prefix: str
+) -> Generator[str, None, None]:
     """Generate a unique request-id for a single test, track it for cleanup.
 
     The request-id is registered in ``request_id_tracker`` before the
     test runs so cleanup happens even if the test fails partway through.
     """
-    rid = str(uuid.uuid4())
+    rid = f"{request_id_prefix}{uuid.uuid4()}"
     request_id_tracker.append(rid)
     yield rid
 
@@ -251,12 +298,10 @@ def live_request_id(request_id_tracker: list[str]) -> Generator[str, None, None]
 # ORB label constants (mirrors orb.providers.k8s.utilities.pod_spec).
 _LABEL_PREFIX = "orb.io"
 _MANAGED_LABEL = f"{_LABEL_PREFIX}/managed"
-_REQUEST_ID_LABEL = f"{_LABEL_PREFIX}/request-id"
 
 
 @pytest.fixture(scope="session", autouse=True)
 def nuclear_cleanup(
-    request_id_tracker: list[str],  # type: ignore[fixture-overriding]
     k8s_core_v1,
     k8s_apps_v1,
     k8s_batch_v1,
@@ -271,11 +316,12 @@ def nuclear_cleanup(
     """
     yield
 
-    # ``request_id_tracker`` at session scope would be empty here because
-    # each module gets its own list via the module-scoped fixture.  We
-    # perform a broader label-selector sweep instead: delete everything
-    # carrying ``orb.io/managed=true`` in the configured namespace.  This
-    # is safe because the label is unique to ORB-owned resources.
+    # Broad label-selector sweep: delete everything carrying
+    # ``orb.io/managed=true`` in the configured namespace.  This is safe
+    # because the label is unique to ORB-owned resources.  We can't rely on
+    # request-id tracking here because ``request_id_tracker`` is
+    # module-scoped so each module gets a fresh list; a session-scoped
+    # fixture cannot compose them.
     label_selector = f"{_MANAGED_LABEL}=true"
 
     _cleanup_pods(k8s_core_v1, k8s_namespace, label_selector)

@@ -69,7 +69,7 @@ def _make_template(namespace: str = "orb-test") -> Any:
 
 
 def _make_deployment_handler(k8s_client_facade: Any, k8s_config: Any) -> Any:
-    from orb.providers.k8s.handlers.deployment_handler import K8sDeploymentHandler  # noqa: PLC0415
+    from orb.providers.k8s.infrastructure.handlers.deployment_handler import K8sDeploymentHandler  # noqa: PLC0415
 
     return K8sDeploymentHandler(
         kubernetes_client=k8s_client_facade,

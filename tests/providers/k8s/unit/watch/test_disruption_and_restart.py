@@ -237,7 +237,7 @@ def test_pod_to_state_restart_count_no_containers() -> None:
 
 def _make_handler() -> Any:
     """Return a concrete K8sPodHandler with stub dependencies."""
-    from orb.providers.k8s.handlers.pod_handler import K8sPodHandler
+    from orb.providers.k8s.infrastructure.handlers.pod_handler import K8sPodHandler
 
     config = MagicMock()
     config.label_prefix = "orb.io"

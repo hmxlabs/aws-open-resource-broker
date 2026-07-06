@@ -28,7 +28,7 @@ from orb.domain.request.aggregate import Request
 from orb.domain.request.value_objects import RequestId, RequestType
 from orb.domain.template.template_aggregate import Template
 from orb.providers.k8s.configuration.config import K8sProviderConfig
-from orb.providers.k8s.handlers.deployment_handler import (
+from orb.providers.k8s.infrastructure.handlers.deployment_handler import (
     POD_DELETION_COST_ANNOTATION,
     VICTIM_DELETION_COST,
     K8sDeploymentHandler,

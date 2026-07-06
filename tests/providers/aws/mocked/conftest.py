@@ -5,7 +5,9 @@ helpers from the parent AWS conftest so that imports such as:
 
     from tests.providers.aws.mocked.conftest import _inject_moto_factory
 
-continue to work without modification.
+continue to work without modification.  Fake AWS credentials are supplied
+by the parent conftest (``_aws_fake_credentials``) for the whole AWS
+non-live subtree.
 """
 
 import pytest

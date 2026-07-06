@@ -29,7 +29,7 @@ from orb.infrastructure.resilience.strategy.circuit_breaker import (
     CircuitState,
 )
 from orb.providers.k8s.configuration.config import K8sProviderConfig
-from orb.providers.k8s.handlers.base_handler import K8sHandlerBase
+from orb.providers.k8s.infrastructure.handlers.base_handler import K8sHandlerBase
 from orb.providers.k8s.resilience.retry_classifier import K8sRetryClassifier
 
 # ---------------------------------------------------------------------------

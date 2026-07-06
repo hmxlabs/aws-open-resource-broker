@@ -19,11 +19,11 @@ from typing import TYPE_CHECKING, Any, Callable, Optional
 from orb.domain.base.operation_outcome import Accepted, Completed, Failed, OperationOutcome
 from orb.domain.base.ports import LoggingPort
 from orb.providers.k8s.configuration.config import K8sProviderConfig
-from orb.providers.k8s.handlers.base_handler import K8sHandlerBase
-from orb.providers.k8s.handlers.deployment_handler import K8sDeploymentHandler
-from orb.providers.k8s.handlers.job_handler import K8sJobHandler
-from orb.providers.k8s.handlers.pod_handler import K8sPodHandler
-from orb.providers.k8s.handlers.statefulset_handler import K8sStatefulSetHandler
+from orb.providers.k8s.infrastructure.handlers.base_handler import K8sHandlerBase
+from orb.providers.k8s.infrastructure.handlers.deployment_handler import K8sDeploymentHandler
+from orb.providers.k8s.infrastructure.handlers.job_handler import K8sJobHandler
+from orb.providers.k8s.infrastructure.handlers.pod_handler import K8sPodHandler
+from orb.providers.k8s.infrastructure.handlers.statefulset_handler import K8sStatefulSetHandler
 from orb.providers.k8s.infrastructure.k8s_client import K8sClient
 from orb.providers.k8s.value_objects import KubernetesProviderApi
 from orb.providers.k8s.watch.multi_namespace import MultiNamespaceWatcher

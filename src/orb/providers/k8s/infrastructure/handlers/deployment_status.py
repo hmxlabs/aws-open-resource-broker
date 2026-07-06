@@ -21,7 +21,7 @@ from orb.domain.base.provider_fulfilment import CheckHostsStatusResult, Provider
 from orb.domain.request.aggregate import Request
 
 if TYPE_CHECKING:  # pragma: no cover — type-checking only
-    from orb.providers.k8s.handlers.deployment_handler import K8sDeploymentHandler
+    from orb.providers.k8s.infrastructure.handlers.deployment_handler import K8sDeploymentHandler
 
 
 class DeploymentStatusResolver:

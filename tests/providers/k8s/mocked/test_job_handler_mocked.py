@@ -66,7 +66,7 @@ def _make_template(namespace: str = "orb-test") -> Any:
 
 
 def _make_job_handler(k8s_client_facade: Any, k8s_config: Any) -> Any:
-    from orb.providers.k8s.handlers.job_handler import K8sJobHandler  # noqa: PLC0415
+    from orb.providers.k8s.infrastructure.handlers.job_handler import K8sJobHandler  # noqa: PLC0415
 
     return K8sJobHandler(
         kubernetes_client=k8s_client_facade,

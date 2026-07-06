@@ -25,7 +25,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from orb.domain.base.operation_outcome import Accepted, Completed
-from orb.providers.k8s.handlers.deployment_handler import (
+from orb.providers.k8s.infrastructure.handlers.deployment_handler import (
     POD_DELETION_COST_ANNOTATION,
     VICTIM_DELETION_COST,
 )

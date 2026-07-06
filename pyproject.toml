@@ -495,13 +495,11 @@ markers = [
     "security: marks security tests",
     "serial: forces serial execution (use ``-n0`` or filter with ``-m 'not serial'`` under xdist)",
 ]
-env = [
-    "AWS_DEFAULT_REGION=us-east-1",
-    "AWS_ACCESS_KEY_ID=testing",
-    "AWS_SECRET_ACCESS_KEY=testing",
-    "AWS_SECURITY_TOKEN=testing",
-    "AWS_SESSION_TOKEN=testing",
-]
+# Provider-specific fake credentials live in
+# tests/providers/<name>/mocked/conftest.py.  The global pytest-env block
+# intentionally does not set cloud credentials so live suites (any
+# provider, any auth mechanism) inherit the operator's real environment.
+env = []
 
 [tool.coverage.run]
 source = ["src/orb"]

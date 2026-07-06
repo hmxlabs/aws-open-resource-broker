@@ -128,7 +128,7 @@ def test_partial_cache_hit_serves_partial_data_and_skips_list() -> None:
     cache, some absent).  This test pins the existing behaviour so any
     future change to the partial-hit policy is caught.
     """
-    from orb.providers.k8s.handlers.pod_handler import K8sPodHandler
+    from orb.providers.k8s.infrastructure.handlers.pod_handler import K8sPodHandler
 
     cache = PodStateCache()
     request = _make_request(requested_count=2)
@@ -495,7 +495,7 @@ async def test_job_release_logs_selective_release_not_supported() -> None:
     The operator must be informed via an info-level log message that
     includes "selective release not supported".
     """
-    from orb.providers.k8s.handlers.job_handler import K8sJobHandler
+    from orb.providers.k8s.infrastructure.handlers.job_handler import K8sJobHandler
 
     batch_v1 = MagicMock()
     batch_v1.delete_namespaced_job.return_value = SimpleNamespace()
@@ -615,7 +615,7 @@ def test_hf_namespace_precedence_end_to_end() -> None:
     provider-config default is used.
     """
     from orb.providers.k8s.domain.template.k8s_template import K8sTemplate
-    from orb.providers.k8s.handlers.base_handler import K8sHandlerBase
+    from orb.providers.k8s.infrastructure.handlers.base_handler import K8sHandlerBase
     from orb.providers.k8s.scheduler.hostfactory_field_mapping import K8sFieldMapping
 
     field_map = K8sFieldMapping()

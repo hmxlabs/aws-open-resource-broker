@@ -29,8 +29,8 @@ from orb.domain.base.provider_fulfilment import CheckHostsStatusResult
 from orb.domain.request.aggregate import Request
 from orb.domain.template.template_aggregate import Template
 from orb.providers.k8s.configuration.config import K8sProviderConfig
-from orb.providers.k8s.handlers.base_handler import K8sHandlerBase
-from orb.providers.k8s.handlers.pod_status import PodStatusResolver
+from orb.providers.k8s.infrastructure.handlers.base_handler import K8sHandlerBase
+from orb.providers.k8s.infrastructure.handlers.pod_status import PodStatusResolver
 from orb.providers.k8s.infrastructure.k8s_client import K8sClient
 from orb.providers.k8s.utilities.pod_spec import (
     build_pod_spec,

@@ -67,7 +67,7 @@ def _make_template(namespace: str = "orb-test") -> Any:
 
 
 def _make_sts_handler(k8s_client_facade: Any, k8s_config: Any) -> Any:
-    from orb.providers.k8s.handlers.statefulset_handler import (  # noqa: PLC0415
+    from orb.providers.k8s.infrastructure.handlers.statefulset_handler import (  # noqa: PLC0415
         K8sStatefulSetHandler,
     )
 

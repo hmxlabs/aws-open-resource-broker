@@ -13,7 +13,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from orb.providers.k8s.configuration.config import K8sProviderConfig
-from orb.providers.k8s.handlers.base_handler import K8sHandlerBase
+from orb.providers.k8s.infrastructure.handlers.base_handler import K8sHandlerBase
 from orb.providers.k8s.strategy.k8s_provider_strategy import (
     K8sProviderStrategy,
 )

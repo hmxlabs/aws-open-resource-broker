@@ -50,7 +50,7 @@ def _build_k8s_client(k8s_provider_config: dict):
 
 def _make_pod_handler(k8s_provider_config: dict):
     """Construct a live :class:`K8sPodHandler`."""
-    from orb.providers.k8s.handlers.pod_handler import K8sPodHandler
+    from orb.providers.k8s.infrastructure.handlers.pod_handler import K8sPodHandler
 
     client, config = _build_k8s_client(k8s_provider_config)
     logger = MagicMock()

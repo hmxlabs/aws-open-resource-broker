@@ -25,10 +25,10 @@ from orb.domain.request.aggregate import Request
 from orb.domain.request.value_objects import RequestId, RequestType
 from orb.providers.k8s.configuration.config import K8sProviderConfig
 from orb.providers.k8s.domain.template.k8s_template import K8sTemplate
-from orb.providers.k8s.handlers.deployment_handler import K8sDeploymentHandler
-from orb.providers.k8s.handlers.job_handler import K8sJobHandler
-from orb.providers.k8s.handlers.pod_handler import K8sPodHandler
-from orb.providers.k8s.handlers.statefulset_handler import K8sStatefulSetHandler
+from orb.providers.k8s.infrastructure.handlers.deployment_handler import K8sDeploymentHandler
+from orb.providers.k8s.infrastructure.handlers.job_handler import K8sJobHandler
+from orb.providers.k8s.infrastructure.handlers.pod_handler import K8sPodHandler
+from orb.providers.k8s.infrastructure.handlers.statefulset_handler import K8sStatefulSetHandler
 
 # ---------------------------------------------------------------------------
 # Shared fixtures

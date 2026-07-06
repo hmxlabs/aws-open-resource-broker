@@ -393,7 +393,7 @@ def test_reject_mode_raises_k8s_error_on_host_path() -> None:
     from unittest.mock import MagicMock
 
     from orb.providers.k8s.configuration.config import K8sProviderConfig
-    from orb.providers.k8s.handlers.base_handler import K8sHandlerBase
+    from orb.providers.k8s.infrastructure.handlers.base_handler import K8sHandlerBase
 
     config = K8sProviderConfig(
         namespace="test",
@@ -438,7 +438,7 @@ def test_reject_mode_off_no_raise_on_host_path() -> None:
     from unittest.mock import MagicMock
 
     from orb.providers.k8s.configuration.config import K8sProviderConfig
-    from orb.providers.k8s.handlers.base_handler import K8sHandlerBase
+    from orb.providers.k8s.infrastructure.handlers.base_handler import K8sHandlerBase
 
     config = K8sProviderConfig(
         namespace="test",
@@ -482,7 +482,7 @@ def test_audit_disabled_skips_check() -> None:
     from unittest.mock import MagicMock
 
     from orb.providers.k8s.configuration.config import K8sProviderConfig
-    from orb.providers.k8s.handlers.base_handler import K8sHandlerBase
+    from orb.providers.k8s.infrastructure.handlers.base_handler import K8sHandlerBase
 
     config = K8sProviderConfig(
         namespace="test",

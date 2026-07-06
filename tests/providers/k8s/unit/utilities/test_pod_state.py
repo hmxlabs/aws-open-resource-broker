@@ -115,7 +115,7 @@ class TestBaseHandlerSucceededWarning:
         """Return a minimal K8sHandlerBase subclass with a mock logger."""
 
         from orb.providers.k8s.configuration.config import K8sProviderConfig
-        from orb.providers.k8s.handlers.base_handler import K8sHandlerBase
+        from orb.providers.k8s.infrastructure.handlers.base_handler import K8sHandlerBase
 
         class _ConcreteHandler(K8sHandlerBase):
             PROVIDER_API = provider_api

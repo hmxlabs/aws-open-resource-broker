@@ -232,7 +232,7 @@ async def test_timeout_gc_deletes_pending_pod_past_threshold(
     user's default.
     """
     from orb.providers.k8s.configuration.config import K8sProviderConfig
-    from orb.providers.k8s.handlers.pod_handler import K8sPodHandler
+    from orb.providers.k8s.infrastructure.handlers.pod_handler import K8sPodHandler
     from orb.providers.k8s.infrastructure.k8s_client import K8sClient
 
     # Override to a short timeout so we never wait the default 300 s.

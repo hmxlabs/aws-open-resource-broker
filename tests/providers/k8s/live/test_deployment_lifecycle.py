@@ -32,7 +32,7 @@ _POLL_INTERVAL = 5  # seconds
 def _build_deployment_handler(k8s_provider_config: dict):
     """Construct a live :class:`K8sDeploymentHandler`."""
     from orb.providers.k8s.configuration.config import K8sProviderConfig
-    from orb.providers.k8s.handlers.deployment_handler import K8sDeploymentHandler
+    from orb.providers.k8s.infrastructure.handlers.deployment_handler import K8sDeploymentHandler
     from orb.providers.k8s.infrastructure.k8s_client import K8sClient
 
     config = K8sProviderConfig(

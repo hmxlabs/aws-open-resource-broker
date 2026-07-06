@@ -27,7 +27,7 @@ from orb.domain.request.aggregate import Request
 from orb.domain.request.value_objects import RequestId, RequestType
 from orb.domain.template.template_aggregate import Template
 from orb.providers.k8s.configuration.config import K8sProviderConfig
-from orb.providers.k8s.handlers.job_handler import K8sJobHandler
+from orb.providers.k8s.infrastructure.handlers.job_handler import K8sJobHandler
 
 # ---------------------------------------------------------------------------
 # Fixtures and helpers

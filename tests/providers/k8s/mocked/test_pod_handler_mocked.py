@@ -69,7 +69,7 @@ def _make_template(namespace: str = "orb-test") -> Any:
 
 
 def _make_pod_handler(k8s_client_facade: Any, k8s_config: Any) -> Any:
-    from orb.providers.k8s.handlers.pod_handler import K8sPodHandler  # noqa: PLC0415
+    from orb.providers.k8s.infrastructure.handlers.pod_handler import K8sPodHandler  # noqa: PLC0415
 
     return K8sPodHandler(
         kubernetes_client=k8s_client_facade,

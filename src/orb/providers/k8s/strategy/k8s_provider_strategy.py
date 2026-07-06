@@ -40,7 +40,7 @@ from orb.providers.base.strategy import (
     ProviderStrategy,
 )
 from orb.providers.k8s.configuration.config import K8sProviderConfig
-from orb.providers.k8s.handlers.base_handler import K8sHandlerBase
+from orb.providers.k8s.infrastructure.handlers.base_handler import K8sHandlerBase
 from orb.providers.k8s.infrastructure.k8s_client import K8sClient
 from orb.providers.k8s.reconciliation.orphan_gc import OrphanGarbageCollector
 from orb.providers.k8s.reconciliation.startup_reconciler import (

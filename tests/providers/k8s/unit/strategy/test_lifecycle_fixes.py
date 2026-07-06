@@ -91,7 +91,7 @@ class TestInstanceLevelHandlerRegistries:
         r1 = _make_registry()
         r2 = _make_registry()
         # Mutating one registry's _handler_classes must not affect the other
-        from orb.providers.k8s.handlers.base_handler import K8sHandlerBase
+        from orb.providers.k8s.infrastructure.handlers.base_handler import K8sHandlerBase
 
         sentinel = type("Sentinel", (K8sHandlerBase,), {})
         r1._handler_classes["XApi"] = sentinel  # type: ignore[assignment]
