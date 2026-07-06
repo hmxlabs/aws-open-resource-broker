@@ -388,14 +388,6 @@ class ConfigurationAdapter(ConfigurationPort):
         """Restrict selection to a provider type - delegate to ConfigurationManager."""
         self._config_manager.override_provider_type(provider_type)
 
-    def override_provider_region(self, region: str) -> None:
-        """Override provider region - delegate to ConfigurationManager."""
-        self._config_manager.override_provider_region(region)
-
-    def override_provider_profile(self, profile: str) -> None:
-        """Override provider credential profile - delegate to ConfigurationManager."""
-        self._config_manager.override_provider_profile(profile)
-
     def get_active_provider_name_override(self) -> str | None:
         """Get current provider name override from CLI."""
         return self._config_manager.get_active_provider_name_override()
@@ -403,14 +395,6 @@ class ConfigurationAdapter(ConfigurationPort):
     def get_active_provider_type_override(self) -> str | None:
         """Get current provider type override from CLI."""
         return self._config_manager.get_active_provider_type_override()
-
-    def get_effective_region(self, default_region: str = "") -> str:
-        """Get effective provider region - delegate to ConfigurationManager."""
-        return self._config_manager.get_effective_region(default_region)
-
-    def get_effective_profile(self, default_profile: str = "") -> str:
-        """Get effective provider credential profile - delegate to ConfigurationManager."""
-        return self._config_manager.get_effective_profile(default_profile)
 
     def get_resource_prefix(self, resource_type: str) -> str:
         """Get resource naming prefix for the given resource type."""
