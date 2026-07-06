@@ -734,7 +734,7 @@ def _write_config_file(
         # AWS-style shape when no strategy class is available.
         if strategy_class is not None:
             try:
-                provider_name = strategy_class.generate_provider_name(provider_data)
+                provider_name = strategy_class.generate_provider_name(provider_config)
             except Exception:
                 provider_name = _fallback_provider_name(provider_type, provider_data)
         else:

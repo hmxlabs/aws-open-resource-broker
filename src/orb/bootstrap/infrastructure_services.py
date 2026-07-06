@@ -49,7 +49,10 @@ def _register_template_services(container: DIContainer):
 
     container.register_singleton(TemplateDefaultsPort, create_template_defaults_service)
 
-    # Register template generation service
+    # Register template generation service.
+    # TemplateExampleGeneratorPort is no longer injected here; the service
+    # resolves the correct per-provider adapter from
+    # TemplateExampleGeneratorRegistry at call time.
     def create_template_generation_service(c):
         """Create template generation service with injected dependencies."""
         from orb.application.ports.scheduler_port import SchedulerPort
@@ -58,16 +61,12 @@ def _register_template_services(container: DIContainer):
             TemplateGenerationService,
         )
         from orb.domain.base.ports.path_resolution_port import PathResolutionPort
-        from orb.domain.base.ports.template_example_generator_port import (
-            TemplateExampleGeneratorPort,
-        )
 
         return TemplateGenerationService(
             config_manager=c.get(ConfigurationPort),
             scheduler_strategy=c.get(SchedulerPort),
             logger=c.get(LoggingPort),
             provider_registry_service=c.get(ProviderRegistryService),
-            template_example_generator=c.get(TemplateExampleGeneratorPort),
             path_resolver=c.get(PathResolutionPort),
         )
 

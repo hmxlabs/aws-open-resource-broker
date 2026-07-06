@@ -164,16 +164,20 @@ def test_create_k8s_strategy_registers_health_checks() -> None:
 
 
 # ---------------------------------------------------------------------------
-# TemplateExampleGeneratorPort — DI wiring and example generation
+# TemplateExampleGeneratorRegistry — wiring and example generation
 # ---------------------------------------------------------------------------
 
 
-def test_register_k8s_services_with_di_wires_example_generator() -> None:
-    """``register_k8s_services_with_di`` registers ``TemplateExampleGeneratorPort``
-    in the DI container when the adapter module is present."""
+def test_register_k8s_services_with_di_registers_example_generator_in_registry() -> None:
+    """``register_k8s_services_with_di`` inserts the k8s adapter into
+    ``TemplateExampleGeneratorRegistry`` under the ``"k8s"`` key."""
+    from orb.infrastructure.registry.template_example_generator_registry import (
+        TemplateExampleGeneratorRegistry,
+    )
     from orb.providers.k8s.registration import register_k8s_services_with_di
 
-    registered: dict = {}
+    # Clear the registry so state from other tests does not interfere.
+    TemplateExampleGeneratorRegistry.clear()
 
     mock_logger = MagicMock()
 
@@ -183,16 +187,12 @@ def test_register_k8s_services_with_di_wires_example_generator() -> None:
 
         if port_type is LoggingPort:
             return mock_logger
-        if port_type is TemplateAdapterPort:  # returned for the template adapter path
+        if port_type is TemplateAdapterPort:
             return MagicMock()
         return MagicMock()
 
-    def _mock_register_singleton(port_type, factory):
-        registered[port_type] = factory
-
     mock_container = MagicMock()
     mock_container.get.side_effect = _mock_get
-    mock_container.register_singleton.side_effect = _mock_register_singleton
 
     with patch(
         "orb.providers.k8s.infrastructure.adapters.template_adapter.create_k8s_template_adapter",
@@ -200,25 +200,23 @@ def test_register_k8s_services_with_di_wires_example_generator() -> None:
     ):
         register_k8s_services_with_di(mock_container)
 
-    from orb.domain.base.ports.template_example_generator_port import (
-        TemplateExampleGeneratorPort,
+    assert TemplateExampleGeneratorRegistry.get("k8s") is not None, (
+        "k8s adapter was not registered in TemplateExampleGeneratorRegistry"
     )
 
-    assert TemplateExampleGeneratorPort in registered, (
-        "TemplateExampleGeneratorPort was not registered with the DI container"
-    )
+    # Restore clean state for subsequent tests.
+    TemplateExampleGeneratorRegistry.clear()
 
 
 def test_k8s_example_generator_returns_templates_for_all_handlers() -> None:
     """``KubernetesTemplateExampleGeneratorAdapter`` returns examples from all
-    four handler classes (Pod, Deployment, StatefulSet, Job) when
-    ``provider_type="k8s"``."""
+    four handler classes (Pod, Deployment, StatefulSet, Job)."""
     from orb.providers.k8s.adapters.template_example_generator_adapter import (
         KubernetesTemplateExampleGeneratorAdapter,
     )
 
     adapter = KubernetesTemplateExampleGeneratorAdapter()
-    templates = adapter.generate_example_templates(provider_type="k8s", provider_name="k8s-default")
+    templates = adapter.generate_example_templates(provider_name="k8s-default")
 
     assert len(templates) >= 4, (
         f"Expected at least 4 example templates (one per handler), got {len(templates)}"
@@ -236,23 +234,32 @@ def test_k8s_example_generator_filters_by_provider_api() -> None:
     )
 
     adapter = KubernetesTemplateExampleGeneratorAdapter()
-    pod_only = adapter.generate_example_templates(
-        provider_type="k8s", provider_name="k8s-default", provider_api="Pod"
-    )
+    pod_only = adapter.generate_example_templates(provider_name="k8s-default", provider_api="Pod")
 
     assert all(getattr(t, "provider_api", None) == "Pod" for t in pod_only)
     assert len(pod_only) >= 1
 
 
-def test_k8s_example_generator_ignores_non_k8s_provider_type() -> None:
-    """The adapter returns an empty list for any provider type other than ``k8s``."""
+def test_k8s_example_generator_registered_in_registry_is_callable() -> None:
+    """The adapter registered under ``"k8s"`` in the registry returns templates."""
+    from orb.infrastructure.registry.template_example_generator_registry import (
+        TemplateExampleGeneratorRegistry,
+    )
     from orb.providers.k8s.adapters.template_example_generator_adapter import (
         KubernetesTemplateExampleGeneratorAdapter,
     )
 
+    TemplateExampleGeneratorRegistry.clear()
     adapter = KubernetesTemplateExampleGeneratorAdapter()
-    result = adapter.generate_example_templates(provider_type="aws", provider_name="aws-default")
-    assert result == []
+    TemplateExampleGeneratorRegistry.register("k8s", adapter)
+
+    resolved = TemplateExampleGeneratorRegistry.get("k8s")
+    assert resolved is adapter
+
+    templates = resolved.generate_example_templates(provider_name="k8s-default")
+    assert len(templates) >= 1
+
+    TemplateExampleGeneratorRegistry.clear()
 
 
 # ---------------------------------------------------------------------------

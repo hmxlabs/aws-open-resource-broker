@@ -63,13 +63,35 @@ def _load_orb_config() -> dict:
 
 
 def _get_k8s_provider_config(orb_config: dict) -> dict:
-    """Extract the first k8s provider config block from the ORB config."""
+    """Extract the k8s provider config block for live tests.
+
+    Preference order:
+
+    * ``ORB_K8S_LIVE_PROVIDER_NAME`` env var overrides everything and targets a
+      specific provider instance by exact name.
+    * Config's ``provider.default_provider_instance`` when it names a k8s-type
+      provider.
+    * First provider of ``type == "k8s"`` in declaration order.
+
+    Returns the provider's ``config`` block, or ``{}`` when no k8s provider is
+    configured (tests then skip via kubernetes client import failure).
+    """
+    import os
+
     providers = orb_config.get("provider", {}).get("providers", [])
+    override = os.environ.get("ORB_K8S_LIVE_PROVIDER_NAME")
+    if override:
+        for provider in providers:
+            if provider.get("type") == "k8s" and provider.get("name") == override:
+                return provider.get("config", {})
+    default_instance = orb_config.get("provider", {}).get("default_provider_instance")
+    if default_instance:
+        for provider in providers:
+            if provider.get("type") == "k8s" and provider.get("name") == default_instance:
+                return provider.get("config", {})
     for provider in providers:
         if provider.get("type") == "k8s":
             return provider.get("config", {})
-    # Fall through to an empty dict; individual tests that need cluster
-    # access will skip via the kubernetes client import failure.
     return {}
 
 
