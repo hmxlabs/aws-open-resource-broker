@@ -14,11 +14,11 @@ from orb.application.dto.template_generation_dto import (
 from orb.application.ports import SchedulerPort
 from orb.domain.base.ports import ConfigurationPort, LoggingPort
 from orb.domain.base.ports.path_resolution_port import PathResolutionPort
+from orb.domain.base.ports.template_example_generator_resolver_port import (
+    TemplateExampleGeneratorResolverPort,
+)
 from orb.domain.base.utils import extract_provider_type
 from orb.domain.constants import PROVIDER_TYPE_AWS
-from orb.infrastructure.registry.template_example_generator_registry import (
-    TemplateExampleGeneratorRegistry,
-)
 
 
 class TemplateGenerationService:
@@ -35,12 +35,14 @@ class TemplateGenerationService:
         scheduler_strategy: SchedulerPort,
         logger: LoggingPort,
         provider_registry_service: "ProviderRegistryService",
+        generator_resolver: TemplateExampleGeneratorResolverPort,
         path_resolver: PathResolutionPort | None = None,
     ):
         self._config_manager = config_manager
         self._scheduler_strategy = scheduler_strategy
         self._logger = logger
         self._provider_registry_service = provider_registry_service
+        self._generator_resolver = generator_resolver
         self._path_resolver = path_resolver
 
     async def generate_templates(
@@ -173,8 +175,8 @@ class TemplateGenerationService:
             )
             raise ValueError(error_msg)
 
-        # Resolve generator from per-provider registry and generate example templates.
-        generator = TemplateExampleGeneratorRegistry.get(provider_type)
+        # Resolve generator via the injected resolver port.
+        generator = self._generator_resolver.get(provider_type)
         if generator is None:
             raise ValueError(f"No template generator registered for provider type: {provider_type}")
         example_templates = generator.generate_example_templates(provider_name, provider_api)
