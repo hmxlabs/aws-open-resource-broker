@@ -106,11 +106,22 @@ class StartupValidator:
         if self.config_path and Path(self.config_path).exists():
             return True
 
-        # Discovery hierarchy
+        from pathlib import Path as _Path
+
+        from orb.config.platform_dirs import get_config_location
+
+        # Discovery hierarchy — must match ConfigurationManager's resolution order.
+        # ORB_CONFIG_FILE and ORB_CONFIG_DIR/config.json are kept explicitly so the
+        # validator can surface a meaningful error when they are set but wrong.
+        # Then the platform-dirs path (respects venv / pyproject / uv-tool detection).
+        # Finally the user-home path so operators running from inside a checkout
+        # (which pins platform_dirs to the repo) still pick up ~/.orb/config/config.json
+        # when the repo has no local config.
         candidates = [
             os.environ.get("ORB_CONFIG_FILE"),
             os.path.join(os.environ.get("ORB_CONFIG_DIR", ""), "config.json"),
-            "./config/config.json",
+            str(get_config_location() / "config.json"),
+            str(_Path.home() / ".orb" / "config" / "config.json"),
         ]
 
         for candidate in candidates:
@@ -162,20 +173,23 @@ class StartupValidator:
 
     def _print_config_help(self) -> None:
         """Print helpful config location information."""
-        from orb.config.services.path_resolution_service import PathResolutionService
-
-        svc = PathResolutionService()
+        from orb.config.platform_dirs import get_config_location
 
         self._console.info("")
         self._console.info("Configuration not found in:")
 
-        default_resolved = svc.resolve_file_path("template", "default_config.json")
-        if default_resolved:
-            self._console.info(f"  - {default_resolved}")
+        # Show the explicit env-var paths when set, then the platform-dirs path.
+        tried: list[str] = []
+        env_file = os.environ.get("ORB_CONFIG_FILE")
+        if env_file:
+            tried.append(env_file)
+        env_dir = os.environ.get("ORB_CONFIG_DIR")
+        if env_dir:
+            tried.append(os.path.join(env_dir, "config.json"))
+        tried.append(str(get_config_location() / "config.json"))
 
-        config_resolved = svc.resolve_file_path("config", "config.json")
-        if config_resolved:
-            self._console.info(f"  - {config_resolved}")
+        for path in tried:
+            self._console.info(f"  - {path}")
 
         self._console.info("")
         self._console.info("To initialize:")
