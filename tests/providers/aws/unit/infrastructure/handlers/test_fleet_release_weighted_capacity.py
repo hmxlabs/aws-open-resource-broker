@@ -8,13 +8,14 @@ Verifies that:
 - The release() path passes the weighted sum to modify_fleet / modify_spot_fleet_request.
 """
 
-from typing import Any
+from typing import Any, cast
 from unittest.mock import MagicMock
 
 from orb.providers.aws.infrastructure.handlers.ec2_fleet.release_manager import (
     EC2FleetReleaseManager,
 )
 from orb.providers.aws.infrastructure.handlers.fleet_release_policy import (
+    FleetCapacityInput,
     compute_fleet_release_decision,
 )
 from orb.providers.aws.infrastructure.handlers.spot_fleet.release_manager import (
@@ -113,70 +114,78 @@ def _active_instances_response(instances: list[dict]) -> dict:
 
 
 class TestComputeFleetReleaseDecision:
-    def test_maintain_partial_return_requires_capacity_reduction(self):
-        decision = compute_fleet_release_decision(
-            fleet_type="maintain",
-            current_capacity=10,
-            weighted_capacity_to_return=4,
+    def _input(
+        self,
+        fleet_type: str,
+        target: int,
+        weighted: int,
+        count: int = 1,
+    ) -> FleetCapacityInput:
+        return FleetCapacityInput(
+            fleet_type=fleet_type,
+            target_capacity_units=target,
+            instances_to_return_count=count,
+            instance_weighted_capacity_units=weighted,
         )
+
+    def test_maintain_partial_return_requires_capacity_reduction(self):
+        decision = compute_fleet_release_decision(self._input("maintain", 10, 4, count=4))
         assert decision.requires_capacity_reduction is True
         assert decision.has_fleet_record is True
         assert decision.is_full_return is False
 
     def test_maintain_full_return_is_full(self):
-        decision = compute_fleet_release_decision(
-            fleet_type="maintain",
-            current_capacity=4,
-            weighted_capacity_to_return=4,
-        )
+        decision = compute_fleet_release_decision(self._input("maintain", 4, 4))
         assert decision.requires_capacity_reduction is True
         assert decision.is_full_return is True
 
     def test_maintain_weighted_return_exceeds_capacity_clamps_to_full(self):
         """If weighted sum > current (race / stale data), still produces is_full_return=True."""
-        decision = compute_fleet_release_decision(
-            fleet_type="maintain",
-            current_capacity=3,
-            weighted_capacity_to_return=8,
-        )
+        decision = compute_fleet_release_decision(self._input("maintain", 3, 8))
         assert decision.is_full_return is True
 
     def test_request_fleet_no_capacity_reduction_required(self):
-        decision = compute_fleet_release_decision(
-            fleet_type="request",
-            current_capacity=5,
-            weighted_capacity_to_return=2,
-        )
+        decision = compute_fleet_release_decision(self._input("request", 5, 2, count=2))
         assert decision.requires_capacity_reduction is False
         assert decision.has_fleet_record is True
         assert decision.is_full_return is False
 
     def test_instant_fleet_no_fleet_record(self):
-        decision = compute_fleet_release_decision(
-            fleet_type="instant",
-            current_capacity=2,
-            weighted_capacity_to_return=2,
-        )
+        decision = compute_fleet_release_decision(self._input("instant", 2, 2))
         assert decision.requires_capacity_reduction is False
         assert decision.has_fleet_record is False
         assert decision.is_full_return is True
 
     def test_weighted_capacity_used_not_instance_count(self):
         """Two instances with WeightedCapacity=4 each: subtract 8, not 2."""
-        decision = compute_fleet_release_decision(
-            fleet_type="maintain",
-            current_capacity=8,
-            weighted_capacity_to_return=8,
-        )
+        decision = compute_fleet_release_decision(self._input("maintain", 8, 8, count=2))
         assert decision.is_full_return is True
 
         # With old (instance-count) arithmetic this would be False (8 - 2 == 6 != 0).
-        decision_old_style = compute_fleet_release_decision(
-            fleet_type="maintain",
-            current_capacity=8,
-            weighted_capacity_to_return=2,
-        )
+        decision_old_style = compute_fleet_release_decision(self._input("maintain", 8, 2, count=2))
         assert decision_old_style.is_full_return is False
+
+    def test_fleet_capacity_input_weighted_equals_target_is_full_return(self):
+        """FleetCapacityInput: weighted=4, target=4, count=1 → is_full_return=True."""
+        inp = FleetCapacityInput(
+            fleet_type="request",
+            target_capacity_units=4,
+            instances_to_return_count=1,
+            instance_weighted_capacity_units=4,
+        )
+        decision = compute_fleet_release_decision(inp)
+        assert decision.is_full_return is True
+
+    def test_fleet_capacity_input_weighted_less_than_target_is_partial(self):
+        """FleetCapacityInput: weighted=2, target=4, count=1 → is_full_return=False."""
+        inp = FleetCapacityInput(
+            fleet_type="request",
+            target_capacity_units=4,
+            instances_to_return_count=1,
+            instance_weighted_capacity_units=2,
+        )
+        decision = compute_fleet_release_decision(inp)
+        assert decision.is_full_return is False
 
 
 # ---------------------------------------------------------------------------
@@ -331,6 +340,48 @@ class TestEC2FleetReleaseWeighted:
             FleetId="fleet-partial",
             TargetCapacitySpecification={"TotalTargetCapacity": 4},
         )
+
+    def test_request_fleet_partial_return_does_not_delete_on_empty_describe_response(self):
+        """Regression: request-type EC2Fleet partial return must NOT delete the fleet even
+        when describe_fleet_instances transiently returns an empty ActiveInstances list.
+
+        Mirrors the SpotFleet regression: AWS API eventual consistency can briefly show
+        no active instances immediately after termination, causing the secondary check to
+        fire and incorrectly delete a fleet that still has running instances.
+        """
+        active = [
+            {"InstanceId": "i-aaa", "InstanceType": "t2.small"},
+            {"InstanceId": "i-bbb", "InstanceType": "t2.small"},
+        ]
+        overrides = [{"InstanceType": "t2.small", "WeightedCapacity": 2}]
+        ec2 = MagicMock()
+        # Simulate AWS API lag: only one describe call (for _sum_weighted_capacity);
+        # the secondary _fleet_has_no_remaining_instances call must not happen.
+        ec2.describe_fleet_instances.side_effect = [
+            {"ActiveInstances": active},  # first call: _sum_weighted_capacity
+            {"ActiveInstances": []},  # would-be second call (must not be reached)
+        ]
+        ec2.modify_fleet.return_value = {}
+        ec2.delete_fleets.return_value = {
+            "SuccessfulFleetDeletions": [],
+            "UnsuccessfulFleetDeletions": [],
+        }
+        mgr = _make_ec2_release_manager(ec2_client_mock=ec2)
+        fleet_details = _fleet_details("request", 4, overrides)
+        fleet_details["Tags"] = [{"Key": "orb:request-id", "Value": "req-request-partial"}]
+
+        mgr.release(
+            fleet_id="fleet-request-partial",
+            instance_ids=["i-aaa"],
+            fleet_details=fleet_details,
+        )
+
+        # Fleet must NOT be deleted: only a partial return.
+        ec2.delete_fleets.assert_not_called()
+        # No capacity modification for request fleets.
+        ec2.modify_fleet.assert_not_called()
+        # The instance must still be terminated.
+        assert cast(MagicMock, mgr._aws_ops).terminate_instances_with_fallback.call_count == 1
 
 
 # ---------------------------------------------------------------------------
@@ -511,4 +562,340 @@ class TestSpotFleetReleaseWeighted:
             SpotFleetRequestId="sfr-partial",
             TargetCapacity=4,
             OnDemandTargetCapacity=0,
+        )
+
+    def test_request_fleet_partial_return_does_not_cancel_on_empty_describe_response(self):
+        """Regression: request-type SpotFleet partial return must NOT cancel the fleet even
+        when describe_spot_fleet_instances transiently returns an empty ActiveInstances list.
+
+        Root cause: AWS API eventual consistency can briefly show no active instances
+        immediately after terminate_instances_with_fallback for Mixed50 / weighted scenarios.
+        The secondary _fleet_has_no_remaining_instances check must be skipped for request
+        fleets because they never auto-refill capacity (unlike maintain fleets).
+        """
+        # Simulates the Mixed50 scenario: 2 instances of t2.small (weight=2 each) in a
+        # request fleet with TargetCapacity=4. We return i-s1; i-s2 should stay running.
+        active_response_sum = {
+            "ActiveInstances": [
+                {"InstanceId": "i-s1", "InstanceType": "t2.small", "WeightedCapacity": "2"},
+                {"InstanceId": "i-s2", "InstanceType": "t2.small", "WeightedCapacity": "2"},
+            ]
+        }
+        # Simulate AWS API lag: describe returns empty AFTER the first instance is terminated.
+        empty_response = {"ActiveInstances": []}
+
+        ec2 = MagicMock()
+        ec2.describe_spot_fleet_instances.side_effect = [
+            active_response_sum,  # first call: _sum_weighted_capacity
+            empty_response,  # would-be second call: _fleet_has_no_remaining_instances
+            # (this call should NOT happen for request fleets)
+        ]
+        ec2.modify_spot_fleet_request.return_value = {}
+        ec2.cancel_spot_fleet_requests.return_value = {
+            "SuccessfulFleetCancellations": [],
+            "UnsuccessfulFleetCancellations": [],
+        }
+        mgr = _make_spot_release_manager(ec2_client_mock=ec2)
+        fleet_details = self._make_fleet_details(
+            "request",
+            4,
+            [{"InstanceType": "t2.small", "WeightedCapacity": 2}],
+        )
+
+        mgr.release(
+            fleet_id="sfr-request-partial",
+            instance_ids=["i-s1"],
+            fleet_details=fleet_details,
+        )
+
+        # The fleet must NOT be cancelled: only one of two instances is being returned.
+        ec2.cancel_spot_fleet_requests.assert_not_called()
+        # No capacity modification for request fleets.
+        ec2.modify_spot_fleet_request.assert_not_called()
+        # The instance must still be terminated.
+        assert cast(MagicMock, mgr._aws_ops).terminate_instances_with_fallback.call_count == 1
+
+    def test_request_fleet_full_return_cancels_when_fleet_empty(self):
+        """Request-type fleet: is_full_return=True AND no remaining instances → fleet IS cancelled.
+
+        When all instances are returned (capacity arithmetic says full AND the live
+        describe call confirms no instances remain), a request-type fleet MUST be
+        cancelled.  AWS does not auto-cancel request fleets, so ORB must do it here.
+
+        The _fleet_has_no_remaining_instances guard prevents stranding running instances
+        when arithmetic gives a false-positive full-return (Mixed50 / high-weight case),
+        but when the fleet is genuinely empty the guard returns True and cancellation
+        proceeds normally.
+        """
+        active_response = {
+            "ActiveInstances": [
+                {"InstanceId": "i-s1", "InstanceType": "t2.small", "WeightedCapacity": "2"},
+                {"InstanceId": "i-s2", "InstanceType": "t2.small", "WeightedCapacity": "2"},
+            ]
+        }
+        # After returning both instances the fleet is empty.
+        empty_response = {"ActiveInstances": []}
+        ec2 = MagicMock()
+        ec2.describe_spot_fleet_instances.side_effect = [
+            active_response,  # first call: _sum_weighted_capacity
+            empty_response,  # second call: _fleet_has_no_remaining_instances
+        ]
+        ec2.modify_spot_fleet_request.return_value = {}
+        ec2.cancel_spot_fleet_requests.return_value = {
+            "SuccessfulFleetCancellations": [],
+            "UnsuccessfulFleetCancellations": [],
+        }
+        mgr = _make_spot_release_manager(ec2_client_mock=ec2)
+        fleet_details = self._make_fleet_details(
+            "request",
+            4,
+            [{"InstanceType": "t2.small", "WeightedCapacity": 2}],
+        )
+
+        mgr.release(
+            fleet_id="sfr-request-full",
+            instance_ids=["i-s1", "i-s2"],
+            fleet_details=fleet_details,
+        )
+
+        # is_full_return=True from arithmetic AND _fleet_has_no_remaining_instances=True →
+        # request fleet IS cancelled.
+        ec2.cancel_spot_fleet_requests.assert_called_once_with(
+            SpotFleetRequestIds=["sfr-request-full"],
+            TerminateInstances=False,
+        )
+        # No capacity modification for request fleets.
+        ec2.modify_spot_fleet_request.assert_not_called()
+        # Instances are still terminated.
+        assert cast(MagicMock, mgr._aws_ops).terminate_instances_with_fallback.call_count == 1
+
+
+# ---------------------------------------------------------------------------
+# Regression tests: _fleet_has_no_remaining_instances guards request-fleet cancel
+# (fixes "cancelled_running" live-test failure)
+# ---------------------------------------------------------------------------
+#
+# Exact scenario that triggered the live failure:
+#   Fleet type: SpotFleet request (hostfactory.SpotFleet.Mixed50)
+#   TargetCapacity=4
+#   Returned: 1 x t3.medium (WeightedCapacity=4) → remaining=0 → is_full_return=True
+#   Still running: 2 x t3.micro (WeightedCapacity=1 each) — not returned
+#   Old behaviour: cancel_spot_fleet_requests called → fleet enters cancelled_running
+#   Correct fix: _fleet_has_no_remaining_instances called; sees i-micro1 and i-micro2
+#                still active → returns False → cancellation skipped
+# ---------------------------------------------------------------------------
+
+
+class TestPrimaryCancelPathGating:
+    """Regression suite for the _fleet_has_no_remaining_instances guard on request fleets."""
+
+    # -- SpotFleet -------------------------------------------------------
+
+    def _spot_fleet_details(self, fleet_type: str, target: int, specs: list[dict]) -> dict:
+        return {
+            "SpotFleetRequestConfig": {
+                "Type": fleet_type,
+                "TargetCapacity": target,
+                "OnDemandTargetCapacity": 0,
+                "LaunchSpecifications": specs,
+                "TagSpecifications": [],
+            },
+            "Tags": [{"Key": "orb:request-id", "Value": "req-primary-guard"}],
+        }
+
+    def test_spot_request_type_weighted_full_return_does_not_cancel(self):
+        """SpotFleet request-type: is_full_return=True (weighted arithmetic) → NOT cancelled
+        when physical instances are still running.
+
+        Exact Mixed50 scenario: target=4, returning t3.medium weight=4, two t3.micro
+        instances (weight=1 each) still running.  Capacity arithmetic yields remaining=0
+        making is_full_return=True.  The _fleet_has_no_remaining_instances helper is
+        called to verify; it sees i-micro1 and i-micro2 still active (excluded={i-medium}),
+        so it returns False and cancellation is skipped.
+        """
+        # The returning instance has weight=4, exhausting the full target.
+        active_response = {
+            "ActiveInstances": [
+                # t3.medium being returned — weight=4
+                {"InstanceId": "i-medium", "InstanceType": "t3.medium", "WeightedCapacity": "4"},
+                # Two t3.micros still running — weight=1 each, NOT in instance_ids
+                {"InstanceId": "i-micro1", "InstanceType": "t3.micro", "WeightedCapacity": "1"},
+                {"InstanceId": "i-micro2", "InstanceType": "t3.micro", "WeightedCapacity": "1"},
+            ]
+        }
+        ec2 = MagicMock()
+        # return_value is used for all calls: both _sum_weighted_capacity and
+        # _fleet_has_no_remaining_instances see the same three-instance response.
+        # After excluding i-medium, i-micro1 and i-micro2 remain → helper returns False.
+        ec2.describe_spot_fleet_instances.return_value = active_response
+        ec2.modify_spot_fleet_request.return_value = {}
+        ec2.cancel_spot_fleet_requests.return_value = {
+            "SuccessfulFleetCancellations": [],
+            "UnsuccessfulFleetCancellations": [],
+        }
+        mgr = _make_spot_release_manager(ec2_client_mock=ec2)
+        fleet_details = self._spot_fleet_details(
+            "request",
+            4,
+            [
+                {"InstanceType": "t3.medium", "WeightedCapacity": 4},
+                {"InstanceType": "t3.micro", "WeightedCapacity": 1},
+            ],
+        )
+
+        mgr.release(
+            fleet_id="sfr-mixed50",
+            instance_ids=["i-medium"],  # only the t3.medium is returned
+            fleet_details=fleet_details,
+        )
+
+        # Capacity arithmetic: 4 - 4 = 0 → is_full_return=True.
+        # _fleet_has_no_remaining_instances called; sees i-micro1+i-micro2 still up → False.
+        # Fleet must NOT be cancelled.
+        ec2.cancel_spot_fleet_requests.assert_not_called()
+        # No capacity modification for request fleets.
+        ec2.modify_spot_fleet_request.assert_not_called()
+        # The t3.medium instance is still terminated.
+        assert cast(MagicMock, mgr._aws_ops).terminate_instances_with_fallback.call_count == 1
+
+    def test_spot_maintain_type_full_return_cancels_fleet(self):
+        """SpotFleet maintain-type: is_full_return=True → fleet IS cancelled (existing behaviour).
+
+        Regression protection: the fix must not break full-return cancellation
+        for maintain-type fleets.
+        """
+        active_response = {
+            "ActiveInstances": [
+                {"InstanceId": "i-s1", "InstanceType": "c5.xlarge", "WeightedCapacity": "4"},
+                {"InstanceId": "i-s2", "InstanceType": "c5.xlarge", "WeightedCapacity": "4"},
+            ]
+        }
+        ec2 = MagicMock()
+        # First call: _sum_weighted_capacity; second call: _fleet_has_no_remaining_instances
+        ec2.describe_spot_fleet_instances.side_effect = [
+            active_response,
+            {"ActiveInstances": []},  # fleet empty after termination
+        ]
+        ec2.modify_spot_fleet_request.return_value = {}
+        ec2.cancel_spot_fleet_requests.return_value = {
+            "SuccessfulFleetCancellations": [],
+            "UnsuccessfulFleetCancellations": [],
+        }
+        mgr = _make_spot_release_manager(ec2_client_mock=ec2)
+        fleet_details = self._spot_fleet_details(
+            "maintain",
+            8,
+            [{"InstanceType": "c5.xlarge", "WeightedCapacity": 4}],
+        )
+
+        mgr.release(
+            fleet_id="sfr-maintain-full",
+            instance_ids=["i-s1", "i-s2"],
+            fleet_details=fleet_details,
+        )
+
+        # maintain fleet, is_full_return=True, requires_capacity_reduction=True → cancelled.
+        ec2.cancel_spot_fleet_requests.assert_called_once_with(
+            SpotFleetRequestIds=["sfr-maintain-full"],
+            TerminateInstances=False,
+        )
+
+    # -- EC2Fleet --------------------------------------------------------
+
+    def _ec2_fleet_details(
+        self, fleet_type: str, total_capacity: int, overrides: list[dict]
+    ) -> dict:
+        return {
+            "Type": fleet_type,
+            "TargetCapacitySpecification": {"TotalTargetCapacity": total_capacity},
+            "LaunchTemplateConfigs": [{"Overrides": overrides}],
+            "Tags": [{"Key": "orb:request-id", "Value": "req-ec2-primary-guard"}],
+        }
+
+    def test_ec2_request_type_weighted_full_return_does_not_delete(self):
+        """EC2Fleet request-type: is_full_return=True (weighted arithmetic) → NOT deleted
+        when physical instances are still running.
+
+        Mirrors the SpotFleet Mixed50 scenario for EC2Fleet: target=4, returning a
+        t3.medium (weight=4) while two t3.micro instances (weight=1 each) still run.
+        The _fleet_has_no_remaining_instances helper sees i-micro1 and i-micro2 still
+        active (excluded={i-medium}), so it returns False and deletion is skipped.
+        """
+        active_instances = [
+            {"InstanceId": "i-medium", "InstanceType": "t3.medium"},
+            {"InstanceId": "i-micro1", "InstanceType": "t3.micro"},
+            {"InstanceId": "i-micro2", "InstanceType": "t3.micro"},
+        ]
+        ec2 = MagicMock()
+        # return_value used for all describe calls; after excluding i-medium,
+        # i-micro1 and i-micro2 remain → _fleet_has_no_remaining_instances returns False.
+        ec2.describe_fleet_instances.return_value = {"ActiveInstances": active_instances}
+        ec2.modify_fleet.return_value = {}
+        ec2.delete_fleets.return_value = {
+            "SuccessfulFleetDeletions": [],
+            "UnsuccessfulFleetDeletions": [],
+        }
+        mgr = _make_ec2_release_manager(ec2_client_mock=ec2)
+        fleet_details = self._ec2_fleet_details(
+            "request",
+            4,
+            [
+                {"InstanceType": "t3.medium", "WeightedCapacity": 4},
+                {"InstanceType": "t3.micro", "WeightedCapacity": 1},
+            ],
+        )
+
+        mgr.release(
+            fleet_id="fleet-ec2-mixed50",
+            instance_ids=["i-medium"],  # only the t3.medium is returned
+            fleet_details=fleet_details,
+        )
+
+        # Capacity arithmetic: 4 - 4 = 0 → is_full_return=True.
+        # _fleet_has_no_remaining_instances sees i-micro1+i-micro2 still up → False.
+        # Fleet must NOT be deleted.
+        ec2.delete_fleets.assert_not_called()
+        # No capacity modification for request fleets.
+        ec2.modify_fleet.assert_not_called()
+        # The t3.medium instance is still terminated.
+        assert cast(MagicMock, mgr._aws_ops).terminate_instances_with_fallback.call_count == 1
+
+    def test_ec2_maintain_type_full_return_deletes_fleet(self):
+        """EC2Fleet maintain-type: is_full_return=True → fleet IS deleted (existing behaviour).
+
+        Regression protection: the fix must not break full-return deletion for
+        maintain-type EC2 fleets.
+        """
+        active_instances = [
+            {"InstanceId": "i-s1", "InstanceType": "c5.xlarge"},
+            {"InstanceId": "i-s2", "InstanceType": "c5.xlarge"},
+        ]
+        ec2 = MagicMock()
+        # First call: _sum_weighted_capacity; second call: _fleet_has_no_remaining_instances
+        ec2.describe_fleet_instances.side_effect = [
+            {"ActiveInstances": active_instances},
+            {"ActiveInstances": []},  # fleet empty after termination
+        ]
+        ec2.modify_fleet.return_value = {}
+        ec2.delete_fleets.return_value = {
+            "SuccessfulFleetDeletions": [],
+            "UnsuccessfulFleetDeletions": [],
+        }
+        mgr = _make_ec2_release_manager(ec2_client_mock=ec2)
+        fleet_details = self._ec2_fleet_details(
+            "maintain",
+            8,
+            [{"InstanceType": "c5.xlarge", "WeightedCapacity": 4}],
+        )
+
+        mgr.release(
+            fleet_id="fleet-ec2-maintain-full",
+            instance_ids=["i-s1", "i-s2"],
+            fleet_details=fleet_details,
+        )
+
+        # maintain fleet, is_full_return=True, requires_capacity_reduction=True → deleted.
+        ec2.delete_fleets.assert_called_once_with(
+            FleetIds=["fleet-ec2-maintain-full"],
+            TerminateInstances=True,
         )

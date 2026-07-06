@@ -39,7 +39,7 @@ def _make_ec2_fleet_manager() -> tuple[EC2FleetReleaseManager, Mock]:
     def _noop_paginate(method, result_key, **kwargs):  # type: ignore[return]
         return []
 
-    def _noop_collect(**kwargs):  # type: ignore[return]
+    def _noop_collect(*args, **kwargs):  # type: ignore[return]
         return []
 
     manager = EC2FleetReleaseManager(
@@ -175,10 +175,13 @@ class TestEC2FleetRequestPartialReturn:
         aws_client.ec2_client.modify_fleet.assert_not_called()
         aws_client.ec2_client.delete_fleets.assert_not_called()
 
-    def test_ec2_fleet_request_full_return_deletes_fleet(self):
-        """Sanity check: full return of a request fleet SHOULD delete the fleet.
+    def test_ec2_fleet_request_full_return_deletes_fleet_when_empty(self):
+        """After the correct fix: request fleet IS deleted when all instances are returned.
 
-        This test MUST PASS against both unfixed and fixed code.
+        AWS does not auto-delete request fleets, so ORB must call delete_fleets once
+        the fleet is confirmed empty.  The _fleet_has_no_remaining_instances guard
+        (invoked for request-type fleets) returns True here because the _noop_collect
+        helper returns [] (no active instances remaining after termination).
         """
         manager, aws_client = _make_ec2_fleet_manager()
         fleet_details = _request_fleet_details_ec2(total_target_capacity=1)
@@ -189,9 +192,11 @@ class TestEC2FleetRequestPartialReturn:
             fleet_details=fleet_details,
         )
 
+        # is_full_return=True AND _fleet_has_no_remaining_instances=True →
+        # request fleet IS deleted via delete_fleets (TerminateInstances=False,
+        # instances were already terminated above).
         aws_client.ec2_client.delete_fleets.assert_called_once_with(
-            FleetIds=["fleet-001"],
-            TerminateInstances=False,
+            FleetIds=["fleet-001"], TerminateInstances=False
         )
 
 
