@@ -618,17 +618,22 @@ def _get_default_config(args) -> Dict[str, Any]:
         strategy_class.get_cli_infrastructure_defaults(args) if strategy_class is not None else {}
     )
 
-    # Use the registered CLI spec to extract provider config when available.
-    # Fall back to the init-level --profile / --region flags for backward
-    # compatibility with callers that have not yet adopted provider-specific flags.
+    # Provider-agnostic config extraction. The strategy classmethod owns the
+    # shape of the provider config block; the CLI spec registry contributes any
+    # additional provider-specific keys (fleet_role, subscription_id, project
+    # etc.) that the classmethod does not itself surface. Init-level fallbacks
+    # apply when neither source produced a value.
+    provider_config = (
+        strategy_class.get_cli_provider_config(args) if strategy_class is not None else {}
+    )
     spec = CLISpecRegistry.get(provider_type)
     if spec is not None:
-        spec_config = spec.extract_config(args)
-        profile = spec_config.get("profile") or getattr(args, "profile", None) or None
-        region = spec_config.get("region") or getattr(args, "region", None) or default_region
-    else:
-        profile = getattr(args, "profile", None) or None
-        region = getattr(args, "region", None) or default_region
+        for key, value in spec.extract_config(args).items():
+            if provider_config.get(key) in (None, ""):
+                provider_config[key] = value
+
+    profile = provider_config.get("profile") or getattr(args, "profile", None) or None
+    region = provider_config.get("region") or getattr(args, "region", None) or default_region
 
     first_provider = {
         "type": provider_type,
