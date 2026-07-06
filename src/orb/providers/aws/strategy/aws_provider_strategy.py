@@ -123,6 +123,15 @@ class AWSProviderStrategy(ProviderStrategy):
         AWSProviderConfig(**provider_config)  # raises ValidationError if invalid
         return raw
 
+    @classmethod
+    def is_image_resolution_needed(cls) -> bool:
+        """AWS uses SSM Parameter Store paths as AMI specifications.
+
+        The TemplateConfigurationManager must resolve those paths to
+        concrete AMI IDs before submitting a fleet request to EC2.
+        """
+        return True
+
     def resolve_api_alias(self, raw_api: str) -> str:
         """Resolve AWS-specific API name aliases to canonical registry keys."""
         return self._API_ALIASES.get(raw_api, raw_api)

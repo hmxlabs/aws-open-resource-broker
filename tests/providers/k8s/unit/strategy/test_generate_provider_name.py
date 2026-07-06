@@ -30,8 +30,9 @@ class TestK8sGenerateProviderName:
         assert name == "k8s_in-cluster"
 
     def test_k8s_generate_provider_name_in_cluster_explicit(self) -> None:
+        # profile key is dead; no-context config falls back to in-cluster sentinel.
         strategy = _make_strategy()
-        name = strategy.generate_provider_name({"profile": "in_cluster"})
+        name = strategy.generate_provider_name({})
         assert name == "k8s_in-cluster"
 
     def test_k8s_generate_provider_name_sanitizes_arn_context(self) -> None:
@@ -40,13 +41,14 @@ class TestK8sGenerateProviderName:
         name = strategy.generate_provider_name({"context": arn_context})
         assert name == "k8s_arn-aws-eks-eu-west-1-686521096028-cluster-ms-karpenter"
 
-    def test_k8s_generate_provider_name_uses_profile_when_no_context(self) -> None:
-        """profile key is the credential-source stored by orb init."""
+    def test_k8s_generate_provider_name_profile_key_ignored(self) -> None:
+        """The legacy profile key is ignored; a bare profile dict falls back to in-cluster."""
         strategy = _make_strategy()
         name = strategy.generate_provider_name({"profile": "staging-cluster"})
-        assert name == "k8s_staging-cluster"
+        assert name == "k8s_in-cluster"
 
-    def test_k8s_generate_provider_name_prefers_context_over_profile(self) -> None:
+    def test_k8s_generate_provider_name_context_wins_over_profile(self) -> None:
+        """context key wins; profile is not consulted."""
         strategy = _make_strategy()
         name = strategy.generate_provider_name({"context": "prod", "profile": "dev"})
         assert name == "k8s_prod"

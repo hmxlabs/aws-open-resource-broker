@@ -1029,20 +1029,22 @@ class K8sProviderStrategy(ProviderStrategy):
            It is sanitised directly without sentinel interpretation: even
            if the context is literally named ``"in-cluster"`` it is treated
            as a kubeconfig context, not the in-cluster ServiceAccount path.
-        2. ``profile`` key — the credential-source value stored by ``orb init``.
-           When the profile equals the in-cluster sentinel (``"in_cluster"``
-           or ``"in-cluster"``) the name ``k8s_in-cluster`` is returned.
-        3. No context and no profile → fall back to ``k8s_in-cluster``.
+        2. No context → fall back to ``k8s_in-cluster`` (in-cluster or
+           ambient kubeconfig default — the name signals no explicit
+           cluster was targeted).
 
         Disambiguation: a kubeconfig context whose sanitised form is
         ``"in-cluster"`` (i.e. the literal context name ``"in-cluster"``)
         would collide with the sentinel output ``k8s_in-cluster``.  It is
         instead prefixed with ``ctx_`` → ``k8s_ctx_in-cluster``.
+
+        Note: the legacy ``profile`` key from pre-k8s-provider ``orb init``
+        writes is no longer consulted.  Callers that previously relied on
+        the ``profile`` fallback should pass ``context`` explicitly.
         """
         import re
 
         raw_context: str | None = config.get("context") or None
-        raw_profile: str | None = config.get("profile") or None
 
         if raw_context:
             # Real kubeconfig context name — sanitise and check for collision.
@@ -1053,14 +1055,7 @@ class K8sProviderStrategy(ProviderStrategy):
                 sanitized = f"ctx_{sanitized}"
             return f"k8s_{sanitized}"
 
-        if raw_profile:
-            # profile carries the sentinel or a real credential-source name.
-            if _normalise_sentinel(raw_profile) == _IN_CLUSTER_SENTINEL:
-                return "k8s_in-cluster"
-            sanitized = re.sub(r"[^a-zA-Z0-9\-_]", "-", raw_profile)
-            return f"k8s_{sanitized}"
-
-        # No context, no profile → in-cluster sentinel.
+        # No context → in-cluster sentinel.
         return "k8s_in-cluster"
 
     @classmethod

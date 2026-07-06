@@ -612,7 +612,11 @@ def _discover_infrastructure(
     Args:
         provider_type: The provider type identifier (e.g. ``"aws"``).
         provider_config: Dict of provider config key/value pairs already
-            collected from the operator (e.g. ``{"region": ..., "profile": ...}``).
+            collected from the operator.  The shape is provider-specific
+            (e.g. ``{"context": ..., "namespace": ...}`` for Kubernetes or
+            ``{"region": ...}`` for AWS); all collected keys are forwarded
+            together and each provider's strategy picks up the fields it
+            understands.
         registry: Live provider registry used to construct the strategy.
     """
     console = get_container().get(ConsolePort)
