@@ -84,23 +84,17 @@ try:
     # ``app_name`` must match ^[a-zA-Z][a-zA-Z0-9_]*$ (Reflex requirement).
     # ``show_built_with_reflex=False`` hides the branding link.
     #
-    # ``api_url=""`` makes Reflex bake *relative* URLs into the compiled
-    # SPA bundle (``/_event``, ``/ping``, ``/_upload`` etc.) instead of
-    # ``http://localhost:{backend_port}``.  The browser then resolves
-    # every endpoint against ``window.location.origin``, so a single
-    # bundle works across every deployment topology without rebuild:
+    # Port baking: Reflex compiles ``http://localhost:{backend_port}`` into the
+    # JS bundle at ``reflex export`` time.  The client-side ``getBackendURL``
+    # rewrites the hostname to ``window.location.hostname`` when it detects a
+    # loopback hostname, but it does NOT rewrite the port.  The port frozen
+    # here at build time is therefore the port every deployed instance of this
+    # bundle will try to reach for ``/_event``, ``/ping``, and ``/_upload``.
     #
-    #   * embedded — Reflex on server_config.port (8000)
-    #   * split    — Reflex on ui_config.backend_port (8001); ORB REST
-    #                lives on server_config.port (8000) and is reached
-    #                separately via api_http (loopback)
-    #   * dev      — reflex run with Bun frontend proxying to backend
-    #   * HA/LB    — any worker on any port behind a load balancer
-    #
-    # Without this, the port that happened to be set in ``rxconfig`` at
-    # ``reflex export`` time gets frozen into the JS bundle, and any
-    # deployment mode that runs on a different port produces broken
-    # WebSocket / SSE requests to the baked-in port.
+    # The default (_ORB_UI_BACKEND_PORT=8000) matches the embedded-mode default
+    # so the shipped wheel works out of the box.  Split-mode operators who bind
+    # Reflex to a different port must rebuild with
+    # ``ORB_UI_BACKEND_PORT=<port> make ui-build``.
     if _frontend_port_env is None:
         config = rx.Config(
             app_name="orb_ui",

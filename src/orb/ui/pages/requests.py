@@ -30,7 +30,6 @@ from orb.infrastructure.logging.logger import get_logger
 _logger = get_logger(__name__)
 
 from .. import api
-from ..state import AppState
 from ..components.cell_formatters import bool_badge, json_truncate, list_count
 from ..components.column_picker import column_picker
 from ..components.empty_state import empty_state
@@ -46,6 +45,7 @@ from ..components.request_drawer import request_drawer
 from ..components.request_modal import RequestModalState, request_modal, request_success_banner
 from ..components.status_badge import request_status_badge
 from ..components.view_toggle import view_toggle
+from ..state import AppState
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -553,9 +553,14 @@ class RequestsState(rx.State):
     def dynamic_columns(self) -> list[ColumnDef]:
         """Provider-declared column definitions merged from backend schemas.
 
-        Reads from AppState.provider_schemas (single fetch, shared across all pages).
+        Reads from AppState.provider_schemas (single HTTP fetch, shared across pages).
         """
-        schemas = self.get_state(AppState).provider_schemas
+        try:
+            schemas: dict[str, list[dict[str, Any]]] = self._get_state_from_cache(
+                AppState
+            ).provider_schemas  # type: ignore[union-attr]
+        except Exception:
+            schemas = {}
         return build_provider_columns(
             schemas,
             "requests",
@@ -971,6 +976,14 @@ class RequestsState(rx.State):
         All dict/list fields are pre-serialised to strings so Reflex column
         formatters receive typed scalars at compile time.
         """
+        # Fetch provider schemas once (from AppState — single HTTP call, shared).
+        try:
+            _req_schemas: dict[str, list[dict[str, Any]]] = self._get_state_from_cache(
+                AppState
+            ).provider_schemas  # type: ignore[union-attr]
+        except Exception:
+            _req_schemas = {}
+
         # Apply client-side search filter
         source = self.requests
         q = self.search_text.lower().strip()
@@ -1099,7 +1112,7 @@ class RequestsState(rx.State):
                     # --- Provider-declared fields ---
                     **resolve_provider_row_fields(
                         r,
-                        self.provider_schemas,
+                        _req_schemas,
                         "requests",
                         self.provider_filter,
                     ),
@@ -2027,7 +2040,7 @@ def _filter_row() -> rx.Component:
     Layout matches the canonical pattern:
         [Filter pills] [Provider dropdown] [Search input] <spacer> [refresh_control]
     """
-    provider_options = rx.Var.create(["All"]) + RequestsState.provider_schemas.keys().to(list)  # type: ignore[attr-defined]
+    provider_options = rx.Var.create(["All"]) + AppState.provider_schemas.keys().to(list)  # type: ignore[attr-defined]
     return rx.hstack(
         rx.hstack(
             *[
@@ -2431,6 +2444,5 @@ def requests_page() -> rx.Component:
             RequestsState.load,
             RequestsState.open_from_query,
             RequestsState.auto_refresh,
-            RequestsState.load_provider_schemas,
         ],
     )

@@ -76,7 +76,7 @@ def _initialize_orb_application_sync() -> bool:
         container = get_container()
         config_manager = container.get(ConfigurationPort)
         app_instance = Application(
-            config_path=getattr(config_manager, "_config_file", None),
+            config_path=getattr(config_manager, "config_file", None),
             skip_validation=True,
             container=container,
         )

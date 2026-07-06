@@ -428,14 +428,22 @@ async def get_config_sources() -> dict[str, Any]:
 async def get_provider_schemas() -> dict[str, list[dict[str, Any]]]:
     """Return all registered provider UI column schemas keyed by provider name.
 
-    Calls ``GET /api/v1/providers/schemas`` which returns a JSON object whose
-    keys are provider names (e.g. ``"aws"``) and whose values are arrays of
-    UIColumnDescriptor dicts.  An empty dict is returned when the endpoint is
-    absent or returns an empty body.
+    Calls ``GET /api/v1/providers/schemas`` which returns a versioned envelope::
+
+        {"schema_version": 1, "schemas": {"aws": [UIColumnDescriptor, ...]}}
+
+    Returns the inner ``schemas`` dict so callers receive the flat
+    ``{provider_name: [columns]}`` mapping they expect.
+    An empty dict is returned when the endpoint is absent or returns no data.
     """
     try:
         result = await _get("/providers/schemas")
         if isinstance(result, dict):
+            # New versioned envelope — extract inner schemas dict.
+            if "schemas" in result:
+                inner = result["schemas"]
+                return inner if isinstance(inner, dict) else {}
+            # Legacy / unexpected shape — return as-is for backward compat.
             return result
         return {}
     except Exception:

@@ -61,6 +61,28 @@ curl http://localhost:8000/orb/health
 No more "Cannot connect to server: ws://localhost:8001/_event" errors — everything
 is on a single port.
 
+> **Security defaults (changed from earlier releases)**
+>
+> The server now binds to `127.0.0.1` (loopback) by default instead of `0.0.0.0`.
+> CORS `origins` defaults to `["http://localhost:8000"]` and `trusted_hosts` defaults
+> to `["localhost", "127.0.0.1"]`.
+>
+> To expose the server on a network interface you must set all three explicitly in
+> your config file:
+>
+> ```json
+> {
+>   "server": {
+>     "host": "0.0.0.0",
+>     "cors": { "origins": ["https://your-domain.example.com"] },
+>     "trusted_hosts": ["your-domain.example.com"]
+>   }
+> }
+> ```
+>
+> Leaving `host` as `0.0.0.0` in the CLI help text is intentional — it remains a
+> valid example of how to broaden network exposure.
+
 ---
 
 ## Mode 2 — Split (production, reverse-proxy)

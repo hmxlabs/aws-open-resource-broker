@@ -369,7 +369,10 @@ class TestProviderSchemaEndpoint:
         finally:
             _pr_mod.get_provider_registry = original
 
-        assert isinstance(resp.json(), list)
+        body = resp.json()
+        # Response is now versioned: {"schema_version": 1, "schema": [...]}
+        assert body.get("schema_version") == 1
+        assert isinstance(body.get("schema"), list)
 
     def test_viewer_role_allowed(self):
         """Viewer role must be sufficient to read schema."""
@@ -462,8 +465,11 @@ class TestAllProviderSchemasEndpoint:
         finally:
             _pr_mod.get_provider_registry = original
 
-        assert "aws" in body
-        assert isinstance(body["aws"], list)
+        # Response is now versioned: {"schema_version": 1, "schemas": {"aws": [...]}}
+        assert body.get("schema_version") == 1
+        schemas = body.get("schemas", {})
+        assert "aws" in schemas
+        assert isinstance(schemas["aws"], list)
 
     def test_empty_registry_returns_empty_dict(self):
         app = _make_app()
@@ -480,7 +486,9 @@ class TestAllProviderSchemasEndpoint:
         finally:
             _pr_mod.get_provider_registry = original
 
-        assert body == {}
+        # Response is now versioned: {"schema_version": 1, "schemas": {}}
+        assert body.get("schema_version") == 1
+        assert body.get("schemas") == {}
 
     def test_viewer_role_allowed(self):
         app = _make_app(role="viewer")
@@ -526,5 +534,7 @@ class TestAllProviderSchemasEndpoint:
 
         assert resp.status_code == 200
         body = resp.json()
-        assert "aws" in body
-        assert body.get("gcp") == []
+        # Response is now versioned: {"schema_version": 1, "schemas": {...}}
+        schemas = body.get("schemas", {})
+        assert "aws" in schemas
+        assert schemas.get("gcp") == []

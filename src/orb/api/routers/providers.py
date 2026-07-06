@@ -90,10 +90,9 @@ def _get_schema_for_provider_type(provider_type: str) -> list[dict[str, Any]]:
         return []
 
     try:
-        # Instantiate a lightweight sentinel to call get_ui_column_schema.
-        # The method only constructs UIColumnDescriptor objects — no AWS I/O.
-        instance = object.__new__(reg.strategy_class)
-        schema = instance.get_ui_column_schema()
+        # Call the classmethod directly — no instance needed.
+        # get_ui_column_schema only constructs UIColumnDescriptor objects; no I/O.
+        schema = reg.strategy_class.get_ui_column_schema()
         return [col.to_dict() for col in schema]
     except Exception as exc:
         logger.warning(
@@ -133,7 +132,11 @@ async def get_all_provider_schemas(
             )
             result[provider_type] = []
 
-    return JSONResponse(content=result, status_code=200)
+    return JSONResponse(
+        content={"schema_version": 1, "schemas": result},
+        status_code=200,
+        headers={"x-schema-version": "1"},
+    )
 
 
 @router.get(
@@ -164,7 +167,11 @@ async def get_provider_schema(
         logger.warning("Failed to build schema for provider '%s': %s", name, exc, exc_info=True)
         schema = []
 
-    return JSONResponse(content=schema, status_code=200)
+    return JSONResponse(
+        content={"schema_version": 1, "schema": schema},
+        status_code=200,
+        headers={"x-schema-version": "1"},
+    )
 
 
 @router.get(
@@ -222,7 +229,6 @@ async def get_providers_health(
                 name: str = getattr(provider_instance, "name", "")
                 ptype: str = getattr(provider_instance, "type", "unknown")
                 enabled: bool = bool(getattr(provider_instance, "enabled", True))
-                instance_config: dict[str, Any] = getattr(provider_instance, "config", {}) or {}
 
                 details: dict[str, Any] = {}
                 if enabled:
@@ -231,13 +237,11 @@ async def get_providers_health(
                 else:
                     status = "unhealthy"
 
-                # Best-effort details — never crash on missing attributes
-                region = instance_config.get("region")
-                if region:
-                    details["region"] = region
-                profile = instance_config.get("profile") or instance_config.get("aws_profile")
-                if profile:
-                    details["profile"] = profile
+                # region and profile are operator-only fields — strip them so
+                # viewer-role callers cannot enumerate AWS profiles or regions.
+                # Operators see the full details via the operator-scoped
+                # /providers/health?details=full endpoint (future) or by
+                # checking provider config directly.
 
                 is_active = active_provider_name is None and enabled
                 if is_active:
