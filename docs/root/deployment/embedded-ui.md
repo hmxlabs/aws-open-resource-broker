@@ -267,3 +267,60 @@ In split mode, check that:
 
 Reflex treats the app root directory as a namespace and forbids the presence of
 `__init__.py` in that directory. Ensure `src/orb/ui/__init__.py` does not exist.
+
+---
+
+## Docker Compose
+
+Two production-ready Compose files are provided under `deployment/docker/`.
+
+### Embedded mode
+
+Runs a single container that serves the SPA, WebSocket layer, and REST API on
+port 8000:
+
+```bash
+docker compose -f deployment/docker/docker-compose.embedded.yml up -d
+```
+
+The container bind-mounts `config/config.json` (read-only) and uses a named
+volume `orb-work` for runtime state (PID file, loopback token, logs).
+
+**When to use:** Standard single-host production deployments, self-contained
+staging environments, or anywhere you want the simplest possible operational
+footprint. Zero extra services required.
+
+**Non-default port:** If you need to run on a port other than 8000, you must
+rebuild the SPA bundle first so the WebSocket URL baked into the JS matches:
+
+```bash
+ORB_UI_BACKEND_PORT=9000 make ui-build
+docker build -t orb-api:custom .
+ORB_PORT=9000 docker compose -f deployment/docker/docker-compose.embedded.yml up -d
+```
+
+### Split mode
+
+Runs two containers — `orb-api` (REST API, port 8000) and `orb-ui` (Reflex
+SPA + WebSocket, port 8001) — on a shared Docker network:
+
+```bash
+docker compose -f deployment/docker/docker-compose.split.yml up -d
+```
+
+A reverse proxy (nginx or traefik) must sit in front to unify the two services
+on a single public port. An nginx template is included as a commented `proxy`
+service block inside the Compose file — uncomment and adjust the TLS paths to
+enable it.
+
+**When to use:** Deployments that need independent scaling of the API and UI
+tiers, CDN edge caching of static assets, or multiple API replicas behind a
+load balancer. Prefer embedded mode for simpler setups.
+
+**Key environment variables for split mode:**
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `ORB_API_PORT` | `8000` | Port for the `orb-api` container |
+| `ORB_UI_PORT` | `8001` | Port for the `orb-ui` container |
+| `ORB_BASE_URL` | `http://orb-api:8000` | URL the UI's httpx client uses to reach the API |
