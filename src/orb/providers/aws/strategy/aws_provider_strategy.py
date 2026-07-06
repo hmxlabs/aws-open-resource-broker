@@ -127,7 +127,8 @@ class AWSProviderStrategy(ProviderStrategy):
         """Resolve AWS-specific API name aliases to canonical registry keys."""
         return self._API_ALIASES.get(raw_api, raw_api)
 
-    def get_ui_column_schema(self) -> list:  # type: ignore[override]
+    @classmethod
+    def get_ui_column_schema(cls) -> list:  # type: ignore[override]
         """Return AWS-specific UI column descriptors for all resource types."""
         from orb.application.dto.system import UIColumnDescriptor
 
@@ -136,7 +137,7 @@ class AWSProviderStrategy(ProviderStrategy):
             # machines
             # ------------------------------------------------------------------
             UIColumnDescriptor(
-                key="aws_instance_type",
+                key="aws_machine_instance_type",
                 path="provider_data.instance_type",
                 label="Instance Type",
                 kind="badge",
@@ -243,7 +244,7 @@ class AWSProviderStrategy(ProviderStrategy):
                 sortable=True,
             ),
             UIColumnDescriptor(
-                key="aws_instance_type",
+                key="aws_template_instance_type",
                 path="instance_type",
                 label="Instance Type",
                 kind="text",

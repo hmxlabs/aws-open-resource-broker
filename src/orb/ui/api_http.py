@@ -8,6 +8,13 @@ from typing import Any
 
 import httpx
 
+# Module-level token cache to avoid a file-read on every HTTP request.
+# The cache is invalidated when the token file's mtime changes (e.g. after
+# a daemon restart or token rotation via SIGHUP).
+_cached_token: str | None = None
+_cached_token_file: Path | None = None
+_cached_token_mtime: float = 0.0
+
 ORB_BASE_URL = os.getenv("ORB_BASE_URL", "http://localhost:8000")
 # In embedded mode ORB is mounted at /orb inside the Reflex process, so the
 # effective API root is /orb/api/v1 and health/info live at /orb/health etc.
@@ -24,7 +31,7 @@ _DEFAULT_HEADERS = {"X-ORB-Scheduler": "default"}
 
 
 def _loopback_token() -> str | None:
-    """Read the loopback-admin token written by the daemon at start time.
+    """Return the loopback-admin token, using a module-level mtime cache.
 
     The UI backend runs in the same process (embedded mode) or on the same
     host (split mode) as ORB, so it can read the token file that
@@ -33,10 +40,15 @@ def _loopback_token() -> str | None:
     calls from anonymous ``viewer`` to loopback ``admin`` — matching what
     ``orb server reload`` already does.
 
+    The token file is only re-read when its mtime changes (``os.stat`` —
+    one cheap syscall per request instead of a full file read).
+
     Returns None when the file is missing (auth disabled or foreground
     ``orb serve`` without daemon).  Callers fall back to unauthenticated
     requests, which still work for read-only endpoints.
     """
+    global _cached_token, _cached_token_file, _cached_token_mtime
+
     # Cheap discovery — mirrors dev-tools flow: prefer the explicit env,
     # fall back to ``work/server/orb-server.token`` under platform-dirs.
     override = os.getenv("ORB_LOOPBACK_TOKEN_FILE")
@@ -48,13 +60,22 @@ def _loopback_token() -> str | None:
 
         candidates.append(get_work_location() / "server" / "orb-server.token")
     except Exception:
-        return None
+        return _cached_token
+
     for token_file in candidates:
         try:
-            if token_file.is_file():
-                token = token_file.read_text(encoding="ascii").strip()
-                if token:
-                    return token
+            if not token_file.is_file():
+                continue
+            current_mtime = os.stat(token_file).st_mtime
+            if token_file == _cached_token_file and current_mtime == _cached_token_mtime:
+                # File unchanged — return cached value.
+                return _cached_token
+            # File is new or has changed; re-read.
+            token = token_file.read_text(encoding="ascii").strip()
+            _cached_token = token if token else None
+            _cached_token_file = token_file
+            _cached_token_mtime = current_mtime
+            return _cached_token
         except OSError:
             continue
     return None
@@ -124,19 +145,11 @@ async def get_me() -> dict[str, Any]:
     async with _client() as c:
         r = await c.get(f"{ORB_ROOT_PREFIX}/api/v1/me")
         if r.status_code == 404:
-            # /me endpoint not present yet — degrade gracefully
+            # /me endpoint not present yet — degrade gracefully with least privilege
             return {
                 "username": "anonymous",
-                "role": "admin",
-                "permissions": [
-                    "read",
-                    "request_machines",
-                    "return_machines",
-                    "cancel_request",
-                    "create_template",
-                    "update_template",
-                    "delete_template",
-                ],
+                "role": "viewer",
+                "permissions": [],
             }
         r.raise_for_status()
         return r.json()

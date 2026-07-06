@@ -25,7 +25,13 @@ from typing import Any
 
 import reflex as rx
 
+from orb.infrastructure.logging.logger import get_logger
+
+_logger = get_logger(__name__)
+
 from .. import api
+from ..state import AppState
+from ..components.cell_formatters import bool_badge, json_truncate, list_count
 from ..components.column_picker import column_picker
 from ..components.empty_state import empty_state
 from ..components.error_callout import error_callout
@@ -249,53 +255,6 @@ def _checkbox_formatter_requests(row: Any) -> rx.Component:
     )
 
 
-def _bool_badge_r(key: str):
-    """Return a formatter that renders a bool field as yes/no badge."""
-
-    def _fmt(row: Any) -> rx.Component:
-        return rx.cond(
-            row[key],
-            rx.badge("yes", variant="soft", color_scheme="green", size="1"),
-            rx.badge("no", variant="soft", color_scheme="gray", size="1"),
-        )
-
-    return _fmt
-
-
-def _json_truncate_r(key: str):
-    """Return a formatter that renders a dict/JSON field as truncated code."""
-
-    def _fmt(row: Any) -> rx.Component:
-        return rx.cond(
-            row[key] != "",
-            rx.code(
-                row[key],
-                size="1",
-                white_space="nowrap",
-                overflow="hidden",
-                text_overflow="ellipsis",
-                max_width="12rem",
-                display="inline-block",
-            ),
-            rx.text("—", size="1", color=rx.color("gray", 9)),
-        )
-
-    return _fmt
-
-
-def _list_count_r(key: str):
-    """Return a formatter that shows a list field as its pre-formatted count string."""
-
-    def _fmt(row: Any) -> rx.Component:
-        return rx.cond(
-            row[key] != "",
-            rx.text(row[key], size="1", color=rx.color("gray", 11)),
-            rx.text("—", size="1", color=rx.color("gray", 9)),
-        )
-
-    return _fmt
-
-
 # ---------------------------------------------------------------------------
 # Column definitions
 # ---------------------------------------------------------------------------
@@ -382,38 +341,36 @@ REQUEST_COLUMNS: list[ColumnDef] = [
         "provider_data",
         "Prov Data",
         default_visible=False,
-        formatter=_json_truncate_r("provider_data"),
+        formatter=json_truncate("provider_data"),
     ),
     ColumnDef("resource_id", "Resource ID", default_visible=False),
     ColumnDef(
         "resource_ids",
         "Resource IDs",
         default_visible=False,
-        formatter=_list_count_r("resource_ids"),
+        formatter=list_count("resource_ids"),
     ),
     ColumnDef(
-        "machine_ids", "Machine IDs", default_visible=False, formatter=_list_count_r("machine_ids")
+        "machine_ids", "Machine IDs", default_visible=False, formatter=list_count("machine_ids")
     ),
     ColumnDef("launch_template_id", "Launch Tmpl", default_visible=False),
     ColumnDef("launch_template_version", "Tmpl Ver", default_visible=False),
-    ColumnDef(
-        "metadata", "Metadata", default_visible=False, formatter=_json_truncate_r("metadata")
-    ),
+    ColumnDef("metadata", "Metadata", default_visible=False, formatter=json_truncate("metadata")),
     ColumnDef(
         "error_details",
         "Error Details",
         default_visible=False,
-        formatter=_json_truncate_r("error_details"),
+        formatter=json_truncate("error_details"),
     ),
     ColumnDef("version", "Version", default_visible=False),
     ColumnDef(
-        "is_terminal", "Terminal", default_visible=False, formatter=_bool_badge_r("is_terminal")
+        "is_terminal", "Terminal", default_visible=False, formatter=bool_badge("is_terminal")
     ),
     ColumnDef(
         "is_failure_like",
         "Failure",
         default_visible=False,
-        formatter=_bool_badge_r("is_failure_like"),
+        formatter=bool_badge("is_failure_like"),
     ),
     ColumnDef("progress_percent", "Progress %", default_visible=False, align="end"),
 ]
@@ -532,7 +489,6 @@ class RequestsState(rx.State):
     # Drawer-scoped provider sync — kept separate from page ``loading``
     # so the toolbar spinner does not block while a single-row sync runs.
     syncing_drawer: bool = False
-    last_sync_time: str = ""
     sync_error: str = ""
 
     # Per-row selection for batch operations. List (not set) because
@@ -589,31 +545,19 @@ class RequestsState(rx.State):
     loading_more: bool = False
     page_size: int = 200
 
-    # Provider column schemas — fetched on mount into this state so that
-    # dynamic_columns and request_rows operate on a plain Python dict rather
-    # than a cross-state Reflex Var (which cannot be coerced to bool).
-    provider_schemas: dict[str, list[dict[str, Any]]] = {}
-
-    @rx.event(background=True)
-    async def load_provider_schemas(self):
-        """Fetch provider column schemas and store in this state."""
-        try:
-            schemas = await api.get_provider_schemas()
-            async with self:
-                self.provider_schemas = schemas if isinstance(schemas, dict) else {}
-        except Exception:
-            async with self:
-                self.provider_schemas = {}
-
     # ---------------------------------------------------------------------------
     # Computed vars
     # ---------------------------------------------------------------------------
 
     @rx.var
     def dynamic_columns(self) -> list[ColumnDef]:
-        """Provider-declared column definitions merged from backend schemas."""
+        """Provider-declared column definitions merged from backend schemas.
+
+        Reads from AppState.provider_schemas (single fetch, shared across all pages).
+        """
+        schemas = self.get_state(AppState).provider_schemas
         return build_provider_columns(
-            self.provider_schemas,
+            schemas,
             "requests",
             self.provider_filter,
         )
@@ -1246,7 +1190,12 @@ class RequestsState(rx.State):
                 requests_list = (res.get("requests") if isinstance(res, dict) else None) or []
                 if requests_list:
                     match = requests_list[0]
-            except Exception:
+            except Exception as exc:
+                _logger.warning(
+                    "open_from_query: failed to fetch request '%s' from API: %s",
+                    rid,
+                    exc,
+                )
                 return
         if match is None:
             return
@@ -1483,7 +1432,7 @@ class RequestsState(rx.State):
                 fresh = {**_empty_request_skeleton(), **fresh_list[0]}
                 self.selected_request = fresh
                 self.requests = [fresh if r.get("request_id") == rid else r for r in self.requests]
-            self.last_sync_time = datetime.datetime.now().strftime("%H:%M:%S")
+            self.last_refresh = datetime.datetime.now().strftime("%H:%M:%S")
         except Exception as exc:
             self.sync_error = f"Sync failed: {exc}"
         finally:
@@ -1540,7 +1489,7 @@ class RequestsState(rx.State):
                 # Update the drawer if it's currently showing this row.
                 if self.selected_request.get("request_id") == request_id:
                     self.selected_request = fresh
-            self.last_sync_time = datetime.datetime.now().strftime("%H:%M:%S")
+            self.last_refresh = datetime.datetime.now().strftime("%H:%M:%S")
         except Exception as exc:
             self.bulk_sync_error = f"Sync failed for {request_id}: {exc}"
         finally:
@@ -1561,7 +1510,7 @@ class RequestsState(rx.State):
         self.bulk_sync_error = ""
         try:
             await api.batch_get_request_status(ids, verbose=True)
-            self.last_sync_time = datetime.datetime.now().strftime("%H:%M:%S")
+            self.last_refresh = datetime.datetime.now().strftime("%H:%M:%S")
             # Reload the list so the rows reflect the new persisted state.
             if self.tab == "returns":
                 res = await api.list_return_requests(limit=self.page_size)
@@ -1643,7 +1592,7 @@ class RequestsState(rx.State):
         self.bulk_sync_error = ""
         try:
             await api.batch_get_request_status(ids, verbose=True)
-            self.last_sync_time = datetime.datetime.now().strftime("%H:%M:%S")
+            self.last_refresh = datetime.datetime.now().strftime("%H:%M:%S")
             # Reload the list so the rows reflect the new persisted state.
             if self.tab == "returns":
                 res = await api.list_return_requests(limit=self.page_size)
@@ -2139,19 +2088,6 @@ def _empty_state() -> rx.Component:
     )
 
 
-def _loading_skeleton() -> rx.Component:
-    """Animated loading placeholders while data fetches.
-
-    TODO: replace with loading_skeleton(rows=5, height="2.5rem") from
-    ..components.loading_skeleton once the components agent ships it.
-    """
-    return rx.vstack(
-        *[rx.skeleton(height="40px", width="100%", border_radius="0.5rem") for _ in range(5)],
-        spacing="2",
-        width="100%",
-    )
-
-
 def _confirm_dialog() -> rx.Component:
     """Cancel confirmation alert dialog."""
     return rx.alert_dialog.root(
@@ -2445,35 +2381,6 @@ def _confirm_cancel_selected_dialog() -> rx.Component:
 # ---------------------------------------------------------------------------
 
 
-def _requests_load_more() -> rx.Component:
-    """Load-more button shown when a next-page cursor is available."""
-    return rx.cond(
-        RequestsState.next_cursor != "",
-        rx.center(
-            rx.button(
-                rx.cond(
-                    RequestsState.loading_more,
-                    rx.spinner(size="2"),
-                    rx.icon("chevrons-down", size=16),
-                ),
-                rx.cond(
-                    RequestsState.loading_more,
-                    "Loading…",
-                    "Load more",
-                ),
-                on_click=RequestsState.load_more,
-                disabled=RequestsState.loading_more,
-                variant="soft",
-                color_scheme="gray",
-                size="2",
-            ),
-            width="100%",
-            padding_top="0.75rem",
-        ),
-        rx.fragment(),
-    )
-
-
 def requests_page() -> rx.Component:
     """The Requests page, registered in orb_ui.py routing."""
     return page(
@@ -2505,11 +2412,12 @@ def requests_page() -> rx.Component:
                 on_row_click=None,  # row click handled per-cell
                 on_sort=RequestsState.set_sort,
             ),
-            load_more=_requests_load_more(),
+            next_cursor=RequestsState.next_cursor,
+            loading_more=RequestsState.loading_more,
+            on_load_more=RequestsState.load_more,
             empty=_empty_state(),
             is_loading=RequestsState.loading & (RequestsState.loaded_count == 0),
             is_empty=~RequestsState.has_requests,
-            loading_skeleton=_loading_skeleton(),
             dialogs=[
                 _confirm_dialog(),
                 _confirm_cancel_all_dialog(),

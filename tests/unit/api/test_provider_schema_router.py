@@ -186,7 +186,7 @@ class TestAWSStrategyUIColumnSchema:
         strategy = self._make_strategy()
         schema = strategy.get_ui_column_schema()
         machine_keys = {c.key for c in schema if c.resource_type == "machines"}
-        assert "aws_instance_type" in machine_keys
+        assert "aws_machine_instance_type" in machine_keys
         assert "aws_availability_zone" in machine_keys
         assert "aws_lifecycle" in machine_keys
         assert "aws_image_id" in machine_keys
@@ -206,7 +206,7 @@ class TestAWSStrategyUIColumnSchema:
         schema = strategy.get_ui_column_schema()
         template_keys = {c.key for c in schema if c.resource_type == "templates"}
         assert "aws_provider_api" in template_keys
-        assert "aws_instance_type" in template_keys
+        assert "aws_template_instance_type" in template_keys
         assert "aws_allocation_strategy" in template_keys
         assert "aws_price_type" in template_keys
         assert "aws_key_name" in template_keys

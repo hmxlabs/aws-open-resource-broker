@@ -10,6 +10,7 @@ from typing import Any
 import reflex as rx
 
 from .. import api
+from ..components.cell_formatters import json_truncate, list_count
 from ..components.column_picker import column_picker
 from ..components.empty_state import empty_state
 from ..components.error_callout import error_callout
@@ -22,6 +23,7 @@ from ..components.refresh_control import refresh_control
 from ..components.request_modal import request_modal, request_success_banner
 from ..components.status_badge import machine_status_badge
 from ..components.view_toggle import view_toggle
+from ..state import AppState
 
 # ---------------------------------------------------------------------------
 # Helpers (pure Python — run at state-side, not in templates)
@@ -181,51 +183,7 @@ def _checkbox_formatter_machines(row: Any) -> rx.Component:
     )
 
 
-def _bool_badge_m(key: str):
-    """Return a formatter that renders a bool field as yes/no badge."""
-
-    def _fmt(row: Any) -> rx.Component:
-        return rx.cond(
-            row[key],
-            rx.badge("yes", variant="soft", color_scheme="green", size="1"),
-            rx.badge("no", variant="soft", color_scheme="gray", size="1"),
-        )
-
-    return _fmt
-
-
-def _json_truncate_m(key: str):
-    """Return a formatter that renders a dict/JSON field as truncated code."""
-
-    def _fmt(row: Any) -> rx.Component:
-        return rx.cond(
-            row[key] != "",
-            rx.code(
-                row[key],
-                size="1",
-                white_space="nowrap",
-                overflow="hidden",
-                text_overflow="ellipsis",
-                max_width="12rem",
-                display="inline-block",
-            ),
-            rx.text("—", size="1", color=rx.color("gray", 9)),
-        )
-
-    return _fmt
-
-
-def _list_count_m(key: str):
-    """Return a formatter that shows a list field as its pre-formatted count string."""
-
-    def _fmt(row: Any) -> rx.Component:
-        return rx.cond(
-            row[key] != "",
-            rx.text(row[key], size="1", color=rx.color("gray", 11)),
-            rx.text("—", size="1", color=rx.color("gray", 9)),
-        )
-
-    return _fmt
+# bool_badge, json_truncate, list_count are imported from cell_formatters
 
 
 # ---------------------------------------------------------------------------
@@ -294,23 +252,21 @@ MACHINE_COLUMNS: list[ColumnDef] = [
         "security_group_ids",
         "Sec Groups",
         default_visible=False,
-        formatter=_list_count_m("security_group_ids"),
+        formatter=list_count("security_group_ids"),
     ),
-    ColumnDef("tags", "Tags", default_visible=False, formatter=_json_truncate_m("tags")),
+    ColumnDef("tags", "Tags", default_visible=False, formatter=json_truncate("tags")),
     ColumnDef(
         "health_checks",
         "Health",
         default_visible=False,
-        formatter=_json_truncate_m("health_checks"),
+        formatter=json_truncate("health_checks"),
     ),
-    ColumnDef(
-        "metadata", "Metadata", default_visible=False, formatter=_json_truncate_m("metadata")
-    ),
+    ColumnDef("metadata", "Metadata", default_visible=False, formatter=json_truncate("metadata")),
     ColumnDef(
         "provider_data",
         "Provider Data",
         default_visible=False,
-        formatter=_json_truncate_m("provider_data"),
+        formatter=json_truncate("provider_data"),
     ),
     ColumnDef("version", "Version", default_visible=False),
     ColumnDef("uptime_seconds", "Uptime (s)", default_visible=False, sortable=True, align="end"),
@@ -423,22 +379,6 @@ class MachinesState(rx.State):
     loading_more: bool = False
     page_size: int = 200
 
-    # Provider column schemas — fetched on mount into this state so that
-    # dynamic_columns and machine_rows operate on a plain Python dict rather
-    # than a cross-state Reflex Var (which cannot be coerced to bool).
-    provider_schemas: dict[str, list[dict[str, Any]]] = {}
-
-    @rx.event(background=True)
-    async def load_provider_schemas(self):
-        """Fetch provider column schemas and store in this state."""
-        try:
-            schemas = await api.get_provider_schemas()
-            async with self:
-                self.provider_schemas = schemas if isinstance(schemas, dict) else {}
-        except Exception:
-            async with self:
-                self.provider_schemas = {}
-
     # -----------------------------------------------------------------------
     # Computed vars
     # -----------------------------------------------------------------------
@@ -539,9 +479,10 @@ class MachinesState(rx.State):
 
             # Extract provider-declared fields so dynamic column formatters
             # can do a simple row[key] lookup at render time.
+            # Provider schemas are owned by AppState (single fetch, shared).
             provider_fields = resolve_provider_row_fields(
                 m,
-                self.provider_schemas,
+                self.get_state(AppState).provider_schemas,
                 "machines",
                 self.provider_filter,
             )
@@ -608,9 +549,11 @@ class MachinesState(rx.State):
 
         Returns columns from all providers when ``provider_filter`` is ``"All"``,
         or only the active provider's columns when a specific provider is selected.
+        Reads from AppState.provider_schemas (single fetch, shared across all pages).
         """
+        schemas = self.get_state(AppState).provider_schemas
         return build_provider_columns(
-            self.provider_schemas,
+            schemas,
             "machines",
             self.provider_filter,
         )
@@ -1530,7 +1473,7 @@ def _filter_row() -> rx.Component:
     Layout:
         [Status pills] [Provider dropdown] [Search input] <spacer> [refresh_control]
     """
-    provider_options = rx.Var.create(["All"]) + MachinesState.provider_schemas.keys().to(list)  # type: ignore[attr-defined]
+    provider_options = rx.Var.create(["All"]) + AppState.provider_schemas.keys().to(list)  # type: ignore[attr-defined]
     return rx.hstack(
         # Status filter pills (replaces rx.select dropdown)
         rx.hstack(
@@ -1710,15 +1653,6 @@ def _confirm_return_all_dialog() -> rx.Component:
     )
 
 
-def _loading_skeleton() -> rx.Component:
-    """Animated loading placeholders while data fetches."""
-    return rx.vstack(
-        *[rx.skeleton(height="3rem", width="100%", border_radius="0.375rem") for _ in range(5)],
-        spacing="2",
-        width="100%",
-    )
-
-
 def _select_all_header(_unused: Any) -> rx.Component:
     """Select-all checkbox rendered in the header.
 
@@ -1781,45 +1715,6 @@ def _return_banner() -> rx.Component:
     )
 
 
-def _load_more_button() -> rx.Component:
-    """Load-more button shown when a next-page cursor is available."""
-    return rx.cond(
-        MachinesState.next_cursor != "",
-        rx.center(
-            rx.button(
-                rx.cond(
-                    MachinesState.loading_more,
-                    rx.spinner(size="2"),
-                    rx.icon("chevrons-down", size=16),
-                ),
-                rx.cond(
-                    MachinesState.loading_more,
-                    "Loading…",
-                    "Load more",
-                ),
-                on_click=MachinesState.load_more,
-                disabled=MachinesState.loading_more,
-                variant="soft",
-                color_scheme="gray",
-                size="2",
-            ),
-            width="100%",
-            padding_top="0.75rem",
-        ),
-        rx.fragment(),
-    )
-
-
-def _all_columns_with_dynamic() -> list[ColumnDef]:
-    """Return base columns; dynamic provider columns are added at render time.
-
-    The base list (ALL_MACHINE_COLUMNS_WITH_ACTIONS) is compiled at import
-    time.  Dynamic provider columns are merged by the state's ``dynamic_columns``
-    computed var and passed to ``list_grid_view`` at runtime.
-    """
-    return ALL_MACHINE_COLUMNS_WITH_ACTIONS
-
-
 def machines_page() -> rx.Component:
     """Machines page component — entry point registered in orb_ui.py."""
     return page(
@@ -1844,11 +1739,12 @@ def machines_page() -> rx.Component:
                 on_row_click=None,  # row click handled per-cell
                 on_sort=MachinesState.set_sort,
             ),
-            load_more=_load_more_button(),
+            next_cursor=MachinesState.next_cursor,
+            loading_more=MachinesState.loading_more,
+            on_load_more=MachinesState.load_more,
             empty=_empty_state(),
             is_loading=MachinesState.loading & (MachinesState.loaded_count == 0),
             is_empty=MachinesState.filtered_count == 0,
-            loading_skeleton=_loading_skeleton(),
             dialogs=[
                 machine_drawer(MachinesState),
                 request_modal(),
@@ -1858,6 +1754,5 @@ def machines_page() -> rx.Component:
         on_mount=[
             MachinesState.load,
             MachinesState.auto_refresh,
-            MachinesState.load_provider_schemas,
         ],
     )

@@ -7,7 +7,7 @@ AsyncClient.  We verify that:
 - happy-path responses are parsed and returned as dicts
 - 4xx/5xx HTTP errors are raised (not swallowed)
 - network-level errors propagate to the caller
-- ``get_me`` degrades gracefully on 404 → returns the default admin payload
+- ``get_me`` degrades gracefully on 404 → returns least-privilege anonymous viewer payload
 """
 
 from __future__ import annotations
@@ -127,7 +127,7 @@ async def test_get_me_returns_user_on_200(api_http):
 
 @pytest.mark.asyncio
 async def test_get_me_degrades_gracefully_on_404(api_http):
-    """get_me() falls back to the default admin payload when the endpoint is absent (404)."""
+    """get_me() falls back to least-privilege anonymous viewer when the endpoint is absent (404)."""
     resp = _mock_response(404)
     resp.content = b""
     client = _make_client_ctx(resp)
@@ -135,9 +135,9 @@ async def test_get_me_degrades_gracefully_on_404(api_http):
     with patch.object(api_http.httpx, "AsyncClient", return_value=client):
         result = await api_http.get_me()
 
-    assert result["role"] == "admin"
-    assert "request_machines" in result["permissions"]
-    assert "return_machines" in result["permissions"]
+    assert result["username"] == "anonymous"
+    assert result["role"] == "viewer"
+    assert result["permissions"] == []
 
 
 @pytest.mark.asyncio

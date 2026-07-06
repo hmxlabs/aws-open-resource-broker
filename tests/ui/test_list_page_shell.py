@@ -93,3 +93,106 @@ def test_list_page_shell_default_none_lists() -> None:
     )
 
     assert component is not None
+
+
+def test_list_page_shell_load_more_via_primitives() -> None:
+    """Passing next_cursor/loading_more/on_load_more builds the button internally."""
+    from unittest.mock import MagicMock
+
+    import reflex as rx
+
+    from orb.ui.components.list_page_shell import list_page_shell
+
+    mock_handler = MagicMock()
+
+    component = list_page_shell(
+        filter_row=rx.fragment(),
+        toolbar=rx.fragment(),
+        grid=rx.fragment(),
+        empty=rx.fragment(),
+        error_banner=rx.fragment(),
+        is_loading=rx.Var.create(False),
+        is_empty=rx.Var.create(False),
+        next_cursor=rx.Var.create("cursor_abc"),
+        loading_more=rx.Var.create(False),
+        on_load_more=mock_handler,
+    )
+
+    assert component is not None
+
+
+def test_list_page_shell_explicit_load_more_takes_precedence() -> None:
+    """An explicit load_more component takes precedence over primitives."""
+    from unittest.mock import MagicMock
+
+    import reflex as rx
+
+    from orb.ui.components.list_page_shell import list_page_shell
+
+    mock_handler = MagicMock()
+    custom_load_more = rx.button("Custom load more")
+
+    component = list_page_shell(
+        filter_row=rx.fragment(),
+        toolbar=rx.fragment(),
+        grid=rx.fragment(),
+        load_more=custom_load_more,
+        empty=rx.fragment(),
+        error_banner=rx.fragment(),
+        is_loading=rx.Var.create(False),
+        is_empty=rx.Var.create(False),
+        next_cursor=rx.Var.create("cursor_abc"),
+        loading_more=rx.Var.create(False),
+        on_load_more=mock_handler,
+    )
+
+    assert component is not None
+
+
+def test_list_page_shell_no_load_more_args() -> None:
+    """Omitting all load-more args must produce a valid component (rx.fragment fallback)."""
+    import reflex as rx
+
+    from orb.ui.components.list_page_shell import list_page_shell
+
+    component = list_page_shell(
+        filter_row=rx.fragment(),
+        toolbar=rx.fragment(),
+        grid=rx.fragment(),
+        empty=rx.fragment(),
+        error_banner=rx.fragment(),
+        is_loading=rx.Var.create(False),
+        is_empty=rx.Var.create(False),
+    )
+
+    assert component is not None
+
+
+def test_build_load_more_button_renders_when_cursor_present() -> None:
+    """_build_load_more_button must compose without raising for any Var inputs."""
+    import reflex as rx
+
+    from orb.ui.components.list_page_shell import _build_load_more_button
+
+    button = _build_load_more_button(
+        next_cursor=rx.Var.create("abc"),
+        loading_more=rx.Var.create(False),
+        on_load_more=rx.Var.create(None),
+    )
+
+    assert button is not None
+
+
+def test_build_load_more_button_renders_loading_state() -> None:
+    """_build_load_more_button must compose without raising when loading_more=True."""
+    import reflex as rx
+
+    from orb.ui.components.list_page_shell import _build_load_more_button
+
+    button = _build_load_more_button(
+        next_cursor=rx.Var.create("abc"),
+        loading_more=rx.Var.create(True),
+        on_load_more=rx.Var.create(None),
+    )
+
+    assert button is not None

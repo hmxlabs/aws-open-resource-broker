@@ -35,7 +35,7 @@ Each state that embeds this widget must declare:
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Optional
 
 import reflex as rx
 
@@ -48,13 +48,13 @@ _INTERVAL_OPTIONS: list[tuple[str, str]] = [
 
 
 def refresh_control(
-    enabled: Any,
-    interval: Any,
-    on_toggle: Any,
-    on_set_interval: Any,
-    on_manual_refresh: Any,
-    last_refresh_text: Any,
-    loading: Any = None,
+    enabled: rx.Var[str],
+    interval: rx.Var[str],
+    on_toggle: rx.EventHandler,
+    on_set_interval: rx.EventHandler,
+    on_manual_refresh: rx.EventHandler,
+    last_refresh_text: rx.Var[str],
+    loading: Optional[rx.Var[bool]] = None,
 ) -> rx.Component:
     """Compact auto-refresh widget placed in page toolbars.
 

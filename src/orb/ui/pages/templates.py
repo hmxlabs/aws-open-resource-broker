@@ -18,6 +18,7 @@ Layout:
 
 from __future__ import annotations
 
+import asyncio
 import json
 import random
 import string
@@ -26,7 +27,9 @@ from typing import Any
 import reflex as rx
 
 from .. import api
+from ..components.cell_formatters import bool_badge, json_truncate, list_count
 from ..components.column_picker import column_picker
+from ..components.error_callout import error_callout
 from ..components.layout import page
 from ..components.list_grid_view import ColumnDef, list_grid_view
 from ..components.list_page_shell import list_page_shell
@@ -143,53 +146,6 @@ def _truncate_id(row) -> rx.Component:
     )
 
 
-def _bool_badge(key: str):
-    """Return a formatter that renders a bool field as yes/no badge."""
-
-    def _fmt(row) -> rx.Component:
-        return rx.cond(
-            row[key],
-            rx.badge("yes", variant="soft", color_scheme="green", size="1"),
-            rx.badge("no", variant="soft", color_scheme="gray", size="1"),
-        )
-
-    return _fmt
-
-
-def _json_truncate(key: str):
-    """Return a formatter that renders a dict/JSON field as truncated code."""
-
-    def _fmt(row) -> rx.Component:
-        return rx.cond(
-            row[key] != "",
-            rx.code(
-                row[key],
-                size="1",
-                white_space="nowrap",
-                overflow="hidden",
-                text_overflow="ellipsis",
-                max_width="12rem",
-                display="inline-block",
-            ),
-            rx.text("—", size="1", color=rx.color("gray", 9)),
-        )
-
-    return _fmt
-
-
-def _list_count(key: str):
-    """Return a formatter that shows a list field as its pre-formatted count string."""
-
-    def _fmt(row) -> rx.Component:
-        return rx.cond(
-            row[key] != "",
-            rx.text(row[key], size="1", color=rx.color("gray", 11)),
-            rx.text("—", size="1", color=rx.color("gray", 9)),
-        )
-
-    return _fmt
-
-
 def _template_row_actions(row) -> rx.Component:
     """Icon-only per-row actions for the templates list view.
 
@@ -253,7 +209,7 @@ TEMPLATE_COLUMNS: list[ColumnDef] = [
         "storage_encryption",
         "Encrypted",
         default_visible=False,
-        formatter=_bool_badge("storage_encryption"),
+        formatter=bool_badge("storage_encryption"),
     ),
     ColumnDef("encryption_key", "Enc Key", default_visible=False),
     ColumnDef("key_name", "Key Name", default_visible=False),
@@ -263,49 +219,49 @@ TEMPLATE_COLUMNS: list[ColumnDef] = [
         "monitoring_enabled",
         "Monitoring",
         default_visible=False,
-        formatter=_bool_badge("monitoring_enabled"),
+        formatter=bool_badge("monitoring_enabled"),
     ),
     ColumnDef(
         "public_ip_assignment",
         "Public IP",
         default_visible=False,
-        formatter=_bool_badge("public_ip_assignment"),
+        formatter=bool_badge("public_ip_assignment"),
     ),
-    ColumnDef("subnet_ids", "Subnets", default_visible=False, formatter=_list_count("subnet_ids")),
+    ColumnDef("subnet_ids", "Subnets", default_visible=False, formatter=list_count("subnet_ids")),
     ColumnDef(
         "security_group_ids",
         "Sec Groups",
         default_visible=False,
-        formatter=_list_count("security_group_ids"),
+        formatter=list_count("security_group_ids"),
     ),
     ColumnDef(
-        "network_zones", "Net Zones", default_visible=False, formatter=_list_count("network_zones")
+        "network_zones", "Net Zones", default_visible=False, formatter=list_count("network_zones")
     ),
     ColumnDef(
         "machine_types",
         "Mach Types",
         default_visible=False,
-        formatter=_json_truncate("machine_types"),
+        formatter=json_truncate("machine_types"),
     ),
     ColumnDef(
         "machine_types_ondemand",
         "Ondemand Types",
         default_visible=False,
-        formatter=_json_truncate("machine_types_ondemand"),
+        formatter=json_truncate("machine_types_ondemand"),
     ),
     ColumnDef(
         "machine_types_priority",
         "Priority Types",
         default_visible=False,
-        formatter=_json_truncate("machine_types_priority"),
+        formatter=json_truncate("machine_types_priority"),
     ),
-    ColumnDef("tags", "Tags", default_visible=False, formatter=_json_truncate("tags")),
-    ColumnDef("metadata", "Metadata", default_visible=False, formatter=_json_truncate("metadata")),
+    ColumnDef("tags", "Tags", default_visible=False, formatter=json_truncate("tags")),
+    ColumnDef("metadata", "Metadata", default_visible=False, formatter=json_truncate("metadata")),
     ColumnDef(
         "provider_data",
         "Provider Data",
         default_visible=False,
-        formatter=_json_truncate("provider_data"),
+        formatter=json_truncate("provider_data"),
     ),
     ColumnDef("provider_type", "Provider Type", default_visible=False),
     ColumnDef("provider_name", "Provider Name", default_visible=False),
@@ -1153,6 +1109,58 @@ class TemplatesState(rx.State):
     def set_auto_refresh_interval(self, value: str) -> None:
         self.auto_refresh_interval = value
 
+    _poll_started: bool = False
+
+    @rx.event(background=True)
+    async def auto_refresh(self) -> None:
+        """Background polling task driven by auto_refresh_enabled and auto_refresh_interval.
+
+        MUST be ``background=True``. A non-background ``@rx.event`` that
+        ``await``s holds the state lock for the duration of the sleep,
+        which blocks every other event handler on this state (drawer
+        clicks, filter switches, etc.) for the full polling interval.
+
+        Single-flight via ``_poll_started`` so re-mounting the page
+        does not spawn additional background loops.
+        """
+        async with self:
+            if self._poll_started:
+                return
+            self._poll_started = True
+        try:
+            while True:
+                async with self:
+                    enabled = self.auto_refresh_enabled == "true"
+                    interval_str = self.auto_refresh_interval or "10"
+                if not enabled:
+                    await asyncio.sleep(5)  # poll the flag while disabled
+                    continue
+                try:
+                    interval = max(5, int(interval_str))
+                except ValueError:
+                    interval = 10
+                await asyncio.sleep(interval)
+                async with self:
+                    page_size = self.page_size
+                try:
+                    import datetime as _dt
+
+                    res = await api.list_templates(limit=page_size)
+                    raw_list = res.get("templates", [])
+                    if not isinstance(raw_list, list):
+                        raw_list = []
+                    async with self:
+                        self.templates = [_template_to_display(t) for t in raw_list]
+                        self.next_cursor = res.get("next_cursor") or ""
+                        self.api_total_count = int(res.get("total_count") or len(raw_list))
+                        self.last_refresh = _dt.datetime.now().strftime("%H:%M:%S")
+                except Exception as e:
+                    async with self:
+                        self.error = f"Auto-refresh failed: {e}"
+        finally:
+            async with self:
+                self._poll_started = False
+
     # ── Generate dialog ──────────────────────────────────────────────────────
 
     generate_dialog_open: bool = False
@@ -1637,35 +1645,6 @@ def _toolbar() -> rx.Component:
 # ---------------------------------------------------------------------------
 
 
-def _templates_load_more() -> rx.Component:
-    """Load-more button shown when a next-page cursor is available."""
-    return rx.cond(
-        TemplatesState.next_cursor != "",
-        rx.center(
-            rx.button(
-                rx.cond(
-                    TemplatesState.loading_more,
-                    rx.spinner(size="2"),
-                    rx.icon("chevrons-down", size=16),
-                ),
-                rx.cond(
-                    TemplatesState.loading_more,
-                    "Loading…",
-                    "Load more",
-                ),
-                on_click=TemplatesState.load_more,
-                disabled=TemplatesState.loading_more,
-                variant="soft",
-                color_scheme="gray",
-                size="2",
-            ),
-            width="100%",
-            padding_top="0.75rem",
-        ),
-        rx.fragment(),
-    )
-
-
 def templates_page() -> rx.Component:
     """Main Templates page component."""
     return page(
@@ -1673,14 +1652,7 @@ def templates_page() -> rx.Component:
         list_page_shell(
             error_banner=rx.cond(
                 TemplatesState.error != "",
-                rx.callout.root(
-                    rx.callout.icon(rx.icon("triangle-alert", size=16)),
-                    rx.callout.text(TemplatesState.error),
-                    color_scheme="red",
-                    variant="surface",
-                    margin_bottom="1rem",
-                    width="100%",
-                ),
+                error_callout(TemplatesState.error, retry=TemplatesState.load),
                 rx.fragment(),
             ),
             banners=[request_success_banner()],
@@ -1698,7 +1670,9 @@ def templates_page() -> rx.Component:
                 on_row_click=None,
                 on_sort=TemplatesState.set_sort,
             ),
-            load_more=_templates_load_more(),
+            next_cursor=TemplatesState.next_cursor,
+            loading_more=TemplatesState.loading_more,
+            on_load_more=TemplatesState.load_more,
             empty=_empty_state(),
             is_loading=TemplatesState.loading & (TemplatesState.loaded_count == 0),
             is_empty=TemplatesState.filtered_count == 0,
@@ -1711,5 +1685,9 @@ def templates_page() -> rx.Component:
                 _generate_dialog(),
             ],
         ),
-        on_mount=[TemplatesState.load, TemplatesState.load_provider_schemas],
+        on_mount=[
+            TemplatesState.load,
+            TemplatesState.auto_refresh,
+            TemplatesState.load_provider_schemas,
+        ],
     )
