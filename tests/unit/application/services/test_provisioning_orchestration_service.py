@@ -203,7 +203,7 @@ class TestDispatchSingleAttemptOutcome:
 
     @pytest.mark.asyncio
     async def test_partial_fulfillment_yields_accepted_outcome(self):
-        """Fewer instances than requested → Accepted (still processing)."""
+        """Fewer instances than requested with async polling → Accepted (still processing)."""
         from orb.providers.base.strategy.provider_strategy import ProviderResult
 
         svc = _make_service()
@@ -213,7 +213,7 @@ class TestDispatchSingleAttemptOutcome:
                 "instances": [{"id": "i-1"}],  # only 1 of 2 requested
                 "instance_ids": ["i-1"],
             },
-            metadata={},
+            metadata={"requires_async_polling": True},
         )
         svc._provider_selection_port.execute_operation = AsyncMock(return_value=provider_result)
 
@@ -233,18 +233,18 @@ class TestDispatchSingleAttemptOutcome:
         assert result.is_final is False
 
     @pytest.mark.asyncio
-    async def test_full_fulfillment_yields_completed_outcome(self):
-        """All instances returned → Completed."""
+    async def test_full_fulfillment_with_no_polling_signal_yields_completed(self):
+        """Synchronous provider (requires_async_polling=False) + full count → Completed."""
         from orb.providers.base.strategy.provider_strategy import ProviderResult
 
         svc = _make_service()
         provider_result = ProviderResult.success_result(
             data={
                 "resource_ids": ["fleet-1"],
-                "instances": [{"id": "i-1"}, {"id": "i-2"}],  # 2 of 2
+                "instances": [{"id": "i-1"}, {"id": "i-2"}],
                 "instance_ids": ["i-1", "i-2"],
             },
-            metadata={},
+            metadata={"requires_async_polling": False},
         )
         svc._provider_selection_port.execute_operation = AsyncMock(return_value=provider_result)
 
@@ -262,6 +262,44 @@ class TestDispatchSingleAttemptOutcome:
         assert result.success is True
         assert isinstance(result.outcome, Completed)
         assert result.is_final is True
+
+    @pytest.mark.asyncio
+    async def test_full_fulfillment_with_polling_signal_yields_accepted(self):
+        """Async provider (requires_async_polling=True) + full count → Accepted.
+
+        Until the provider signals no more polling is needed, the orchestrator
+        must keep polling. Instances exist but may still be pending. This guards
+        the Accepted-vs-Completed branch from collapsing into a constant: a
+        future regression where the orchestrator wrongly emits Completed on
+        every success would break here.
+        """
+        from orb.providers.base.strategy.provider_strategy import ProviderResult
+
+        svc = _make_service()
+        provider_result = ProviderResult.success_result(
+            data={
+                "resource_ids": ["fleet-1"],
+                "instances": [{"id": "i-1"}, {"id": "i-2"}],
+                "instance_ids": ["i-1", "i-2"],
+            },
+            metadata={"requires_async_polling": True},
+        )
+        svc._provider_selection_port.execute_operation = AsyncMock(return_value=provider_result)
+
+        scheduler = MagicMock()
+        scheduler.format_template_for_provider.return_value = {}
+        svc._container.get.return_value = scheduler
+
+        result = await svc._dispatch_single_attempt(
+            MagicMock(template_id="t-1"),
+            _make_request(count=2),
+            _make_selection_result(),
+            count=2,
+        )
+
+        assert result.success is True
+        assert isinstance(result.outcome, Accepted)
+        assert result.is_final is False
 
     @pytest.mark.asyncio
     async def test_provider_failure_yields_failed_outcome(self):

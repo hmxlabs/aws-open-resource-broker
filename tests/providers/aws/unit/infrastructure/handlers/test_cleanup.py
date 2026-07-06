@@ -551,17 +551,29 @@ class TestEC2FleetReleaseManagerFleetTypes:
         mock_delete.assert_called_once_with("fleet-1")
         cleanup_fn.assert_called_once_with("ec2_fleet", "req-ec2-abc")
 
-    def test_request_type_deletes_fleet_with_terminate_false_and_calls_cleanup(self):
+    def test_request_type_full_return_deletes_fleet_when_empty(self):
+        """Request fleet: is_full_return=True AND no remaining instances → fleet IS deleted.
+
+        AWS does not auto-delete request fleets, so ORB must issue an explicit
+        delete_fleets when all instances have been returned.  The
+        _fleet_has_no_remaining_instances guard prevents a false-positive deletion
+        (Mixed50 / high-weight scenario where arithmetic says full but instances still
+        run); here the guard returns True (fleet empty) so deletion proceeds.
+        """
         cleanup_fn = MagicMock()
         mgr, aws_client, _ = _make_ec2_fleet_release_manager(cleanup_fn)
+        # Fleet is empty after returning the only instance.
+        aws_client.ec2_client.describe_fleet_instances.return_value = {"ActiveInstances": []}
         with patch.object(mgr, "_delete_fleet") as mock_delete:
             mgr.release("fleet-2", ["i-1"], self._fleet_details("request", 1))
-        # request type: no modify_fleet, no _delete_fleet helper — uses delete_fleets directly
+        # request type: no modify_fleet (capacity reduction not needed)
         aws_client.ec2_client.modify_fleet.assert_not_called()
-        mock_delete.assert_not_called()
+        # Fleet IS deleted via delete_fleets (not _delete_fleet, which uses TerminateInstances=True)
         aws_client.ec2_client.delete_fleets.assert_called_once_with(
             FleetIds=["fleet-2"], TerminateInstances=False
         )
+        mock_delete.assert_not_called()
+        # Cleanup IS triggered because the fleet was deleted
         cleanup_fn.assert_called_once_with("ec2_fleet", "req-ec2-abc")
 
     def test_instant_type_calls_delete_fleets_and_cleanup(self):
@@ -579,12 +591,16 @@ class TestEC2FleetReleaseManagerFleetTypes:
 
     def test_request_type_missing_request_id_tag_skips_cleanup_gracefully(self):
         cleanup_fn = MagicMock()
-        mgr, _aws_client, _ = _make_ec2_fleet_release_manager(cleanup_fn)
+        mgr, aws_client, _ = _make_ec2_fleet_release_manager(cleanup_fn)
+        # Fleet is empty after returning the only instance.
+        aws_client.ec2_client.describe_fleet_instances.return_value = {"ActiveInstances": []}
         details = {
             "Type": "request",
             "TargetCapacitySpecification": {"TotalTargetCapacity": 1},
             "Tags": [],
         }
+        # Fleet IS deleted (empty after return), but cleanup is skipped because
+        # the fleet has no orb:request-id tag.
         mgr.release("fleet-4", ["i-1"], details)
         cleanup_fn.assert_not_called()
 
@@ -648,15 +664,28 @@ class TestSpotFleetReleaseManagerFleetTypes:
         )
         cleanup_fn.assert_called_once_with("spot_fleet", "req-spot-xyz")
 
-    def test_request_type_cancels_fleet_with_terminate_false_and_calls_cleanup(self):
+    def test_request_type_full_return_cancels_fleet_when_empty(self):
+        """Request fleet: is_full_return=True AND no remaining instances → fleet IS cancelled.
+
+        AWS does not auto-cancel request fleets, so ORB must issue an explicit
+        cancel_spot_fleet_requests when all instances have been returned.  The
+        _fleet_has_no_remaining_instances guard prevents a false-positive cancellation
+        (Mixed50 / high-weight scenario where arithmetic says full but instances still
+        run); here the guard returns True (fleet empty) so cancellation proceeds.
+        """
         cleanup_fn = MagicMock()
         mgr, aws_client, _ = _make_spot_fleet_release_manager(cleanup_fn)
+        # Fleet is empty after returning the only instance.
+        aws_client.ec2_client.describe_spot_fleet_instances.return_value = {"ActiveInstances": []}
         mgr.release("sfr-2", ["i-1"], self._fleet_details("request", 1))
+        # No capacity modification for request fleets.
         aws_client.ec2_client.modify_spot_fleet_request.assert_not_called()
+        # Fleet IS cancelled.
         aws_client.ec2_client.cancel_spot_fleet_requests.assert_called_once_with(
             SpotFleetRequestIds=["sfr-2"],
             TerminateInstances=False,
         )
+        # Cleanup IS triggered because the fleet was cancelled
         cleanup_fn.assert_called_once_with("spot_fleet", "req-spot-xyz")
 
     def test_maintain_missing_request_id_tag_skips_cleanup(self):

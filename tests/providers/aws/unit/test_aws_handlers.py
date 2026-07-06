@@ -2596,3 +2596,199 @@ class TestMultiInstanceOverrides:
         handler = EC2FleetHandler(Mock(), Mock(), Mock(), Mock(), config_port=Mock())
         # Conflicting values are now tolerated; should not raise
         handler._validate_prerequisites(cast(AWSTemplate, template))  # type: ignore[arg-type]
+
+
+@pytest.mark.unit
+@pytest.mark.aws
+class TestRequiresAsyncPollingKey:
+    """Regression tests for the requires_async_polling key in provider_data.
+
+    Each handler must set the key with the correct value:
+    - EC2Fleet INSTANT  → True  (instances are pending; polling loop must observe running state)
+    - EC2Fleet MAINTAIN → False (fleet creation IS the final synchronous answer)
+    - EC2Fleet REQUEST  → False (fleet creation IS the final synchronous answer)
+    - SpotFleet         → False (request submitted synchronously; status via polling happens
+                                 via check_hosts_status, not the create path)
+    - ASG               → False (ASG created synchronously)
+    - RunInstances      → False (explicit: synchronous provisioning, no async polling needed)
+    """
+
+    def _make_ec2_fleet_handler(self, fleet_id="fleet-001"):
+        """Build an EC2FleetHandler with aws_ops returning a successful fleet-create result."""
+        fleet_result = {
+            "fleet_id": fleet_id,
+            "instance_ids": [],
+            "metadata_updates": {"fleet_errors": []},
+        }
+        mock_aws_ops = Mock()
+        mock_aws_ops.execute_with_standard_error_handling = Mock(return_value=fleet_result)
+        mock_config_port = Mock()
+        mock_config_port.get_resource_prefix.return_value = ""
+        handler = EC2FleetHandler(
+            aws_client=Mock(),
+            logger=Mock(),
+            aws_ops=mock_aws_ops,
+            launch_template_manager=Mock(),
+            config_port=mock_config_port,
+        )
+        handler._validate_prerequisites = Mock()
+        return handler
+
+    def _ec2_fleet_request(self):
+        return SimpleNamespace(
+            request_id="req-poll",
+            requested_count=1,
+            metadata={},
+            error_details={},
+        )
+
+    def test_ec2_fleet_instant_sets_requires_async_polling_true(self):
+        """EC2Fleet INSTANT must set requires_async_polling=True."""
+        handler = self._make_ec2_fleet_handler()
+        template = SimpleNamespace(
+            template_id="tmpl-1",
+            fleet_type=AWSFleetType.INSTANT,
+            provider_api=None,
+        )
+
+        result = handler._acquire_hosts_internal(
+            cast(Request, self._ec2_fleet_request()),
+            cast(AWSTemplate, template),
+        )
+
+        assert result["success"] is True
+        assert result["provider_data"]["requires_async_polling"] is True
+
+    def test_ec2_fleet_maintain_sets_requires_async_polling_false(self):
+        """EC2Fleet MAINTAIN must set requires_async_polling=False."""
+        handler = self._make_ec2_fleet_handler("fleet-002")
+        template = SimpleNamespace(
+            template_id="tmpl-2",
+            fleet_type=AWSFleetType.MAINTAIN,
+            provider_api=None,
+        )
+
+        result = handler._acquire_hosts_internal(
+            cast(Request, self._ec2_fleet_request()),
+            cast(AWSTemplate, template),
+        )
+
+        assert result["success"] is True
+        assert result["provider_data"]["requires_async_polling"] is False
+
+    def test_ec2_fleet_request_type_sets_requires_async_polling_false(self):
+        """EC2Fleet REQUEST must set requires_async_polling=False."""
+        handler = self._make_ec2_fleet_handler("fleet-003")
+        template = SimpleNamespace(
+            template_id="tmpl-3",
+            fleet_type=AWSFleetType.REQUEST,
+            provider_api=None,
+        )
+
+        result = handler._acquire_hosts_internal(
+            cast(Request, self._ec2_fleet_request()),
+            cast(AWSTemplate, template),
+        )
+
+        assert result["success"] is True
+        assert result["provider_data"]["requires_async_polling"] is False
+
+    def test_spot_fleet_sets_requires_async_polling_false(self):
+        """SpotFleet handler must set requires_async_polling=False in provider_data."""
+        mock_aws_ops = Mock()
+        mock_aws_ops.execute_with_standard_error_handling = Mock(
+            return_value={"SpotFleetRequestId": "sfr-001"}
+        )
+        handler = SpotFleetHandler(
+            aws_client=Mock(),
+            logger=Mock(),
+            aws_ops=mock_aws_ops,
+            launch_template_manager=Mock(),
+        )
+        handler._validate_prerequisites = Mock()
+
+        request = SimpleNamespace(
+            request_id="req-sf",
+            requested_count=1,
+            metadata={},
+            error_details={},
+        )
+        mock_template = Mock()
+        mock_template.spot_fleet_role = "arn:aws:iam::123456789012:role/SpotFleetRole"
+        mock_template.fleet_type = None
+
+        result = handler._acquire_hosts_internal(
+            cast(Request, request),
+            cast(AWSTemplate, mock_template),
+        )
+
+        assert result["success"] is True
+        assert result["provider_data"]["requires_async_polling"] is False
+
+    def test_asg_sets_requires_async_polling_false(self):
+        """ASGHandler must set requires_async_polling=False in provider_data."""
+        mock_aws_ops = Mock()
+        mock_aws_ops.execute_with_standard_error_handling = Mock(return_value="asg-001")
+        handler = ASGHandler(
+            aws_client=Mock(),
+            logger=Mock(),
+            aws_ops=mock_aws_ops,
+            launch_template_manager=Mock(),
+        )
+        handler._validate_prerequisites = Mock()
+        handler.launch_template_manager.create_or_update_launch_template.return_value = (
+            SimpleNamespace(template_id="lt-asg", version="1")
+        )
+
+        request = SimpleNamespace(
+            request_id="req-asg",
+            requested_count=1,
+            metadata={},
+            error_details={},
+        )
+        template = Mock()
+        template.template_id = "tmpl-asg"
+
+        result = handler._acquire_hosts_internal(
+            cast(Request, request),
+            cast(AWSTemplate, template),
+        )
+
+        assert result["success"] is True
+        assert result["provider_data"]["requires_async_polling"] is False
+
+    def test_run_instances_sets_requires_async_polling_false(self):
+        """RunInstancesHandler must set requires_async_polling=False explicitly."""
+        run_response = {
+            "ReservationId": "r-001",
+            "Instances": [],
+            "InstanceCount": 0,
+            "InstanceIds": [],
+        }
+        mock_aws_ops = Mock()
+        mock_aws_ops.execute_with_standard_error_handling = Mock(return_value=run_response)
+        handler = RunInstancesHandler(
+            aws_client=Mock(),
+            logger=Mock(),
+            aws_ops=mock_aws_ops,
+            launch_template_manager=Mock(),
+        )
+        handler._validate_prerequisites = Mock()
+
+        request = SimpleNamespace(
+            request_id="req-ri",
+            requested_count=1,
+            metadata={},
+            error_details={},
+            provider_api="RunInstances",
+        )
+        template = Mock()
+        template.template_id = "tmpl-ri"
+
+        result = handler._acquire_hosts_internal(
+            cast(Request, request),
+            cast(AWSTemplate, template),
+        )
+
+        assert result["success"] is True
+        assert result["provider_data"]["requires_async_polling"] is False

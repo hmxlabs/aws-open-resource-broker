@@ -347,3 +347,39 @@ class TestReturnPartialDescribeGuard:
             provider_metadata={},
         )
         assert status == RequestStatus.IN_PROGRESS.value
+
+
+class TestReturnEmptyProviderMachinesPositiveEvidence:
+    """Regression tests: COMPLETED requires positive termination evidence.
+
+    provider_machines=[] alone is not sufficient — we must also have db_machines
+    to confirm we ever had instances to terminate.  An empty-both state means
+    the provider hasn't reported anything yet, not that termination completed.
+    """
+
+    def setup_method(self):
+        self.svc = _make_service()
+        self.req = _make_request("return", requested_count=2)
+
+    def test_empty_provider_and_empty_db_machines_is_in_progress(self):
+        """No DB records + no provider records → IN_PROGRESS, not COMPLETED."""
+        status, msg = self.svc.determine_status_from_machines(
+            db_machines=[],
+            provider_machines=[],
+            request=self.req,
+            provider_metadata={},
+        )
+        assert status == RequestStatus.IN_PROGRESS.value
+        assert status != RequestStatus.COMPLETED.value
+
+    def test_empty_provider_with_db_machines_is_completed(self):
+        """DB has records + provider reports none → genuinely terminated, COMPLETED."""
+        db_machines = [_make_machine(MachineStatus.RUNNING)]
+        status, msg = self.svc.determine_status_from_machines(
+            db_machines=db_machines,  # type: ignore[arg-type]
+            provider_machines=[],
+            request=self.req,
+            provider_metadata={},
+        )
+        assert status == RequestStatus.COMPLETED.value
+        assert "no longer visible" in (msg or "")

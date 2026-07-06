@@ -294,3 +294,32 @@ class TestASGHandlerNameTag:
             resource_id="asg-ctx",
             provider_api="ASG",
         )
+
+
+class TestASGAcquireAsyncPolling:
+    """ASG _acquire_hosts_internal must return requires_async_polling=True.
+
+    ASG create returns a group ID with 0 instances — instances launch
+    asynchronously.  The provisioning loop must keep polling until the provider
+    confirms InService instances before stamping the request Completed.
+    """
+
+    def test_acquire_returns_requires_async_polling_true(self):
+        """provider_data must carry requires_async_polling=True for ASG acquires."""
+        handler = _make_handler()
+        handler.config_port = MagicMock()
+        handler.config_port.get_resource_prefix.return_value = "orb-asg-"
+
+        request = _make_request(["asg-async-test"])
+        aws_template = MagicMock()
+        aws_template.instance_protection = False
+        aws_template.lifecycle_hooks = None
+
+        with patch.object(handler, "_create_asg_internal", return_value="orb-asg-req-001"):
+            with patch.object(handler, "aws_ops") as mock_ops:
+                mock_ops.execute_with_standard_error_handling.return_value = "orb-asg-req-001"
+                result = handler._acquire_hosts_internal(request, aws_template)
+
+        assert result["success"] is True
+        assert result["provider_data"]["requires_async_polling"] is True
+        assert result["provider_data"]["resource_type"] == "asg"
