@@ -341,7 +341,7 @@ async def test_release_hosts_deletes_named_pods() -> None:
     handler = _make_handler(core_v1)
     request = _make_request(requested_count=2)
 
-    await handler.release_hosts(["orb-aaa-0000", "orb-aaa-0001"], request)
+    await handler.release_hosts(["orb-aaa-0000", "orb-aaa-0001"], request.provider_data)
     assert core_v1.delete_namespaced_pod.call_count == 2
 
 
@@ -361,7 +361,7 @@ async def test_release_hosts_swallows_404() -> None:
     request = _make_request()
 
     # Must not raise — 404 is best-effort.
-    await handler.release_hosts(["orb-aaa-0000"], request)
+    await handler.release_hosts(["orb-aaa-0000"], request.provider_data)
     assert core_v1.delete_namespaced_pod.call_count == 1
 
 
@@ -378,7 +378,7 @@ async def test_release_hosts_propagates_non_404_errors() -> None:
     # Non-404 errors fall through to retry-with-backoff and surface as
     # MaxRetriesExceededError once the retry budget is exhausted.
     with pytest.raises((RuntimeError, MaxRetriesExceededError)):
-        await handler.release_hosts(["orb-aaa-0000"], request)
+        await handler.release_hosts(["orb-aaa-0000"], request.provider_data)
 
 
 @pytest.mark.asyncio
@@ -387,7 +387,7 @@ async def test_release_hosts_with_empty_list_is_noop() -> None:
     handler = _make_handler(core_v1)
     request = _make_request()
 
-    await handler.release_hosts([], request)
+    await handler.release_hosts([], request.provider_data)
     core_v1.delete_namespaced_pod.assert_not_called()
 
 

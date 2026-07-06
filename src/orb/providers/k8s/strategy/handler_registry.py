@@ -248,7 +248,9 @@ class K8sHandlerRegistry:
         try:
             provider_api = self.resolve_provider_api(request)
             handler = self.get_handler(provider_api)
-            release_result = await handler.release_hosts(list(machine_ids), request)
+            provider_data: dict[str, Any] = dict(getattr(request, "provider_data", None) or {})
+            provider_data.setdefault("request_id", str(request.request_id))
+            release_result = await handler.release_hosts(list(machine_ids), provider_data)
             # release_hosts returns a dict with ``deleted`` and
             # ``failed_deletes`` when partial failure occurred.  The caller
             # only needs the successfully deleted IDs as pending_resource_ids

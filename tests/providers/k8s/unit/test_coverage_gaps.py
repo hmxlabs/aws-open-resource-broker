@@ -522,7 +522,7 @@ async def test_job_release_logs_selective_release_not_supported() -> None:
     )
 
     # Selective release: caller only passes one of the three pods.
-    await handler.release_hosts(["orb-testreq1-pod0"], request)
+    await handler.release_hosts(["orb-testreq1-pod0"], request.provider_data)
 
     # The whole Job must have been deleted.
     batch_v1.delete_namespaced_job.assert_called_once()

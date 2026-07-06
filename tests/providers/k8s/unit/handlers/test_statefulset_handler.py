@@ -221,7 +221,7 @@ async def test_release_hosts_selective_highest_ordinal_no_warning() -> None:
     # current=5, victims=[orb-deadbeef-4, orb-deadbeef-3] => the
     # top-of-stack ordinals; the controller would have picked these
     # anyway.
-    await handler.release_hosts(["orb-deadbeef-4", "orb-deadbeef-3"], request)
+    await handler.release_hosts(["orb-deadbeef-4", "orb-deadbeef-3"], request.provider_data)
 
     # No WARNING logged (the requested victims are the top of stack).
     warning_calls = [
@@ -267,7 +267,7 @@ async def test_release_hosts_selective_non_highest_ordinal_warns_and_still_scale
 
     # current=5, victims=[ordinal-1, ordinal-2] — non-highest ordinals.
     # The controller will evict ordinals 3 and 4 instead.
-    await handler.release_hosts(["orb-deadbeef-1", "orb-deadbeef-2"], request)
+    await handler.release_hosts(["orb-deadbeef-1", "orb-deadbeef-2"], request.provider_data)
 
     # WARNING logged.
     warning_messages = [
@@ -311,7 +311,7 @@ async def test_release_hosts_selective_unparseable_victim_names_warns() -> None:
 
     # Victim name does not match the StatefulSet's name prefix — its
     # ordinal cannot be parsed.
-    await handler.release_hosts(["some-other-pod"], request)
+    await handler.release_hosts(["some-other-pod"], request.provider_data)
 
     warning_messages = [
         call.args[0]
@@ -347,7 +347,9 @@ async def test_release_hosts_full_release_scales_to_zero_then_deletes() -> None:
         namespace="orb-test",
     )
 
-    await handler.release_hosts(["orb-deadbeef-0", "orb-deadbeef-1", "orb-deadbeef-2"], request)
+    await handler.release_hosts(
+        ["orb-deadbeef-0", "orb-deadbeef-1", "orb-deadbeef-2"], request.provider_data
+    )
 
     # Full release path: no ordinal warning, just scale-to-zero +
     # delete.
@@ -368,7 +370,7 @@ async def test_release_hosts_empty_machine_ids_is_noop() -> None:
     handler = _make_handler(client=client)
 
     request = _make_request()
-    await handler.release_hosts([], request)
+    await handler.release_hosts([], request.provider_data)
 
     apps_v1.read_namespaced_stateful_set.assert_not_called()
     apps_v1.patch_namespaced_stateful_set_scale.assert_not_called()
@@ -389,7 +391,7 @@ async def test_release_hosts_statefulset_already_gone_is_best_effort() -> None:
 
     request = _make_request(statefulset_name="orb-deadbeef")
     # Must not raise — StatefulSet evaporated, treat as success.
-    await handler.release_hosts(["orb-deadbeef-0"], request)
+    await handler.release_hosts(["orb-deadbeef-0"], request.provider_data)
     apps_v1.patch_namespaced_stateful_set_scale.assert_not_called()
 
 

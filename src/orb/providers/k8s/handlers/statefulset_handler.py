@@ -188,6 +188,7 @@ class K8sStatefulSetHandler(K8sHandlerBase):
             "resource_ids": [statefulset_name],
             "machine_ids": [],
             "provider_data": {
+                "request_id": str(request.request_id),
                 "namespace": namespace,
                 "statefulset_name": statefulset_name,
                 "replicas": replicas,
@@ -209,7 +210,7 @@ class K8sStatefulSetHandler(K8sHandlerBase):
     async def release_hosts(
         self,
         machine_ids: list[str],
-        request: Request,
+        provider_data: dict[str, Any],
     ) -> None:
         """Selective or full release using ordinal-aware scale-down.
 
@@ -239,16 +240,24 @@ class K8sStatefulSetHandler(K8sHandlerBase):
         specific list.  This mirrors the StatefulSet controller's own
         scale-down semantics and is the only safe behaviour for a
         controller that owns stable pod identity.
+
+        Args:
+            machine_ids: Pod names the caller wants to release.
+            provider_data: The ``provider_data`` dict stamped onto the
+                Request aggregate at acquire time.  Carries ``namespace``
+                and ``statefulset_name`` (falls back to deterministic
+                defaults when absent).
         """
+        request_id = provider_data.get("request_id", "unknown")
         if not machine_ids:
             self._logger.debug(
                 "release_hosts called with no machine_ids for statefulset request %s — no-op",
-                request.request_id,
+                request_id,
             )
             return
 
-        namespace = self._resolve_request_namespace(request)
-        statefulset_name = self._resolve_statefulset_name(request)
+        namespace = self._resolve_namespace_from_provider_data(provider_data)
+        statefulset_name = self._resolve_statefulset_name_from_provider_data(provider_data)
 
         statefulset, current_replicas = await asyncio.to_thread(
             self._read_statefulset_spec_replicas, namespace, statefulset_name
@@ -265,7 +274,7 @@ class K8sStatefulSetHandler(K8sHandlerBase):
         self._logger.info(
             "Kubernetes statefulset release: request_id=%s namespace=%s statefulset=%s "
             "victims=%s current_replicas=%s full=%s",
-            request.request_id,
+            request_id,
             namespace,
             statefulset_name,
             machine_ids,
@@ -285,7 +294,7 @@ class K8sStatefulSetHandler(K8sHandlerBase):
             statefulset_name=statefulset_name,
             current_replicas=current_replicas,
             requested_victims=machine_ids,
-            request_id=str(request.request_id),
+            request_id=request_id,
         )
 
         new_replicas = max(current_replicas - len(machine_ids), 0)
@@ -443,20 +452,25 @@ class K8sStatefulSetHandler(K8sHandlerBase):
     # Helpers
     # ------------------------------------------------------------------
 
-    def _resolve_statefulset_name(self, request: Request) -> str:
-        """Recover the StatefulSet name created at acquire time.
+    def _resolve_statefulset_name_from_provider_data(self, provider_data: dict[str, Any]) -> str:
+        """Recover the StatefulSet name from a ``provider_data`` dict.
 
-        Persisted in ``request.provider_data["statefulset_name"]`` by
-        :meth:`acquire_hosts`; falls back to the deterministic
-        :func:`make_statefulset_name` when the field is missing so callers
-        that operate on a freshly-loaded Request still resolve a
-        sensible value.
+        Reads the ``statefulset_name`` key written by ``acquire_hosts``; falls
+        back to the deterministic :func:`make_statefulset_name` using the
+        ``request_id`` key when the field is missing.
         """
+        name = provider_data.get("statefulset_name")
+        if isinstance(name, str) and name:
+            return name
+        return make_statefulset_name(str(provider_data.get("request_id", "unknown")))
+
+    def _resolve_statefulset_name(self, request: "Request") -> str:
+        """Thin wrapper for status resolvers that hold the full Request aggregate."""
         provider_data = getattr(request, "provider_data", None) or {}
-        if isinstance(provider_data, dict):
-            name = provider_data.get("statefulset_name")
-            if isinstance(name, str) and name:
-                return name
+        pd = provider_data if isinstance(provider_data, dict) else {}
+        name = pd.get("statefulset_name")
+        if isinstance(name, str) and name:
+            return name
         return make_statefulset_name(str(request.request_id))
 
     # ------------------------------------------------------------------

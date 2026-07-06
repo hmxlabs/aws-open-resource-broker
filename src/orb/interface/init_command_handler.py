@@ -265,10 +265,10 @@ def _interactive_setup() -> Dict[str, Any]:
         console.info("  Discover infrastructure for template defaults?")
         console.info("  This will help create generic templates that work across provider setups.")
         console.info("")
-        discover_choice = input("  Discover infrastructure? (y/N): ").strip().lower()
+        discover_choice = input("  Discover infrastructure? (Y/n): ").strip().lower()
 
         infrastructure_defaults = {}
-        if discover_choice in ["y", "yes"]:
+        if discover_choice in ["", "y", "yes"]:
             registry = get_container().get(ProviderRegistryPort)
             infrastructure_defaults = _discover_infrastructure(
                 provider_type, provider_config, registry
@@ -413,10 +413,10 @@ def _configure_additional_provider() -> Optional[Dict[str, Any]]:
         console.info("")
         console.info("Infrastructure Discovery")
         console.separator(char="-", color="cyan")
-        discover_choice = input("  Discover infrastructure? (y/N): ").strip().lower()
+        discover_choice = input("  Discover infrastructure? (Y/n): ").strip().lower()
 
         infrastructure_defaults = {}
-        if discover_choice in ["y", "yes"]:
+        if discover_choice in ["", "y", "yes"]:
             registry = get_container().get(ProviderRegistryPort)
             infrastructure_defaults = _discover_infrastructure(
                 provider_type, provider_config, registry

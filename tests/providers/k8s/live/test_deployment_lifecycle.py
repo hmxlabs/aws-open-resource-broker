@@ -188,7 +188,7 @@ async def test_deployment_acquire_n_replicas(
         "deployment_name": deployment_name,
     }
     pod_names = [p.metadata.name for p in pods[:3]]
-    await handler.release_hosts(pod_names, request)
+    await handler.release_hosts(pod_names, request.provider_data)
     _wait_until_deployment_gone(
         __import__("kubernetes").client.AppsV1Api(), k8s_namespace, deployment_name
     )
@@ -225,7 +225,7 @@ async def test_deployment_selective_release_by_pod_deletion_cost(
 
     # Release 1 — pick the first pod.
     victim = pod_names[:1]
-    await handler.release_hosts(victim, request)
+    await handler.release_hosts(victim, request.provider_data)
 
     # Wait for the Deployment to scale down to 2.
     _wait_for_pod_count(k8s_core_v1, k8s_namespace, label_selector, expected_count=2)
@@ -245,7 +245,7 @@ async def test_deployment_selective_release_by_pod_deletion_cost(
 
     # Full cleanup
     remaining = list(active_names)
-    await handler.release_hosts(remaining, request)
+    await handler.release_hosts(remaining, request.provider_data)
     _wait_until_deployment_gone(
         __import__("kubernetes").client.AppsV1Api(), k8s_namespace, deployment_name
     )
@@ -286,7 +286,7 @@ async def test_deployment_full_release_deletes_deployment(
     )
 
     # Full release
-    await handler.release_hosts(pod_names, request)
+    await handler.release_hosts(pod_names, request.provider_data)
     _wait_until_deployment_gone(apps_v1, k8s_namespace, deployment_name, timeout=_SCALE_TIMEOUT)
 
     assert not _deployment_exists(apps_v1, k8s_namespace, deployment_name), (

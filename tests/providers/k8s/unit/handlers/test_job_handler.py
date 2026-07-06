@@ -226,7 +226,7 @@ async def test_release_hosts_deletes_whole_job_with_background_propagation() -> 
 
     # Even when called with a partial machine_ids list, the whole Job
     # is deleted — selective release is not supported for Jobs.
-    await handler.release_hosts(["orb-deadbeef-pod1"], request)
+    await handler.release_hosts(["orb-deadbeef-pod1"], request.provider_data)
 
     batch_v1.delete_namespaced_job.assert_called_once()
     kwargs = batch_v1.delete_namespaced_job.call_args.kwargs
@@ -248,7 +248,7 @@ async def test_release_hosts_full_release_lists_all_machine_ids() -> None:
         namespace="orb-test",
     )
 
-    await handler.release_hosts(["pod-a", "pod-b", "pod-c"], request)
+    await handler.release_hosts(["pod-a", "pod-b", "pod-c"], request.provider_data)
 
     # Whole-Job delete; the controller cascade-deletes the pods.
     batch_v1.delete_namespaced_job.assert_called_once()
@@ -261,7 +261,7 @@ async def test_release_hosts_empty_machine_ids_is_noop() -> None:
     handler = _make_handler(client=client)
 
     request = _make_request()
-    await handler.release_hosts([], request)
+    await handler.release_hosts([], request.provider_data)
 
     batch_v1.delete_namespaced_job.assert_not_called()
 
@@ -279,7 +279,7 @@ async def test_release_hosts_job_already_gone_is_best_effort() -> None:
 
     request = _make_request(job_name="orb-deadbeef")
     # Must not raise — Job evaporated, treat as success.
-    await handler.release_hosts(["pod-x"], request)
+    await handler.release_hosts(["pod-x"], request.provider_data)
 
 
 # ---------------------------------------------------------------------------

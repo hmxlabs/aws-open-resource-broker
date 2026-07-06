@@ -206,6 +206,7 @@ class K8sDeploymentHandler(K8sHandlerBase):
             "resource_ids": [deployment_name],
             "machine_ids": [],
             "provider_data": {
+                "request_id": str(request.request_id),
                 "namespace": namespace,
                 "deployment_name": deployment_name,
                 "replicas": replicas,
@@ -227,7 +228,7 @@ class K8sDeploymentHandler(K8sHandlerBase):
     async def release_hosts(
         self,
         machine_ids: list[str],
-        request: Request,
+        provider_data: dict[str, Any],
     ) -> None:
         """Selective or full release using pod-deletion-cost + replicas patch.
 
@@ -243,16 +244,24 @@ class K8sDeploymentHandler(K8sHandlerBase):
         We never delete pods directly — the controller picks the
         annotated pods via deletion-cost ordering.  This preserves any
         PodDisruptionBudgets the operator may have configured.
+
+        Args:
+            machine_ids: Pod names the caller wants to release.
+            provider_data: The ``provider_data`` dict stamped onto the
+                Request aggregate at acquire time.  Carries ``namespace``
+                and ``deployment_name`` (falls back to deterministic
+                defaults when absent).
         """
+        request_id = provider_data.get("request_id", "unknown")
         if not machine_ids:
             self._logger.debug(
                 "release_hosts called with no machine_ids for deployment request %s — no-op",
-                request.request_id,
+                request_id,
             )
             return
 
-        namespace = self._resolve_request_namespace(request)
-        deployment_name = self._resolve_deployment_name(request)
+        namespace = self._resolve_namespace_from_provider_data(provider_data)
+        deployment_name = self._resolve_deployment_name_from_provider_data(provider_data)
 
         deployment, current_replicas = await asyncio.to_thread(
             self._read_deployment_spec_replicas, namespace, deployment_name
@@ -269,7 +278,7 @@ class K8sDeploymentHandler(K8sHandlerBase):
         self._logger.info(
             "Kubernetes deployment release: request_id=%s namespace=%s deployment=%s "
             "victims=%s current_replicas=%s full=%s",
-            request.request_id,
+            request_id,
             namespace,
             deployment_name,
             machine_ids,
@@ -501,20 +510,26 @@ class K8sDeploymentHandler(K8sHandlerBase):
     # Helpers
     # ------------------------------------------------------------------
 
-    def _resolve_deployment_name(self, request: Request) -> str:
-        """Recover the deployment name created at acquire time.
+    def _resolve_deployment_name_from_provider_data(self, provider_data: dict[str, Any]) -> str:
+        """Recover the deployment name from a ``provider_data`` dict.
 
-        Persisted in ``request.provider_data["deployment_name"]`` by
-        :meth:`acquire_hosts`; falls back to the deterministic
-        :func:`make_deployment_name` when the field is missing so callers
-        that operate on a freshly-loaded Request still resolve a
-        sensible value.
+        Reads the ``deployment_name`` key written by ``acquire_hosts``; falls
+        back to the deterministic :func:`make_deployment_name` using the
+        ``request_id`` key when the field is missing.
         """
+        name = provider_data.get("deployment_name")
+        if isinstance(name, str) and name:
+            return name
+        return make_deployment_name(str(provider_data.get("request_id", "unknown")))
+
+    def _resolve_deployment_name(self, request: "Request") -> str:
+        """Thin wrapper for status resolvers that hold the full Request aggregate."""
         provider_data = getattr(request, "provider_data", None) or {}
-        if isinstance(provider_data, dict):
-            name = provider_data.get("deployment_name")
-            if isinstance(name, str) and name:
-                return name
+        pd = provider_data if isinstance(provider_data, dict) else {}
+        # Fallback uses request_id from the aggregate when not in provider_data.
+        name = pd.get("deployment_name")
+        if isinstance(name, str) and name:
+            return name
         return make_deployment_name(str(request.request_id))
 
     # ------------------------------------------------------------------

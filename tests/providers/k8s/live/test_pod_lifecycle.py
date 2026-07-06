@@ -185,7 +185,7 @@ async def test_pod_acquire_reaches_running_status(
     assert "running" in statuses, f"Expected at least one pod in 'running' status, got: {statuses}"
 
     # Cleanup
-    await handler.release_hosts(pod_names, request)
+    await handler.release_hosts(pod_names, request.provider_data)
 
 
 async def test_pod_release_removes_from_cluster(
@@ -208,7 +208,7 @@ async def test_pod_release_removes_from_cluster(
         f"Pod {pod_name} should exist immediately after acquire"
     )
 
-    await handler.release_hosts(pod_names, request)
+    await handler.release_hosts(pod_names, request.provider_data)
 
     _wait_until_pod_gone(k8s_core_v1, k8s_namespace, pod_name, timeout=_POD_DELETE_TIMEOUT)
     assert not _pod_exists(k8s_core_v1, k8s_namespace, pod_name), (
@@ -233,7 +233,7 @@ async def test_pod_status_after_release_is_terminated(
 
     pod_name = pod_names[0]
     # Release the pod.
-    await handler.release_hosts(pod_names, request)
+    await handler.release_hosts(pod_names, request.provider_data)
     _wait_until_pod_gone(k8s_core_v1, k8s_namespace, pod_name, timeout=_POD_DELETE_TIMEOUT)
 
     # Status query with on-demand list (no watcher) should return no running pods.
@@ -308,4 +308,4 @@ async def test_pod_acquire_bad_image_reaches_failed(
     )
 
     # Cleanup
-    await handler.release_hosts(pod_names, request)
+    await handler.release_hosts(pod_names, request.provider_data)

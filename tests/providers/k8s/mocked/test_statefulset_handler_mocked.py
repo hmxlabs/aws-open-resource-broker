@@ -217,7 +217,7 @@ async def test_statefulset_handler_scale_down_from_highest_ordinal(
     )
 
     # The two victims are the highest ordinals: <sts>-2 and <sts>-3.
-    await handler.release_hosts([f"{sts_name}-2", f"{sts_name}-3"], request)
+    await handler.release_hosts([f"{sts_name}-2", f"{sts_name}-3"], request.provider_data)
 
     # After the release the spec.replicas stored in kmock must be 2.
     stored = kmock_k8s.objects[sts_res, "orb-test", sts_name]

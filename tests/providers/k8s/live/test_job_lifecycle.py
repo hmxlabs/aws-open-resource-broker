@@ -170,7 +170,7 @@ async def test_job_acquire_creates_parallelism_completions(
 
     # Cleanup
     dummy_machine_ids = ["placeholder"]
-    await handler.release_hosts(dummy_machine_ids, request)
+    await handler.release_hosts(dummy_machine_ids, request.provider_data)
     _wait_until_job_gone(k8s_batch_v1, k8s_namespace, job_name)
 
 
@@ -203,7 +203,7 @@ async def test_job_completion_status_is_completed(
     log.info("Job %s/%s completed successfully", k8s_namespace, job_name)
 
     # Cleanup
-    await handler.release_hosts(["placeholder"], request)
+    await handler.release_hosts(["placeholder"], request.provider_data)
     _wait_until_job_gone(k8s_batch_v1, k8s_namespace, job_name)
 
 
@@ -231,7 +231,7 @@ async def test_job_release_deletes_job_and_pods(
     )
 
     # Release the whole Job.
-    await handler.release_hosts(["placeholder"], request)
+    await handler.release_hosts(["placeholder"], request.provider_data)
 
     # The Job itself should disappear.
     _wait_until_job_gone(k8s_batch_v1, k8s_namespace, job_name, timeout=_DELETE_TIMEOUT)

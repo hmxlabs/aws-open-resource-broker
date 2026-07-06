@@ -292,7 +292,7 @@ async def test_pod_handler_release_calls_delete_namespaced_pod(
     request = _make_request(requested_count=1, request_id=request_id)
     handler._max_retries = 1
 
-    await handler.release_hosts([pod_name], request)
+    await handler.release_hosts([pod_name], request.provider_data)
 
     # The object must now be marked deleted in the emulator.
     obj = kmock_k8s.objects[pod_res, "orb-test", pod_name]
@@ -316,5 +316,5 @@ async def test_pod_handler_release_tolerates_404(
 
     # The pod "ghost-pod" does not exist in kmock.  The DELETE call returns
     # a 404 status which the handler should tolerate without raising.
-    await handler.release_hosts(["ghost-pod"], request)
+    await handler.release_hosts(["ghost-pod"], request.provider_data)
     # Reaching here without an exception is the assertion.

@@ -269,7 +269,7 @@ async def test_deployment_handler_selective_release_annotates_and_patches_replic
         namespace="orb-test",
     )
 
-    await handler.release_hosts(["pod-v1", "pod-v2"], request)
+    await handler.release_hosts(["pod-v1", "pod-v2"], request.provider_data)
 
     # Both victim pods must have been patched with the deletion-cost annotation.
     for victim in ("pod-v1", "pod-v2"):

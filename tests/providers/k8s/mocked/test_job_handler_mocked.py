@@ -192,7 +192,7 @@ async def test_job_handler_release_deletes_job(
     handler._max_retries = 1
 
     request = _make_request(requested_count=2, job_name=job_name)
-    await handler.release_hosts([job_name], request)
+    await handler.release_hosts([job_name], request.provider_data)
 
     stored = kmock_k8s.objects[job_res, "orb-test", job_name]
     assert stored.deleted
@@ -217,4 +217,4 @@ async def test_job_handler_release_tolerates_already_deleted_job(
 
     request = _make_request(requested_count=1, job_name="ghost-job")
     # Should not raise — best-effort 404 tolerance.
-    await handler.release_hosts(["ghost-job"], request)
+    await handler.release_hosts(["ghost-job"], request.provider_data)

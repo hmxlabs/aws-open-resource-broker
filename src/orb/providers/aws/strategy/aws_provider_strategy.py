@@ -742,6 +742,30 @@ class AWSProviderStrategy(ProviderStrategy):
         return "us-east-1"
 
     @classmethod
+    def get_operational_param_choices(cls, param: str) -> list[tuple[str, str]]:
+        """Return picker choices for an operational parameter, if any.
+
+        The generic ``orb init`` operational-params prompt consults this hook
+        to render a numbered picker for a parameter.  When the returned list
+        is empty the prompt falls back to free-text input.
+        """
+        if param == "region":
+            return cls.get_available_regions()
+        return []
+
+    @classmethod
+    def get_operational_param_default(cls, param: str) -> str:
+        """Return the default value for an operational parameter.
+
+        Consulted by the ``orb init`` operational-params prompt to pre-select
+        a picker entry (or pre-fill a free-text field) when the operator does
+        not choose explicitly.
+        """
+        if param == "region":
+            return cls.get_default_region()
+        return ""
+
+    @classmethod
     def get_cli_extra_config_keys(cls) -> set[str]:
         """Return AWS keys that belong in provider config, not template_defaults."""
         return {"fleet_role"}

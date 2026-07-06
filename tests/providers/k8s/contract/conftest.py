@@ -142,19 +142,19 @@ def _build_pod_handler(core_v1: Any, config: K8sProviderConfig, logger: Any) -> 
 #
 # The base contract tests call acquire_hosts / release_hosts synchronously
 # with the signature (request, template) / (machine_ids,) respectively.
-# K8s handlers are async coroutines and release_hosts additionally requires
-# a Request argument for namespace resolution.  This adapter shims both gaps.
+# K8s handlers are async coroutines.  This adapter shims both gaps.
 # ---------------------------------------------------------------------------
 
 
 class _K8sProviderAdapter:
     """Sync adapter over an async K8sPodHandler for use by the contract base classes.
 
-    acquire_hosts — runs the async coroutine via asyncio.run.
-    release_hosts — delegates to the async coroutine using the last
-                    acquire's request for namespace context; falls back to a
-                    stub request when called cold (e.g. the idempotent-release
-                    contract test).
+    acquire_hosts — runs the async coroutine via asyncio.run; captures the
+                    provider_data returned so release_hosts can resolve
+                    namespace without holding a full Request aggregate.
+    release_hosts — delegates to the async coroutine using the captured
+                    provider_data; falls back to a stub dict when called
+                    cold (e.g. the idempotent-release contract test).
     get_provider_info — satisfies the monitoring contract.
     check_hosts_status — delegates synchronously (the pod handler's
                          check_hosts_status is itself synchronous).
@@ -162,15 +162,22 @@ class _K8sProviderAdapter:
 
     def __init__(self, handler: K8sPodHandler) -> None:
         self._handler = handler
-        self._last_request: Any = None
+        self._last_provider_data: dict[str, Any] = {}
 
     def acquire_hosts(self, request: Any, template: Any) -> dict:
-        self._last_request = request
-        return asyncio.run(self._handler.acquire_hosts(request, template))
+        result = asyncio.run(self._handler.acquire_hosts(request, template))
+        # Capture the provider_data stamped at acquire time so release_hosts
+        # can resolve namespace and workload names without the Request aggregate.
+        pd = result.get("provider_data") if isinstance(result, dict) else None
+        self._last_provider_data = dict(pd) if isinstance(pd, dict) else {}
+        self._last_provider_data.setdefault(
+            "request_id", str(getattr(request, "request_id", "unknown"))
+        )
+        return result
 
     def release_hosts(self, machine_ids: list) -> None:
-        req = self._last_request or _make_request()
-        asyncio.run(self._handler.release_hosts(machine_ids, req))
+        provider_data = self._last_provider_data or {"namespace": "orb-contract"}
+        asyncio.run(self._handler.release_hosts(machine_ids, provider_data))
 
     def check_hosts_status(self, request: Any) -> CheckHostsStatusResult:
         return self._handler.check_hosts_status(request)

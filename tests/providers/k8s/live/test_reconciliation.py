@@ -311,6 +311,6 @@ async def test_timeout_gc_deletes_pending_pod_past_threshold(
 
     # Cleanup any survivors.
     try:
-        await handler.release_hosts(pod_names, request_obj)
+        await handler.release_hosts(pod_names, request_obj.provider_data)
     except Exception:
         pass

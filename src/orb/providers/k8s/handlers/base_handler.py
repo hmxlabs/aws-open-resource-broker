@@ -602,22 +602,31 @@ class K8sHandlerBase(ABC):
             "metadata": {},
         }
 
-    def _resolve_request_namespace(self, request: Request) -> str:
-        """Resolve a request's namespace using saved provider_data when present.
+    def _resolve_namespace_from_provider_data(self, provider_data: dict[str, Any]) -> str:
+        """Resolve a namespace from a ``provider_data`` dict.
 
-        Falls back to the provider's default namespace when the request
-        was not stamped with one — this keeps callers that operate on a
-        freshly-loaded Request working without re-querying.
+        Reads the ``namespace`` key written by ``acquire_hosts``; falls back
+        to the provider's default namespace when the key is absent or empty.
+        The ``_resolve_namespace`` model_validator on :class:`K8sProviderConfig`
+        guarantees the default is always a non-empty string.
         """
-        provider_data = getattr(request, "provider_data", None) or {}
-        if isinstance(provider_data, dict):
-            ns = provider_data.get("namespace")
-            if isinstance(ns, str) and ns:
-                return ns
-        # _resolve_namespace model_validator guarantees this is always a str.
+        ns = provider_data.get("namespace")
+        if isinstance(ns, str) and ns:
+            return ns
         namespace = self._config.namespace
         assert namespace is not None, "namespace must be resolved by model_validator"
         return namespace
+
+    def _resolve_request_namespace(self, request: Request) -> str:
+        """Resolve a request's namespace using saved provider_data when present.
+
+        Thin wrapper over :meth:`_resolve_namespace_from_provider_data` for
+        callers (status resolvers) that still hold the full Request aggregate.
+        """
+        provider_data = getattr(request, "provider_data", None) or {}
+        return self._resolve_namespace_from_provider_data(
+            provider_data if isinstance(provider_data, dict) else {}
+        )
 
     def _read_from_cache(self, request: Request) -> Optional[CheckHostsStatusResult]:
         """Cache-first read path.
@@ -698,9 +707,17 @@ class K8sHandlerBase(ABC):
     async def release_hosts(
         self,
         machine_ids: list[str],
-        request: Request,
+        provider_data: dict[str, Any],
     ) -> None:
-        """Delete the pods/workloads identified by ``machine_ids``."""
+        """Delete the pods/workloads identified by ``machine_ids``.
+
+        ``provider_data`` is the dict stored on the Request aggregate at
+        acquire time.  It carries ``namespace`` (and for controller-based
+        handlers ``deployment_name`` / ``job_name`` / ``statefulset_name``)
+        so the handler can resolve context without needing the full Request
+        aggregate.  The dict is the same object that was stamped under
+        ``Request.provider_data`` by ``acquire_hosts``.
+        """
 
     @classmethod
     @abstractmethod

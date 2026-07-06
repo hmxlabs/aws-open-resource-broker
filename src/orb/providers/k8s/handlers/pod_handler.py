@@ -184,6 +184,7 @@ class K8sPodHandler(K8sHandlerBase):
             "resource_ids": created,
             "machine_ids": created,
             "provider_data": {
+                "request_id": str(request.request_id),
                 "namespace": namespace,
                 "pod_names": created,
                 "failed_pod_names": [name for name, _ in failures],
@@ -255,7 +256,7 @@ class K8sPodHandler(K8sHandlerBase):
     async def release_hosts(
         self,
         machine_ids: list[str],
-        request: Request,
+        provider_data: dict[str, Any],
     ) -> dict[str, Any]:
         """Delete the named pods concurrently; 404s are best-effort.
 
@@ -273,21 +274,23 @@ class K8sPodHandler(K8sHandlerBase):
         Args:
             machine_ids: Pod names to delete.  For the Pod handler the
                 machine_id IS the pod name (1 ORB unit = 1 pod).
-            request: Request providing namespace context via
-                ``provider_data["namespace"]`` (falls back to the
-                provider default).
+            provider_data: The ``provider_data`` dict stamped onto the
+                Request aggregate at acquire time.  Carries
+                ``namespace`` (falls back to the provider default when
+                absent).
         """
+        request_id = provider_data.get("request_id", "unknown")
         if not machine_ids:
             self._logger.debug(
                 "release_hosts called with no machine_ids for request %s — no-op",
-                request.request_id,
+                request_id,
             )
             return {"deleted": [], "failed_deletes": []}
 
-        namespace = self._resolve_request_namespace(request)
+        namespace = self._resolve_namespace_from_provider_data(provider_data)
         self._logger.info(
             "Kubernetes pod release: request_id=%s namespace=%s pods=%s",
-            request.request_id,
+            request_id,
             namespace,
             machine_ids,
         )
@@ -309,7 +312,7 @@ class K8sPodHandler(K8sHandlerBase):
                 failed_deletes.append((pod_name, reason))
                 self._logger.warning(
                     "Pod delete failed: request_id=%s pod=%s reason=%s",
-                    request.request_id,
+                    request_id,
                     pod_name,
                     reason,
                 )
@@ -319,9 +322,7 @@ class K8sPodHandler(K8sHandlerBase):
         if failed_deletes and not deleted:
             # All deletes failed — raise so the caller can surface the error.
             first_error = failed_deletes[0][1]
-            raise RuntimeError(
-                f"All pod deletes failed for request {request.request_id}: {first_error}"
-            )
+            raise RuntimeError(f"All pod deletes failed for request {request_id}: {first_error}")
 
         return {"deleted": deleted, "failed_deletes": failed_deletes}
 

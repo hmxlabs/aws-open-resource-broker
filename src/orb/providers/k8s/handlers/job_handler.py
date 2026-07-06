@@ -170,6 +170,7 @@ class K8sJobHandler(K8sHandlerBase):
             "resource_ids": [job_name],
             "machine_ids": [],
             "provider_data": {
+                "request_id": str(request.request_id),
                 "namespace": namespace,
                 "job_name": job_name,
                 "parallelism": parallelism,
@@ -191,7 +192,7 @@ class K8sJobHandler(K8sHandlerBase):
     async def release_hosts(
         self,
         machine_ids: list[str],
-        request: Request,
+        provider_data: dict[str, Any],
     ) -> None:
         """Delete the whole Job (cascade-deletes pods).
 
@@ -208,23 +209,26 @@ class K8sJobHandler(K8sHandlerBase):
         Args:
             machine_ids: Pod names the caller wanted to release.  Logged
                 at info level for audit; not used for selective release.
-            request: Request providing namespace + job-name context via
-                ``provider_data`` (falls back to deterministic defaults).
+            provider_data: The ``provider_data`` dict stamped onto the
+                Request aggregate at acquire time.  Carries ``namespace``
+                and ``job_name`` (falls back to deterministic defaults
+                when absent).
         """
+        request_id = provider_data.get("request_id", "unknown")
         if not machine_ids:
             self._logger.debug(
                 "release_hosts called with no machine_ids for job request %s — no-op",
-                request.request_id,
+                request_id,
             )
             return
 
-        namespace = self._resolve_request_namespace(request)
-        job_name = self._resolve_job_name(request)
+        namespace = self._resolve_namespace_from_provider_data(provider_data)
+        job_name = self._resolve_job_name_from_provider_data(provider_data)
 
         self._logger.info(
             "Kubernetes job release: request_id=%s namespace=%s job=%s "
             "requested_machine_ids=%s (deleting whole Job — selective release not supported)",
-            request.request_id,
+            request_id,
             namespace,
             job_name,
             machine_ids,
@@ -286,20 +290,25 @@ class K8sJobHandler(K8sHandlerBase):
     # Helpers
     # ------------------------------------------------------------------
 
-    def _resolve_job_name(self, request: Request) -> str:
-        """Recover the Job name created at acquire time.
+    def _resolve_job_name_from_provider_data(self, provider_data: dict[str, Any]) -> str:
+        """Recover the Job name from a ``provider_data`` dict.
 
-        Persisted in ``request.provider_data["job_name"]`` by
-        :meth:`acquire_hosts`; falls back to the deterministic
-        :func:`make_job_name` when the field is missing so callers that
-        operate on a freshly-loaded Request still resolve a sensible
-        value.
+        Reads the ``job_name`` key written by ``acquire_hosts``; falls back
+        to the deterministic :func:`make_job_name` using the ``request_id``
+        key when the field is missing.
         """
+        name = provider_data.get("job_name")
+        if isinstance(name, str) and name:
+            return name
+        return make_job_name(str(provider_data.get("request_id", "unknown")))
+
+    def _resolve_job_name(self, request: "Request") -> str:
+        """Thin wrapper for status resolvers that hold the full Request aggregate."""
         provider_data = getattr(request, "provider_data", None) or {}
-        if isinstance(provider_data, dict):
-            name = provider_data.get("job_name")
-            if isinstance(name, str) and name:
-                return name
+        pd = provider_data if isinstance(provider_data, dict) else {}
+        name = pd.get("job_name")
+        if isinstance(name, str) and name:
+            return name
         return make_job_name(str(request.request_id))
 
     # ------------------------------------------------------------------

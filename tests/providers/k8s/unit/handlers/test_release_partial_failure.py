@@ -68,7 +68,9 @@ async def test_release_hosts_partial_failure_deletes_survivors() -> None:
     handler = _make_handler(core_v1)
     request = _make_request()
 
-    result = await handler.release_hosts(["orb-ok-0000", "orb-fail-0001", "orb-ok-0002"], request)
+    result = await handler.release_hosts(
+        ["orb-ok-0000", "orb-fail-0001", "orb-ok-0002"], request.provider_data
+    )
 
     assert sorted(result["deleted"]) == ["orb-ok-0000", "orb-ok-0002"]
     assert len(result["failed_deletes"]) == 1
@@ -94,7 +96,7 @@ async def test_release_hosts_partial_failure_logs_each_failure_at_warning() -> N
 
     # Two pods both fail — both should be logged at WARNING.
     with pytest.raises(RuntimeError, match="All pod deletes failed"):
-        await handler.release_hosts(["orb-a-0000", "orb-b-0001"], request)
+        await handler.release_hosts(["orb-a-0000", "orb-b-0001"], request.provider_data)
 
     warning_calls = [str(c) for c in logger.warning.call_args_list]
     # Each warning must mention the pod names (request_id is an opaque object in warnings).
@@ -111,7 +113,7 @@ async def test_release_hosts_all_failures_raises() -> None:
     request = _make_request()
 
     with pytest.raises(RuntimeError, match="All pod deletes failed"):
-        await handler.release_hosts(["orb-a-0000", "orb-b-0001"], request)
+        await handler.release_hosts(["orb-a-0000", "orb-b-0001"], request.provider_data)
 
 
 @pytest.mark.asyncio
@@ -127,7 +129,7 @@ async def test_release_hosts_single_failure_does_not_raise() -> None:
     handler = _make_handler(core_v1)
     request = _make_request()
 
-    result = await handler.release_hosts(["orb-good-0000", "orb-bad-0001"], request)
+    result = await handler.release_hosts(["orb-good-0000", "orb-bad-0001"], request.provider_data)
     assert result["deleted"] == ["orb-good-0000"]
     assert result["failed_deletes"][0][0] == "orb-bad-0001"
 
@@ -138,6 +140,6 @@ async def test_release_hosts_empty_list_returns_empty_dicts() -> None:
     handler = _make_handler(core_v1)
     request = _make_request()
 
-    result = await handler.release_hosts([], request)
+    result = await handler.release_hosts([], request.provider_data)
     assert result == {"deleted": [], "failed_deletes": []}
     core_v1.delete_namespaced_pod.assert_not_called()

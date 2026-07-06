@@ -195,7 +195,7 @@ async def test_statefulset_acquire_creates_ordinals(
     )
 
     # Full cleanup
-    await handler.release_hosts(pod_names, request)
+    await handler.release_hosts(pod_names, request.provider_data)
     _wait_until_statefulset_gone(apps_v1, k8s_namespace, sts_name)
 
 
@@ -230,7 +230,7 @@ async def test_statefulset_release_terminates_highest_ordinal_first(
     # the highest-ordinal pod (``<sts_name>-2``) regardless of what we pass.
     # We pass the lowest-ordinal pod to exercise the non-highest-ordinal warning.
     lowest_pod = f"{sts_name}-0"
-    await handler.release_hosts([lowest_pod], request)
+    await handler.release_hosts([lowest_pod], request.provider_data)
 
     remaining = _wait_for_active_pod_count(
         k8s_core_v1, k8s_namespace, label_selector, expected_count=2
@@ -248,7 +248,7 @@ async def test_statefulset_release_terminates_highest_ordinal_first(
     )
 
     # Full cleanup
-    await handler.release_hosts(list(remaining_names), request)
+    await handler.release_hosts(list(remaining_names), request.provider_data)
     _wait_until_statefulset_gone(apps_v1, k8s_namespace, sts_name)
 
 
@@ -289,7 +289,7 @@ async def test_statefulset_release_of_non_highest_falls_back(
 
     # Request to release ordinal -1 specifically (a non-highest victim).
     middle_pod = f"{sts_name}-1"
-    await handler.release_hosts([middle_pod], request)
+    await handler.release_hosts([middle_pod], request.provider_data)
 
     remaining = _wait_for_active_pod_count(
         k8s_core_v1, k8s_namespace, label_selector, expected_count=2
@@ -304,5 +304,5 @@ async def test_statefulset_release_of_non_highest_falls_back(
     )
 
     # Full cleanup
-    await handler.release_hosts(list(remaining_names), request)
+    await handler.release_hosts(list(remaining_names), request.provider_data)
     _wait_until_statefulset_gone(apps_v1, k8s_namespace, sts_name)

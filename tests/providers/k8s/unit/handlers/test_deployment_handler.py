@@ -214,7 +214,7 @@ async def test_release_hosts_selective_annotates_victims_and_patches_replicas() 
         namespace="orb-test",
     )
 
-    await handler.release_hosts(["pod-m2", "pod-m4"], request)
+    await handler.release_hosts(["pod-m2", "pod-m4"], request.provider_data)
 
     # Step 1: both victim pods received the annotation with cost ``-9999``.
     assert core_v1.patch_namespaced_pod.call_count == 2
@@ -269,7 +269,7 @@ async def test_release_hosts_selective_404_on_victim_is_best_effort() -> None:
     # 404 on the annotation patch must not raise — selective release
     # is best-effort on the per-pod patch step.  The replicas patch
     # still proceeds (current=2, victims=1 => new=1).
-    await handler.release_hosts(["pod-x"], request)
+    await handler.release_hosts(["pod-x"], request.provider_data)
     apps_v1.patch_namespaced_deployment_scale.assert_called_once()
     assert (
         apps_v1.patch_namespaced_deployment_scale.call_args.kwargs["body"]["spec"]["replicas"] == 1
@@ -308,7 +308,7 @@ async def test_release_hosts_partial_annotation_failure_minority_proceeds() -> N
 
     # 1 out of 3 victims fails annotation — below the 50% threshold, so
     # the release must continue and patch spec.replicas from 4 to 1.
-    await handler.release_hosts(["pod-a", "pod-b", "pod-x"], request)
+    await handler.release_hosts(["pod-a", "pod-b", "pod-x"], request.provider_data)
     apps_v1.patch_namespaced_deployment_scale.assert_called_once()
     assert (
         apps_v1.patch_namespaced_deployment_scale.call_args.kwargs["body"]["spec"]["replicas"] == 1
@@ -347,7 +347,7 @@ async def test_release_hosts_partial_annotation_failure_majority_aborts() -> Non
     # 2 out of 3 victims fail annotation — above the 50% threshold, so
     # the release must raise and the replicas patch must NOT be applied.
     with pytest.raises(RuntimeError, match="Aborted selective release"):
-        await handler.release_hosts(["pod-a", "pod-b", "pod-c"], request)
+        await handler.release_hosts(["pod-a", "pod-b", "pod-c"], request.provider_data)
     apps_v1.patch_namespaced_deployment_scale.assert_not_called()
 
 
@@ -373,7 +373,7 @@ async def test_release_hosts_full_release_scales_to_zero_then_deletes() -> None:
         namespace="orb-test",
     )
 
-    await handler.release_hosts(["pod-a", "pod-b", "pod-c"], request)
+    await handler.release_hosts(["pod-a", "pod-b", "pod-c"], request.provider_data)
 
     # Full release path: no annotation step, just scale-to-zero + delete.
     core_v1.patch_namespaced_pod.assert_not_called()
@@ -392,7 +392,7 @@ async def test_release_hosts_empty_machine_ids_is_noop() -> None:
     handler = _make_handler(client=client)
 
     request = _make_request()
-    await handler.release_hosts([], request)
+    await handler.release_hosts([], request.provider_data)
 
     apps_v1.read_namespaced_deployment.assert_not_called()
     core_v1.patch_namespaced_pod.assert_not_called()
@@ -413,7 +413,7 @@ async def test_release_hosts_deployment_already_gone_is_best_effort() -> None:
 
     request = _make_request(deployment_name="orb-deadbeef")
     # Must not raise — deployment evaporated, treat as success.
-    await handler.release_hosts(["pod-x"], request)
+    await handler.release_hosts(["pod-x"], request.provider_data)
     core_v1.patch_namespaced_pod.assert_not_called()
     apps_v1.patch_namespaced_deployment_scale.assert_not_called()
 
