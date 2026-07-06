@@ -626,7 +626,10 @@ class ProviderRegistry(BaseRegistry, ProviderRegistryPort):
                 name_override = config_port.get_active_provider_name_override()
                 type_override = config_port.get_active_provider_type_override()
             except Exception:
-                pass
+                # Override lookup is best-effort; a stale or dead config port must
+                # not block selection. Fall through with both overrides unset.
+                name_override = None
+                type_override = None
 
         if name_override:
             provider_instance = self._get_provider_instance_config(name_override)
@@ -657,12 +660,15 @@ class ProviderRegistry(BaseRegistry, ProviderRegistryPort):
                 raise ValueError(f"No active providers of type '{type_override}'")
             if len(filtered) == 1:
                 selected = filtered[0]
-                reason = f"type_override_{type_override}_single"
+                reason = f"CLI type override (--provider-type {type_override}) single_active_match"
             else:
                 selected = self._apply_load_balancing_strategy(
                     filtered, provider_config.selection_policy
                 )
-                reason = f"type_override_{type_override}_load_balanced"
+                reason = (
+                    f"CLI type override (--provider-type {type_override}) "
+                    f"load_balanced_{provider_config.selection_policy.lower()}"
+                )
             if logger:
                 logger.info(
                     "Selected provider by type override '%s': %s", type_override, selected.name
@@ -670,7 +676,7 @@ class ProviderRegistry(BaseRegistry, ProviderRegistryPort):
             return ProviderSelectionResult(
                 provider_type=selected.type,
                 provider_name=selected.name,
-                selection_reason=f"CLI type override (--provider-type {type_override})",
+                selection_reason=reason,
                 confidence=1.0,
                 alternatives=[p.name for p in filtered if p.name != selected.name],
             )
