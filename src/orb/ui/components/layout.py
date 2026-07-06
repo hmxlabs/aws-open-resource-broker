@@ -109,7 +109,16 @@ def _orb_logo() -> rx.Component:
     weight (rx.heading size=6 ≈ 28px) so the sidebar header row and the
     content-area header row line up.  Expanded mode uses the full 3rem
     icon + tri-line wordmark, which matches the expanded topbar height.
+
+    The whole row is wrapped in a link to ``/`` so clicking the logo
+    navigates back to the dashboard — matches the convention on every
+    other product UI and gives keyboard users a Home affordance next to
+    the primary nav.
     """
+    return rx.link(_orb_logo_body(), href="/", underline="none", width="100%")
+
+
+def _orb_logo_body() -> rx.Component:
     return rx.cond(
         AppState.is_collapsed,
         # Collapsed: fixed header row (HEADER_HEIGHT) matches the topbar
