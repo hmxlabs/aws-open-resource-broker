@@ -88,6 +88,19 @@ def _register_template_services(container: DIContainer):
 
         factory = TemplateFactory(logger=c.get(LoggingPort))
         logger_port = c.get(LoggingPort)
+
+        # Register Kubernetes template extensions so K8sTemplateDTOConfig is
+        # available for round-trip serialisation before per-provider template
+        # classes are registered below.  Guarded by ImportError so the factory
+        # builds cleanly when the k8s extra is not installed.
+        try:
+            from orb.providers.k8s import register_k8s_extensions, register_k8s_template_factory
+
+            register_k8s_extensions(logger_port)
+            register_k8s_template_factory(factory, logger_port)
+        except ImportError:
+            pass
+
         for _name in _REGISTERED_PROVIDERS:
             _mod_path = f"orb.providers.{_name}.registration"
             if importlib.util.find_spec(_mod_path) is None:
