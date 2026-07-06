@@ -73,8 +73,6 @@ class ConfigurationManager:
 
         # Scheduler override support
         self._scheduler_override: Optional[str] = None
-        self._provider_name_override: Optional[str] = None
-        self._provider_type_override: Optional[str] = None
 
     @property
     def loader(self) -> ConfigurationLoader:
@@ -282,22 +280,6 @@ class ConfigurationManager:
     def restore_scheduler_strategy(self) -> None:
         """Restore original scheduler strategy."""
         self._scheduler_override = None
-
-    def override_provider_name(self, provider_name: str) -> None:
-        """Temporarily override provider instance by exact name."""
-        self._provider_name_override = provider_name
-
-    def override_provider_type(self, provider_type: str) -> None:
-        """Temporarily restrict selection to a provider type."""
-        self._provider_type_override = provider_type
-
-    def get_active_provider_name_override(self) -> Optional[str]:
-        """Get current provider name override."""
-        return self._provider_name_override
-
-    def get_active_provider_type_override(self) -> Optional[str]:
-        """Get current provider type override."""
-        return self._provider_type_override
 
     def get_loaded_config_file(self) -> str | None:
         """Get the actual config file that was loaded."""

@@ -229,12 +229,10 @@ def _get_active_providers() -> List[Dict[str, Any]]:
 def _get_active_providers_with_overrides() -> List[Dict[str, Any]]:
     """Get active providers with provider-name and provider-type overrides applied.
 
-    The provider-name and provider-type overrides are already handled by the
-    caller via ``ConfigurationPort.get_active_provider_name_override()`` and
-    ``get_active_provider_type_override()``.  Provider-specific config key
-    overrides (e.g. AWS region, AWS profile) are not applied here because
-    they are provider-scoped and do not belong in the provider-agnostic
-    interface layer.
+    Provider-name and provider-type filtering is a per-operation concern handled
+    by each orchestrator's Input DTO.  Provider-specific config key overrides
+    (e.g. AWS region, AWS profile) are not applied here because they are
+    provider-scoped and do not belong in the provider-agnostic interface layer.
     """
     return _get_active_providers()
 

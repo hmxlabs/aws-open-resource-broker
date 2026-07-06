@@ -399,9 +399,7 @@ class TestSelectActiveProviderOverrides:
         aws2 = self._make_provider("aws-eu-west-1", "aws")
         registry = _make_registry_multi([aws1, aws2])
 
-        result = registry.select_active_provider(
-            provider_name="aws-eu-west-1", provider_type="aws"
-        )
+        result = registry.select_active_provider(provider_name="aws-eu-west-1", provider_type="aws")
 
         assert result.provider_name == "aws-eu-west-1"
         assert "name override" in result.selection_reason

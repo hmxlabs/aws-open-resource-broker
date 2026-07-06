@@ -12,7 +12,6 @@ from typing import Any, Callable, Dict, Optional
 
 from orb.bootstrap import Application
 from orb.config.managers.configuration_manager import ConfigurationManager
-from orb.domain.base.ports.configuration_port import ConfigurationPort
 from orb.infrastructure.di.container import create_container
 
 from .config import SDKConfig
@@ -73,11 +72,12 @@ class ORBClient:
             app_config: Application config dict — replaces config.json on disk.
                         Pass the same structure as config.json to run without filesystem.
             scheduler: Scheduler strategy override (e.g. ``"default"`` or ``"hostfactory"``).
-            provider_type: Provider type filter applied via ConfigurationPort on initialise.
-                           Narrows which provider is selected when multiple providers are
-                           registered (e.g. ``"k8s"``).
-            provider_name: Provider instance name applied via ConfigurationPort on initialise.
-                           Selects a specific named provider instance (e.g. ``"my-k8s-cluster"``).
+            provider_type: Provider type filter. Narrows which provider is selected when
+                           multiple providers are registered (e.g. ``"k8s"``). Passed
+                           through to Input DTOs on each operation.
+            provider_name: Provider instance name. Selects a specific named provider
+                           instance (e.g. ``"my-k8s-cluster"``). Passed through to
+                           Input DTOs on each operation.
             provider_config: Provider-specific key/value pairs (e.g. ``{"region": "us-east-1"}``).
             region: **Deprecated.** Use ``provider_config={"region": ...}`` instead.
             profile: **Deprecated.** Use ``provider_config={"profile": ...}`` instead.
@@ -200,19 +200,6 @@ class ORBClient:
                     f"Failed to initialize {self._config.provider} provider",
                     provider=self._config.provider,
                 )
-
-            # Apply provider-name and provider-type overrides from SDK config.
-            # Use self._container (the per-client isolated container), not the
-            # module-level singleton returned by get_container(), so that overrides
-            # from one ORBClient instance never bleed into another.
-            # provider_config is stored for future use; pushing arbitrary provider
-            # key/value pairs through a provider-agnostic port is a follow-up task.
-            if self._config.provider_type or self._config.provider_name:
-                config_port = self._container.get(ConfigurationPort)
-                if self._config.provider_type:
-                    config_port.override_provider_type(self._config.provider_type)
-                if self._config.provider_name:
-                    config_port.override_provider_name(self._config.provider_name)
 
             # Get CQRS buses directly from the initialized application
             self._query_bus = self._app.get_query_bus()

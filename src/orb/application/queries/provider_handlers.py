@@ -57,19 +57,10 @@ class GetProviderHealthHandler(BaseQueryHandler[GetProviderHealthQuery, dict[str
             provider_name = query.provider_name
             if not provider_name:
                 try:
-                    selection_result = self._provider_registry_service.select_active_provider()
-                    candidate_name = selection_result.provider_name
-                    # When provider_type is set, only return health if types match
-                    if query.provider_type:
-                        candidate_type = getattr(selection_result, "provider_type", None)
-                        if candidate_type and candidate_type != query.provider_type:
-                            return {
-                                "provider_name": None,
-                                "status": "not_found",
-                                "health": "unknown",
-                                "message": f"No active provider of type '{query.provider_type}' found",
-                            }
-                    provider_name = candidate_name
+                    selection_result = self._provider_registry_service.select_active_provider(
+                        provider_type=query.provider_type,
+                    )
+                    provider_name = selection_result.provider_name
                     self.logger.debug("Using active provider: %s", provider_name)
                 except Exception as e:
                     self.logger.warning("Failed to get active provider: %s", e, exc_info=True)
@@ -77,7 +68,11 @@ class GetProviderHealthHandler(BaseQueryHandler[GetProviderHealthQuery, dict[str
                         "provider_name": None,
                         "status": "not_found",
                         "health": "unknown",
-                        "message": "No active provider found",
+                        "message": (
+                            f"No active provider of type '{query.provider_type}' found"
+                            if query.provider_type
+                            else "No active provider found"
+                        ),
                     }
 
             # Get health information from registry service
