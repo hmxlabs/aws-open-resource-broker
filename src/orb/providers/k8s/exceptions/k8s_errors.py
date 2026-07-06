@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from orb.domain.base.exceptions import InfrastructureError
 
-class K8sError(Exception):
+
+class K8sError(InfrastructureError):
     """Base class for all Kubernetes provider-specific errors."""
 
 
