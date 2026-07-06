@@ -187,7 +187,6 @@ class ListAvailableProvidersHandler(BaseQueryHandler[ListAvailableProvidersQuery
                     {
                         "name": provider_instance.name,
                         "type": provider_instance.type,
-                        "region": provider_instance.config.get("region", "unknown"),
                         "status": "active" if provider_instance.enabled else "disabled",
                         "capabilities": handler_names,  # Real handler names from inheritance
                         "weight": provider_instance.weight,

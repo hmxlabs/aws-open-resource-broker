@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Optional
+from dataclasses import dataclass, field
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -12,24 +12,22 @@ class DiscoveryContext:
 
     Attributes:
         provider_type: The provider type identifier (e.g. ``"k8s"``, ``"aws"``).
-        region: Cloud or cluster region string.  Empty string when not applicable.
-        profile: Credential-source identifier chosen during ``orb init``.
-            For the k8s provider this is either a kubeconfig context name or
-            the literal ``"in_cluster"`` sentinel.  ``None`` when no
-            credential-source was pre-selected.
+        provider_config: Opaque provider-specific configuration dict.  AWS callers
+            store ``region`` and ``profile`` here; k8s callers store kubeconfig
+            context names and similar.  Provider-agnostic layers must not inspect
+            the contents of this dict.
     """
 
     provider_type: str
-    region: str = ""
-    profile: Optional[str] = None
+    provider_config: dict[str, Any] = field(default_factory=dict)
 
 
 def discovery_context_from_dict(raw: dict) -> DiscoveryContext:
     """Build a :class:`DiscoveryContext` from a raw provider-config dict.
 
-    Reads ``raw["config"]["profile"]`` and ``raw.get("region", "")`` so
-    callers that still receive the legacy dict contract do not need to be
-    changed before the typed variant is adopted end-to-end.
+    Extracts ``provider_type`` from the top-level ``type`` or ``provider_type``
+    key and forwards the nested ``config`` section (plus any remaining
+    top-level provider-specific keys) into ``provider_config``.
 
     Args:
         raw: Provider config dict as passed by the strategy layer.
@@ -37,8 +35,12 @@ def discovery_context_from_dict(raw: dict) -> DiscoveryContext:
     Returns:
         A fully typed :class:`DiscoveryContext`.
     """
-    config_section: dict = raw.get("config", {}) or {}
     provider_type: str = raw.get("type", raw.get("provider_type", ""))
-    region: str = raw.get("region", "") or ""
-    profile: Optional[str] = config_section.get("profile")
-    return DiscoveryContext(provider_type=provider_type, region=region, profile=profile)
+    config_section: dict = raw.get("config", {}) or {}
+    # Merge the nested config section with any remaining provider-specific keys
+    # so that callers that embed region/profile at the top level still work.
+    provider_config: dict[str, Any] = {
+        k: v for k, v in raw.items() if k not in ("type", "provider_type", "config")
+    }
+    provider_config.update(config_section)
+    return DiscoveryContext(provider_type=provider_type, provider_config=provider_config)

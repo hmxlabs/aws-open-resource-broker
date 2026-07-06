@@ -306,7 +306,7 @@ class ProviderStrategy(ABC):
         """Get the naming pattern for this provider type.
 
         Returns:
-            Pattern string (e.g., "{type}_{profile}_{region}")
+            Pattern string describing the provider-specific naming convention
         """
 
     @classmethod
@@ -351,24 +351,6 @@ class ProviderStrategy(ABC):
         Asked after credentials are tested successfully.
         """
         return {}
-
-    @classmethod
-    def get_available_regions(cls) -> list[tuple[str, str]]:
-        """Get available regions as (region_id, display_name) tuples.
-
-        Returns:
-            List of (region_id, display_name) tuples.
-            Empty list means the provider accepts free-text region input.
-        """
-        return []
-
-    @classmethod
-    def get_default_region(cls) -> str:
-        """Return the default region string for CLI prompts.
-
-        Override in provider-specific strategies.
-        """
-        return ""
 
     @classmethod
     def get_cli_extra_config_keys(cls) -> set[str]:

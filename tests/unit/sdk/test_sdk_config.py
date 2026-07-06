@@ -15,8 +15,7 @@ class TestSDKConfigDefaults:
         assert config.timeout == 300
         assert config.retry_attempts == 3
         assert config.log_level == "INFO"
-        assert config.region is None
-        assert config.profile is None
+        assert config.provider_config == {}
         assert config.config_path is None
         assert config.custom_config == {}
 
@@ -59,14 +58,12 @@ class TestSDKConfigValidation:
 class TestSDKConfigFromEnv:
     def test_reads_env_vars(self, monkeypatch):
         monkeypatch.setenv("ORB_PROVIDER", "mock")
-        monkeypatch.setenv("ORB_REGION", "eu-west-1")
         monkeypatch.setenv("ORB_TIMEOUT", "60")
         monkeypatch.setenv("ORB_RETRY_ATTEMPTS", "5")
         monkeypatch.setenv("ORB_LOG_LEVEL", "DEBUG")
 
         config = SDKConfig.from_env()
         assert config.provider == "mock"
-        assert config.region == "eu-west-1"
         assert config.timeout == 60
         assert config.retry_attempts == 5
         assert config.log_level == "DEBUG"
@@ -74,7 +71,6 @@ class TestSDKConfigFromEnv:
     def test_defaults_when_env_absent(self, monkeypatch):
         for var in [
             "ORB_PROVIDER",
-            "ORB_REGION",
             "ORB_TIMEOUT",
             "ORB_RETRY_ATTEMPTS",
             "ORB_LOG_LEVEL",
@@ -83,16 +79,14 @@ class TestSDKConfigFromEnv:
 
         config = SDKConfig.from_env()
         assert config.provider == "aws"
-        assert config.region is None
         assert config.timeout == 300
 
 
 class TestSDKConfigFromDict:
     def test_known_fields_mapped(self):
-        config = SDKConfig.from_dict({"provider": "mock", "timeout": 120, "region": "us-west-2"})
+        config = SDKConfig.from_dict({"provider": "mock", "timeout": 120})
         assert config.provider == "mock"
         assert config.timeout == 120
-        assert config.region == "us-west-2"
 
     def test_unknown_fields_go_to_custom_config(self):
         config = SDKConfig.from_dict({"provider": "aws", "my_custom_key": "value"})
@@ -126,6 +120,17 @@ class TestSDKConfigFromDict:
         config = SDKConfig.from_dict({"provider": "aws", "scheduler": "default"})
         assert config.scheduler == "default"
 
+    def test_provider_config_dict_mapped(self):
+        config = SDKConfig.from_dict(
+            {"provider": "aws", "provider_config": {"region": "us-east-1", "profile": "prod"}}
+        )
+        assert config.provider_config == {"region": "us-east-1", "profile": "prod"}
+
+    def test_legacy_top_level_region_goes_to_custom_config(self):
+        # A caller that passes region= at the top level gets it in custom_config, not a field.
+        config = SDKConfig.from_dict({"provider": "aws", "region": "eu-central-1"})
+        assert config.custom_config.get("region") == "eu-central-1"
+
 
 class TestSDKConfigFromFile:
     def test_loads_json_file(self, tmp_path):
@@ -145,10 +150,17 @@ class TestSDKConfigFromFile:
 
 class TestSDKConfigToDict:
     def test_to_dict_excludes_none(self):
-        config = SDKConfig(provider="aws", region=None)
+        config = SDKConfig(provider="aws")
         d = config.to_dict()
         assert "region" not in d
+        assert "profile" not in d
+        assert "provider_config" not in d
         assert d["provider"] == "aws"
+
+    def test_to_dict_includes_provider_config_when_set(self):
+        config = SDKConfig(provider_config={"region": "eu-west-1"})
+        d = config.to_dict()
+        assert d["provider_config"] == {"region": "eu-west-1"}
 
     def test_to_dict_includes_custom_config(self):
         config = SDKConfig(custom_config={"extra": "val"})

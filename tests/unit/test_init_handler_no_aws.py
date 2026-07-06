@@ -70,24 +70,6 @@ def test_no_hostfactory_config_root_hardcoding():
     )
 
 
-def test_provider_strategy_has_get_available_regions():
-    """Base ProviderStrategy must have get_available_regions method."""
-    from orb.providers.base.strategy.provider_strategy import ProviderStrategy
-
-    assert hasattr(ProviderStrategy, "get_available_regions"), (
-        "get_available_regions not on ProviderStrategy"
-    )
-
-
-def test_provider_strategy_has_get_default_region():
-    """Base ProviderStrategy must have get_default_region method."""
-    from orb.providers.base.strategy.provider_strategy import ProviderStrategy
-
-    assert hasattr(ProviderStrategy, "get_default_region"), (
-        "get_default_region not on ProviderStrategy"
-    )
-
-
 def test_provider_strategy_has_get_cli_extra_config_keys():
     """Base ProviderStrategy must have get_cli_extra_config_keys method."""
     from orb.providers.base.strategy.provider_strategy import ProviderStrategy
@@ -145,9 +127,9 @@ def test_provider_strategy_base_defaults():
     config = MagicMock()
     strategy = _ConcreteStrategy(config)
 
-    assert strategy.get_default_region() == ""
     assert strategy.get_cli_extra_config_keys() == set()
     assert strategy.get_cli_infrastructure_defaults(MagicMock()) == {}
+    assert strategy.get_cli_provider_config(MagicMock()) == {}
 
 
 def _make_aws_strategy():

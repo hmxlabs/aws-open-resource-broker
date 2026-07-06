@@ -227,39 +227,16 @@ def _get_active_providers() -> List[Dict[str, Any]]:
 
 
 def _get_active_providers_with_overrides() -> List[Dict[str, Any]]:
-    """Get active providers with global overrides applied."""
-    providers = _get_active_providers()
+    """Get active providers with provider-name and provider-type overrides applied.
 
-    # Apply global overrides
-    try:
-        from orb.domain.base.ports.configuration_port import ConfigurationPort
-
-        container = get_container()
-        config = container.get(ConfigurationPort)
-
-        for provider in providers:
-            provider_config = provider.get("config", {})
-
-            # Apply region override if present in config
-            region = provider_config.get("region")
-            if region is not None:
-                provider_config["region"] = config.get_effective_region(region)
-
-            # Apply profile override if present in config
-            profile = provider_config.get("profile")
-            if profile is not None:
-                provider_config["profile"] = config.get_effective_profile(profile)
-
-            if provider_config:
-                provider["config"] = provider_config
-    except Exception as e:
-        # Fallback to original providers if override fails
-        from orb.infrastructure.logging.logger import get_logger
-
-        logger = get_logger(__name__)
-        logger.debug(f"Failed to override provider config: {e}")
-
-    return providers
+    The provider-name and provider-type overrides are already handled by the
+    caller via ``ConfigurationPort.get_active_provider_name_override()`` and
+    ``get_active_provider_type_override()``.  Provider-specific config key
+    overrides (e.g. AWS region, AWS profile) are not applied here because
+    they are provider-scoped and do not belong in the provider-agnostic
+    interface layer.
+    """
+    return _get_active_providers()
 
 
 def _get_provider_config(provider_name: str) -> Dict[str, Any]:

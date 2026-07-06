@@ -27,8 +27,7 @@ class SDKConfig:
     provider: str = "aws"
     provider_type: Optional[str] = None
     provider_name: Optional[str] = None
-    region: Optional[str] = None
-    profile: Optional[str] = None
+    provider_config: dict[str, Any] = field(default_factory=dict)
     scheduler: Optional[str] = None
 
     # Operation configuration
@@ -55,8 +54,6 @@ class SDKConfig:
             provider=os.getenv("ORB_PROVIDER", "aws"),
             provider_type=os.getenv("ORB_PROVIDER_TYPE"),
             provider_name=os.getenv("ORB_PROVIDER_NAME"),
-            region=os.getenv("ORB_REGION"),
-            profile=os.getenv("ORB_PROFILE"),
             timeout=int(os.getenv("ORB_TIMEOUT", "300")),
             retry_attempts=int(os.getenv("ORB_RETRY_ATTEMPTS", "3")),
             log_level=os.getenv("ORB_LOG_LEVEL", "INFO"),
@@ -66,7 +63,8 @@ class SDKConfig:
     @classmethod
     def from_dict(cls, config: dict[str, Any]) -> "SDKConfig":
         """Create configuration from dictionary."""
-        # Extract known fields
+        # Extract known fields.  Legacy top-level ``region`` / ``profile`` keys are
+        # NOT known fields; callers that still pass them will find them in custom_config.
         known_fields = {field.name for field in cls.__dataclass_fields__.values()}
 
         sdk_config = {}
@@ -128,16 +126,17 @@ class SDKConfig:
 
     def to_dict(self) -> dict[str, Any]:
         """Convert configuration to dictionary."""
-        result = {
+        result: dict[str, Any] = {
             "provider": self.provider,
             "provider_type": self.provider_type,
             "provider_name": self.provider_name,
-            "region": self.region,
-            "profile": self.profile,
             "timeout": self.timeout,
             "retry_attempts": self.retry_attempts,
             "log_level": self.log_level,
         }
+
+        if self.provider_config:
+            result["provider_config"] = self.provider_config
 
         # Add custom configuration
         result.update(self.custom_config)

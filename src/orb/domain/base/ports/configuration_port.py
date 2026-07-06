@@ -87,32 +87,6 @@ class ConfigurationPort(ProviderConfigPort):
     def override_provider_type(self, provider_type: str) -> None:
         """Restrict selection to a provider type."""
 
-    def override_provider_region(self, region: str) -> None:  # pyright: ignore[reportUnusedParameter]
-        """Override the provider region for this session.
-
-        Provider-specific concern — concrete adapters override this.
-        """
-
-    def override_provider_profile(self, profile: str) -> None:  # pyright: ignore[reportUnusedParameter]
-        """Override the provider credential profile for this session.
-
-        Provider-specific concern — concrete adapters override this.
-        """
-
-    def get_effective_region(self, default_region: str = "") -> str:
-        """Get effective provider region (override or configured).
-
-        Provider-specific concern — concrete adapters override this.
-        """
-        return default_region
-
-    def get_effective_profile(self, default_profile: str = "") -> str:
-        """Get effective provider credential profile (override or configured).
-
-        Provider-specific concern — concrete adapters override this.
-        """
-        return default_profile
-
     # get_provider_instance_config inherited from ProviderConfigPort
 
     @abstractmethod

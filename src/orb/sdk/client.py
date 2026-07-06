@@ -168,21 +168,14 @@ class ORBClient:
                     provider=self._config.provider,
                 )
 
-            # Apply region/profile/provider overrides from SDK config (mirrors CLI pattern).
+            # Apply provider-name and provider-type overrides from SDK config.
             # Use self._container (the per-client isolated container), not the
             # module-level singleton returned by get_container(), so that overrides
             # from one ORBClient instance never bleed into another.
-            if (
-                self._config.region
-                or self._config.profile
-                or self._config.provider_type
-                or self._config.provider_name
-            ):
+            # provider_config is stored for future use; pushing arbitrary provider
+            # key/value pairs through a provider-agnostic port is a follow-up task.
+            if self._config.provider_type or self._config.provider_name:
                 config_port = self._container.get(ConfigurationPort)
-                if self._config.region:
-                    config_port.override_provider_region(self._config.region)
-                if self._config.profile:
-                    config_port.override_provider_profile(self._config.profile)
                 if self._config.provider_type:
                     config_port.override_provider_type(self._config.provider_type)
                 if self._config.provider_name:

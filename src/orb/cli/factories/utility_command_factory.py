@@ -12,7 +12,6 @@ class InitCommandData:
         self.non_interactive = kwargs.get("non_interactive", False)
         self.scheduler = kwargs.get("scheduler")
         self.provider = kwargs.get("provider")
-        self.region = kwargs.get("region")
         self.config_dir = kwargs.get("config_dir")
         self.force = kwargs.get("force", False)
 
@@ -50,7 +49,6 @@ class InfrastructureCommandData:
     def __init__(self, action: str, **kwargs: Any):
         self.action = action  # discover, show, validate
         self.provider = kwargs.get("provider")
-        self.region = kwargs.get("region")
         self.detailed = kwargs.get("detailed", False)
 
 

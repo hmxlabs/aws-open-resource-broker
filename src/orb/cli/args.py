@@ -67,8 +67,6 @@ def add_global_arguments(parser):
         metavar="TYPE",
         help="Restrict to all active instances of a provider type (e.g. aws, k8s)",
     )
-    parser.add_argument("--region", help="AWS region override")
-    parser.add_argument("--profile", help="AWS profile override")
     parser.add_argument(
         "--scheduler", choices=["default", "hostfactory"], help="Override scheduler strategy"
     )
@@ -784,8 +782,6 @@ For more information, visit: {DOCS_URL}
         default="aws",
         help="Provider type to initialise (e.g. aws, k8s)",
     )
-    init_parser.add_argument("--region", help="AWS region")
-    init_parser.add_argument("--profile", help="AWS profile")
     init_parser.add_argument("--config-dir", help="Custom configuration directory")
     init_parser.add_argument(
         "--scripts-dir",

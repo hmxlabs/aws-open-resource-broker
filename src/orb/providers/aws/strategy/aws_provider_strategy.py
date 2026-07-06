@@ -589,11 +589,11 @@ class AWSProviderStrategy(ProviderStrategy):
     def get_cli_provider_config(cls, args: Any) -> dict[str, Any]:
         """Extract AWS provider config keys from parsed CLI args.
 
-        Returns the ``region`` and ``profile`` values that should appear in
-        the provider instance config block written by ``orb init``.  Both
-        values default to ``None`` when the corresponding flag was not
-        supplied on the command line; callers are responsible for falling
-        back to provider defaults as needed.
+        Reads ``--aws-profile`` and ``--aws-region`` (the AWS-scoped flags
+        registered via ``AWSCLISpec``).  Both values default to ``None``
+        (profile) or the canonical default region when not supplied; the
+        ``_get_default_config`` overlay via ``CLISpecRegistry`` will also
+        fill any remaining gaps from ``args.aws_profile`` / ``args.aws_region``.
 
         Args:
             args: Parsed argparse.Namespace from the ``orb init`` invocation.
@@ -602,8 +602,8 @@ class AWSProviderStrategy(ProviderStrategy):
             Dict with ``region`` and ``profile`` keys.
         """
         return {
-            "profile": getattr(args, "profile", None) or None,
-            "region": getattr(args, "region", None) or cls.get_default_region(),
+            "profile": getattr(args, "aws_profile", None) or None,
+            "region": getattr(args, "aws_region", None) or cls.get_default_region(),
         }
 
     @classmethod
