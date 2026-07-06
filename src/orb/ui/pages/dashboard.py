@@ -1197,6 +1197,9 @@ def dashboard_page() -> rx.Component:
         # stat cards so it's discoverable without scrolling past the
         # counts.  Mirrors the pattern on the list pages where the
         # refresh_control sits in the top-of-page filter/toolbar row.
+        # ``margin_bottom`` keeps a visible gap between this row and
+        # the stat-card flex below so the refresh controls don't visually
+        # butt up against the "Templates" tile.
         rx.hstack(
             rx.spacer(),
             refresh_control(
@@ -1211,6 +1214,7 @@ def dashboard_page() -> rx.Component:
             spacing="3",
             align="center",
             width="100%",
+            margin_bottom="1rem",
         ),
         # Stat cards — grouped by resource type and ordered by workflow
         # direction: Templates define the shape → Requests ask for the

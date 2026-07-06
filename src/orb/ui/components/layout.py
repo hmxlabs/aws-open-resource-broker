@@ -228,13 +228,12 @@ def sidebar() -> rx.Component:
 
     return rx.vstack(
         # Top row: logo only (toggle button has moved to the bottom of the sidebar).
-        rx.hstack(
-            _orb_logo(),
-            width="100%",
-            align="center",
-            spacing="0",
-        ),
-        rx.divider(),
+        # ``_orb_logo`` owns its own bottom border stripe (matches topbar).
+        # A separate ``rx.divider`` here would double the visible stripe AND
+        # add margin that pushes the first nav item below the topbar's
+        # baseline — omit it so the sidebar-header and topbar rows share
+        # the same vertical grid.
+        _orb_logo(),
         # rx.el.nav provides the <nav> landmark so assistive technologies can
         # jump directly to the primary navigation.
         rx.el.nav(
