@@ -44,9 +44,9 @@ class TestK8sProvisioningContract(BaseProvisioningContract):
         adapters (each with a fresh mock) so the assertion is not contingent on
         shared mock state between the two acquire calls.
         """
-        from unittest.mock import MagicMock  # noqa: PLC0415
+        from unittest.mock import MagicMock
 
-        from tests.providers.k8s.contract.conftest import (  # noqa: PLC0415
+        from tests.providers.k8s.contract.conftest import (
             _build_pod_handler,
             _K8sProviderAdapter,
             _make_config,
