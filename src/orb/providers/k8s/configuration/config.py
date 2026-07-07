@@ -36,7 +36,7 @@ _LEGACY_FIELD_MAP: dict[str, str] = {
 }
 
 
-def _get_logger() -> "logging.Logger":
+def _get_logger() -> logging.Logger:
     """Return a stdlib logger for namespace auto-detection messages.
 
     The K8sProviderConfig model validator runs during Pydantic construction,
@@ -299,6 +299,21 @@ class K8sProviderConfig(BaseSettings, BaseProviderConfig):  # type: ignore[misc]
         ),
     )
 
+    # Prometheus metrics
+    metrics_enabled: bool = Field(
+        True,
+        description=(
+            "Toggle for the Prometheus metrics surface.  When True the "
+            "provider registers a :class:`K8sMetrics` instance against "
+            "``prometheus_client.REGISTRY`` on start-up and records "
+            "acquire/release counts, pod-creation outcomes, watch events, "
+            "and watch reconnects from the handler and watcher hot paths. "
+            "Set False to disable metric emission entirely (useful in test "
+            "harnesses or when a downstream process owns the global "
+            "registry)."
+        ),
+    )
+
     # Native spec escape hatch
     native_spec_enabled: bool = Field(
         False,
@@ -394,7 +409,7 @@ class K8sProviderConfig(BaseSettings, BaseProviderConfig):  # type: ignore[misc]
         return v
 
     @model_validator(mode="after")
-    def _resolve_namespace(self) -> "K8sProviderConfig":
+    def _resolve_namespace(self) -> K8sProviderConfig:
         """Resolve ``namespace`` to a concrete string when unset.
 
         Resolution order:
@@ -418,7 +433,7 @@ class K8sProviderConfig(BaseSettings, BaseProviderConfig):  # type: ignore[misc]
         return self
 
     @model_validator(mode="after")
-    def _validate_label_prefix(self) -> "K8sProviderConfig":
+    def _validate_label_prefix(self) -> K8sProviderConfig:
         """``label_prefix`` must satisfy RFC 1123 DNS subdomain rules.
 
         Rejects empty strings, values containing ``=``, ``,``, ``(``, ``)``,
@@ -440,7 +455,7 @@ class K8sProviderConfig(BaseSettings, BaseProviderConfig):  # type: ignore[misc]
         return self
 
     @model_validator(mode="after")
-    def _validate_native_spec_requires_rejection(self) -> "K8sProviderConfig":
+    def _validate_native_spec_requires_rejection(self) -> K8sProviderConfig:
         """``native_spec_enabled=True`` requires ``reject_high_risk_pod_fields=True``.
 
         Allowing native specs through the escape hatch whilst the high-risk
