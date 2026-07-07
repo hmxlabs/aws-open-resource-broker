@@ -96,6 +96,111 @@ def _get_k8s_provider_config(orb_config: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Kubeconfig parsing — provider-agnostic auth environment preparation
+# ---------------------------------------------------------------------------
+
+
+def _resolve_kubeconfig_path(kubeconfig_path: str | None) -> str:
+    """Resolve the kubeconfig file the kubernetes SDK will load.
+
+    Falls back through the same precedence order the SDK uses so the
+    conftest reads exactly the file the runtime does: explicit path >
+    ``KUBECONFIG`` env > ``~/.kube/config``.
+    """
+    import os
+
+    if kubeconfig_path:
+        return os.path.expanduser(kubeconfig_path)
+    env_path = os.environ.get("KUBECONFIG")
+    if env_path:
+        return os.path.expanduser(env_path.split(":", 1)[0])
+    return os.path.expanduser("~/.kube/config")
+
+
+def _read_kubeconfig_yaml(path: str) -> dict:
+    """Parse the kubeconfig file and return the raw dict.
+
+    Uses ``yaml.safe_load`` — same parser the kubernetes SDK relies on.
+    """
+    import yaml  # noqa: PLC0415 — optional, only present when k8s extra installed
+
+    with open(path) as fh:
+        return yaml.safe_load(fh) or {}
+
+
+def _find_context_user_exec_env(kubeconfig: dict, context_name: str | None) -> list[dict[str, str]]:
+    """Return the ``exec.env`` block for the user of *context_name*.
+
+    Walks kubeconfig ``contexts`` → matched user → ``users`` → ``user.exec.env``.
+    Returns an empty list when the kubeconfig has no exec-based auth (e.g.
+    bearer-token, client-cert, or basic-auth users) since those need no
+    env-var injection to work.
+
+    When ``context_name`` is ``None`` we look up ``current-context`` so the
+    behaviour matches the SDK's default-context selection.
+    """
+    context_name = context_name or kubeconfig.get("current-context")
+    if not context_name:
+        return []
+    user_name: str | None = None
+    for ctx in kubeconfig.get("contexts") or []:
+        if ctx.get("name") == context_name:
+            user_name = (ctx.get("context") or {}).get("user")
+            break
+    if not user_name:
+        return []
+    for user_entry in kubeconfig.get("users") or []:
+        if user_entry.get("name") != user_name:
+            continue
+        exec_block = (user_entry.get("user") or {}).get("exec") or {}
+        env_block = exec_block.get("env") or []
+        return [
+            {"name": item.get("name"), "value": item.get("value")}
+            for item in env_block
+            if item.get("name")
+        ]
+    return []
+
+
+def _strip_mocked_test_sentinels() -> None:
+    """Remove env vars whose value is the fake-test sentinel ``"testing"``.
+
+    Provider-agnostic scrub — clears any cloud-cred sentinel accidentally
+    inherited from mocked-test scaffolding.  Values are compared exactly
+    so real production credentials are never removed.
+    """
+    import os
+
+    for key in list(os.environ):
+        if os.environ[key] == "testing":
+            os.environ.pop(key, None)
+
+
+def _apply_kubeconfig_exec_env(env_block: list[dict[str, str]]) -> None:
+    """Export each ``{name, value}`` entry from the exec ``env:`` block.
+
+    Kubernetes exec plugins (``aws eks get-token``, ``gke-gcloud-auth-plugin``,
+    ``kubelogin``, custom OIDC clients, ...) receive parent-process env
+    verbatim.  If a cred-managing env var (e.g. ``AWS_ACCESS_KEY_ID``) is
+    already present it can beat the kubeconfig's declared ``AWS_PROFILE``,
+    silently authenticating as the wrong principal.  Exporting the block
+    into ``os.environ`` before ``load_kube_config`` neutralises that
+    precedence conflict and mirrors kubectl's own behaviour.
+
+    Auth mechanisms that do not use exec plugins (bearer tokens, client
+    certificates, HTTP basic, service-account files) leave the block empty
+    so this function is a no-op — which is the correct outcome.
+    """
+    import os
+
+    for entry in env_block:
+        name = entry.get("name")
+        value = entry.get("value")
+        if name and value is not None:
+            os.environ[name] = value
+
+
+# ---------------------------------------------------------------------------
 # pytest_sessionstart — credential pre-flight
 # ---------------------------------------------------------------------------
 
@@ -107,6 +212,18 @@ def pytest_sessionstart(session: pytest.Session) -> None:
     specified in the ORB provider config, constructs a bare CoreV1Api
     call, and exits immediately if it fails — so no tests are attempted
     with unusable credentials.
+
+    Provider-agnostic auth preparation runs first:
+
+    * Fake ``"testing"`` credential sentinels inherited from mocked-test
+      scaffolding are scrubbed.
+    * When the resolved kubeconfig context uses an exec-plugin auth
+      (EKS, GKE, AKS, OIDC login, ...) its declared ``env:`` block is
+      exported into the process env so precedence conflicts with parent
+      env vars are neutralised.  Auth methods that carry credentials
+      inline in the kubeconfig (bearer token, client cert, HTTP basic)
+      or use an in-cluster service account leave the exec block empty,
+      so this step is a no-op for them.
     """
     if not _is_k8s_run(session.config):
         return
@@ -124,10 +241,30 @@ def pytest_sessionstart(session: pytest.Session) -> None:
     kubeconfig_path = k8s_cfg.get("kubeconfig_path")
     context = k8s_cfg.get("context")
 
-    # Kubeconfig exec plugins (e.g. ``aws eks get-token``) cache tokens on
-    # disk with short TTLs.  A cached-but-expired token gives 401 on first
-    # call — retry once after clearing the cache so operators don't need to
-    # manually prime the exec plugin between runs.
+    # Provider-agnostic env preparation — must happen before load_kube_config
+    # so the exec plugin subprocess inherits the right env.
+    _strip_mocked_test_sentinels()
+    try:
+        kubeconfig_dict = _read_kubeconfig_yaml(_resolve_kubeconfig_path(kubeconfig_path))
+        exec_env = _find_context_user_exec_env(kubeconfig_dict, context)
+        _apply_kubeconfig_exec_env(exec_env)
+    except FileNotFoundError as exc:
+        pytest.exit(
+            f"k8s live pre-flight failed: kubeconfig not found: {exc}\n"
+            "Set kubeconfig_path in the ORB k8s provider config or export KUBECONFIG.",
+            returncode=1,
+        )
+    except Exception as exc:
+        # Kubeconfig parse failure is non-fatal on its own — some
+        # kubeconfigs use YAML anchors the SDK handles that a plain
+        # safe_load can't.  Fall through to load_kube_config so the SDK's
+        # own error surfaces below rather than a misleading one here.
+        log.debug("kubeconfig pre-parse skipped: %s", exc)
+
+    # Kubeconfig exec plugins cache tokens on disk with short TTLs.  A
+    # cached-but-expired token gives 401 on first call — retry once after
+    # clearing the cache so operators don't need to manually prime the
+    # exec plugin between runs.
     last_exc: Exception | None = None
     for attempt in (1, 2):
         try:
@@ -153,20 +290,19 @@ def pytest_sessionstart(session: pytest.Session) -> None:
 def _refresh_exec_plugin_cache() -> None:
     """Force kubeconfig exec plugins to reissue their auth token.
 
-    Deletes the AWS EKS token cache (default ``~/.kube/cache/token/``) so
-    ``aws eks get-token`` re-executes on the next SDK call.  Best-effort:
-    missing files or unknown providers are silently ignored — the
-    subsequent SDK call will surface any real auth failure.  Extend this
-    with per-provider cache paths as new managed-cluster exec plugins
-    (GKE, AKS, ...) join the mix.
+    Deletes the shared kubernetes token cache (``~/.kube/cache/token/``)
+    so any exec plugin (``aws eks get-token``, ``gke-gcloud-auth-plugin``,
+    ``kubelogin``, ...) re-executes on the next SDK call.  Best-effort:
+    missing directories are silently ignored — the subsequent SDK call
+    will surface any real auth failure.
     """
     import os
     import shutil
     from pathlib import Path
 
-    aws_token_cache = Path(os.path.expanduser("~/.kube/cache/token"))
-    if aws_token_cache.exists():
-        shutil.rmtree(aws_token_cache, ignore_errors=True)
+    token_cache = Path(os.path.expanduser("~/.kube/cache/token"))
+    if token_cache.exists():
+        shutil.rmtree(token_cache, ignore_errors=True)
 
 
 # ---------------------------------------------------------------------------
