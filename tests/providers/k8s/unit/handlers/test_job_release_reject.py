@@ -20,6 +20,7 @@ from orb.providers.k8s.infrastructure.handlers.job_handler import K8sJobHandler
 def _make_handler() -> K8sJobHandler:
     handler = object.__new__(K8sJobHandler)
     handler._logger = MagicMock()  # type: ignore[attr-defined]
+    handler._metrics = None  # type: ignore[attr-defined]
     handler._resolve_namespace_from_provider_data = MagicMock(return_value="ns")  # type: ignore[attr-defined]
     handler._resolve_job_name_from_provider_data = MagicMock(return_value="orb-job")  # type: ignore[attr-defined]
     handler._delete_job = AsyncMock()  # type: ignore[attr-defined]

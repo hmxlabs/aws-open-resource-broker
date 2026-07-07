@@ -341,7 +341,7 @@ async def test_release_hosts_deletes_pods_by_name() -> None:
 
 @pytest.mark.asyncio
 async def test_release_hosts_tolerates_404() -> None:
-    from kubernetes.client.exceptions import ApiException  # noqa: PLC0415
+    from kubernetes.client.exceptions import ApiException
 
     core_v1 = MagicMock()
     core_v1.delete_namespaced_pod.side_effect = ApiException(status=404)
@@ -398,6 +398,52 @@ async def test_release_hosts_no_machine_ids_is_noop() -> None:
 # ---------------------------------------------------------------------------
 # F1 — Succeeded pods count as fulfilled capacity
 # ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# T11 — delete_one_pod single-try dedup
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_delete_one_pod_404_swallowed_silently() -> None:
+    """404 from the apiserver must be swallowed with a single debug log — no exception."""
+    from kubernetes.client.exceptions import ApiException
+
+    core_v1 = MagicMock()
+    core_v1.delete_namespaced_pod.side_effect = ApiException(status=404)
+    handler = _make_handler(core_v1)
+    handler._max_retries = 1
+
+    import asyncio
+
+    sem = asyncio.Semaphore(1)
+    # Must not raise.
+    await handler._delete_one_pod(sem=sem, namespace="orb-test", pod_name="ghost")
+
+    # Only one API call issued — no double-try retry.
+    assert core_v1.delete_namespaced_pod.call_count == 1
+    # Debug logged, warning NOT logged.
+    handler._logger.debug.assert_called()
+    handler._logger.warning.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_delete_one_pod_500_raises_with_single_warning() -> None:
+    """Non-404 errors must propagate after a single warning log (no double-log)."""
+    core_v1 = MagicMock()
+    core_v1.delete_namespaced_pod.side_effect = RuntimeError("internal server error")
+    handler = _make_handler(core_v1)
+    handler._max_retries = 1
+
+    import asyncio
+
+    sem = asyncio.Semaphore(1)
+    with pytest.raises(Exception):  # noqa: B017
+        await handler._delete_one_pod(sem=sem, namespace="orb-test", pod_name="pod-x")
+
+    # Warning logged exactly once.
+    assert handler._logger.warning.call_count == 1
 
 
 def test_succeeded_pod_maps_to_fulfilled_fulfilment() -> None:

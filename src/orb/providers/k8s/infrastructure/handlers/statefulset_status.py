@@ -27,7 +27,7 @@ if TYPE_CHECKING:  # pragma: no cover — type-checking only
 class StatefulSetStatusResolver:
     """Compute the per-request status verdict for a StatefulSet-managed pod set."""
 
-    def __init__(self, handler: "K8sStatefulSetHandler") -> None:
+    def __init__(self, handler: K8sStatefulSetHandler) -> None:
         self._handler = handler
 
     def check_hosts_status(self, request: Request) -> CheckHostsStatusResult:

@@ -84,9 +84,8 @@ def instance_dict_for_pod(
                     name,
                     provider_api,
                 )
-        else:
-            if status_reason is None:
-                status_reason = "Container completed successfully"
+        elif status_reason is None:
+            status_reason = "Container completed successfully"
 
     # DisruptionTarget condition — Karpenter preemption signal.
     disrupted_reason: Optional[str] = None

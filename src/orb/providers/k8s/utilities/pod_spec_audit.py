@@ -59,7 +59,7 @@ def _get(d: dict[str, Any], camel: str, snake: str, default: Any = None) -> Any:
     return d.get(snake, default)
 
 
-def audit_pod_spec(pod_spec: dict[str, Any], logger: "LoggingPort") -> list[str]:
+def audit_pod_spec(pod_spec: dict[str, Any], logger: LoggingPort) -> list[str]:
     """Audit *pod_spec* for high-risk fields and log each finding.
 
     The function accepts:
