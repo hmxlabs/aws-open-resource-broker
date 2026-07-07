@@ -292,22 +292,38 @@ async def test_timeout_gc_deletes_pending_pod_past_threshold(
         effective_timeout,
     )
 
-    # Wait longer than the timeout so the GC can act.
-    await asyncio.sleep(effective_timeout + 5)
-
-    # Invoking check_hosts_status triggers the timeout rewrite + async deletion.
-    status_result = handler.check_hosts_status(request_obj)
-    instances = status_result.instances or []
-    timed_out = [inst for inst in instances if inst.get("status") == "terminated"]
+    # Poll check_hosts_status until the timeout GC has marked the pod as
+    # terminated.  We wait up to (effective_timeout + _GC_WAIT_TIMEOUT) seconds
+    # total rather than sleeping a fixed duration, so the test exits as soon
+    # as the condition is met on faster clusters.
+    timed_out: list = []
+    deadline = time.monotonic() + effective_timeout + _GC_WAIT_TIMEOUT
+    while time.monotonic() < deadline:
+        await asyncio.sleep(_POLL_INTERVAL)
+        status_result = handler.check_hosts_status(request_obj)
+        instances = status_result.instances or []
+        timed_out = [inst for inst in instances if inst.get("status") == "terminated"]
+        if timed_out:
+            break
 
     assert timed_out, (
-        f"Expected at least one pod marked 'terminated' by timeout GC; "
+        f"Expected at least one pod marked 'terminated' by timeout GC within "
+        f"{effective_timeout + _GC_WAIT_TIMEOUT}s; "
         f"statuses={[inst.get('status') for inst in instances]!r}"
     )
     log.info("Timeout GC correctly marked pod(s) as terminated: %r", timed_out)
 
-    # Give the async delete a moment to execute.
-    await asyncio.sleep(3)
+    # Poll for the async deletion to complete rather than sleeping a fixed duration.
+    delete_deadline = time.monotonic() + _GC_WAIT_TIMEOUT
+    while time.monotonic() < delete_deadline:
+        await asyncio.sleep(_POLL_INTERVAL)
+        try:
+            # check_hosts_status with no pods means the deletion succeeded.
+            check = handler.check_hosts_status(request_obj)
+            if all(i.get("status") in ("terminated", "unknown") for i in (check.instances or [])):
+                break
+        except Exception:
+            break
 
     # Cleanup any survivors.
     try:

@@ -37,6 +37,16 @@ Covered scenarios
   factory and re-enters the stream loop.
 * Watcher survives a transient exception from the watch factory and
   reconnects after backoff.
+
+Flakiness note (Group T3)
+-------------------------
+
+The original tests used ``asyncio.sleep(0.1–0.3s)`` as an imprecise
+rendezvous after starting the watcher.  That pattern is timing-sensitive
+on slow CI runners.  The tests below replace the raw sleep with
+``asyncio.wait_for`` polling on the cache state — the coroutine returns
+as soon as the expected condition holds, with a deterministic 5-second
+wall-clock timeout rather than a fixed sleep duration.
 """
 
 from __future__ import annotations
@@ -138,6 +148,38 @@ class _GoneWatch:
 
 
 # ---------------------------------------------------------------------------
+# Deterministic polling helper — replaces asyncio.sleep rendezvous
+# ---------------------------------------------------------------------------
+
+
+async def _wait_for_cache_condition(
+    check: "Callable[[], bool]",
+    *,
+    timeout: float = 5.0,
+    poll_interval: float = 0.01,
+) -> None:
+    """Poll *check* until it returns True or *timeout* seconds elapse.
+
+    Raises ``asyncio.TimeoutError`` when the condition is not met within the
+    deadline.  This replaces raw ``asyncio.sleep`` rendezvous that are brittle
+    on slow CI runners.
+    """
+    import asyncio  # noqa: PLC0415
+    from typing import Callable  # noqa: PLC0415
+
+    deadline = asyncio.get_event_loop().time() + timeout
+    while True:
+        if check():
+            return
+        remaining = deadline - asyncio.get_event_loop().time()
+        if remaining <= 0:
+            raise asyncio.TimeoutError(
+                f"Cache condition not met within {timeout}s"
+            )
+        await asyncio.sleep(min(poll_interval, remaining))
+
+
+# ---------------------------------------------------------------------------
 # Watcher factory helper
 # ---------------------------------------------------------------------------
 
@@ -203,8 +245,11 @@ async def test_watch_ingests_pod_events(
 
     watcher, cache = _make_watcher(k8s_client_facade, k8s_config, watch_factory=_factory)
     watcher.start()
-    # Allow two event-loop iterations for the thread to process events.
-    await asyncio.sleep(0.1)
+    # Wait until the cache contains both pods instead of sleeping a fixed duration.
+    await _wait_for_cache_condition(
+        lambda: len(cache.get(request_id) or []) == 2,
+        timeout=5.0,
+    )
     await watcher.stop()
 
     states = cache.get(request_id) or []
@@ -245,14 +290,16 @@ async def test_watch_processes_deleted_event(
 
     watcher, cache = _make_watcher(k8s_client_facade, k8s_config, watch_factory=_factory)
     watcher.start()
-    await asyncio.sleep(0.1)
+    # Wait until there are no live states for the pod (the DELETED event has been processed).
+    # The cache may briefly hold a non-deleted entry after ADDED before DELETED arrives.
+    # We wait for the live count to reach zero with a generous timeout rather than sleeping.
+    await _wait_for_cache_condition(
+        lambda: len([s for s in (cache.get(request_id) or []) if not s.deleted]) == 0,
+        timeout=5.0,
+    )
     await watcher.stop()
 
     states = cache.get(request_id) or []
-    # After DELETED the cache entry is removed; the list may be empty or
-    # contain only a terminal snapshot depending on the race between the
-    # stop signal and the delete processing.  At minimum there must be no
-    # non-deleted state.
     live_states = [s for s in states if not s.deleted]
     assert live_states == [], f"Expected no live states after DELETED; got {live_states}"
 
@@ -291,7 +338,14 @@ async def test_watch_reconnects_on_410_gone(
 
     watcher, cache = _make_watcher(k8s_client_facade, k8s_config, watch_factory=_factory)
     watcher.start()
-    await asyncio.sleep(0.2)
+    # Wait until the cache contains the recovered pod rather than sleeping.
+    await _wait_for_cache_condition(
+        lambda: any(
+            s.pod_name == "orb-recovered-0000"
+            for s in (cache.get(request_id) or [])
+        ),
+        timeout=5.0,
+    )
     await watcher.stop()
 
     # The 410 path must NOT increment consecutive_failures (it is a clean
@@ -334,8 +388,16 @@ async def test_watch_survives_transient_disconnect(
 
     watcher, cache = _make_watcher(k8s_client_facade, k8s_config, watch_factory=_factory)
     watcher.start()
-    # Allow time for the backoff (0.01s) plus the second stream to process.
-    await asyncio.sleep(0.3)
+    # Wait until the cache holds the post-disconnect pod rather than sleeping a
+    # fixed duration.  The watcher backs off for 0.01s before retrying so the
+    # condition should be met well within the 5-second timeout.
+    await _wait_for_cache_condition(
+        lambda: any(
+            s.pod_name == "orb-post-disconnect-0000"
+            for s in (cache.get(request_id) or [])
+        ),
+        timeout=5.0,
+    )
     await watcher.stop()
 
     states = cache.get(request_id) or []

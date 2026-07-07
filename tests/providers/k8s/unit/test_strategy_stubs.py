@@ -354,6 +354,10 @@ def test_stop_watch_manager_blocks_until_stop_completes_from_foreign_thread() ->
     a fake watch manager whose ``stop()`` coroutine sets a threading.Event,
     then calls ``_stop_watch_manager_sync`` from the *main* (foreign) thread
     and asserts that the Event is set before the call returns.
+
+    Replaces the original asyncio.sleep(5) loop-keepalive with an
+    asyncio.Event so the loop exits immediately once the stop coroutine has
+    been scheduled, eliminating the 5-second sleep-based rendezvous.
     """
     stop_completed = threading.Event()
 
@@ -371,14 +375,20 @@ def test_stop_watch_manager_blocks_until_stop_completes_from_foreign_thread() ->
 
     # Run the event loop in a background thread to simulate a daemon.
     loop_ready = threading.Event()
+    loop_terminate = threading.Event()
     loop_ref: list[asyncio.AbstractEventLoop] = []
 
     async def _loop_main() -> None:
         loop_ref.append(asyncio.get_running_loop())
         loop_ready.set()
-        # Keep the loop alive long enough for the foreign-thread call to
-        # schedule and complete the stop coroutine.
-        await asyncio.sleep(5)
+        # Wait for the test to signal loop teardown rather than sleeping a
+        # fixed duration.  This makes the background loop exit promptly once
+        # the stop coroutine has been scheduled and removes the sleep-based
+        # rendezvous that caused the original 5-second delay.
+        await asyncio.wait_for(
+            asyncio.get_event_loop().run_in_executor(None, loop_terminate.wait),
+            timeout=10.0,
+        )
 
     bg_thread = threading.Thread(target=lambda: asyncio.run(_loop_main()), daemon=True)
     bg_thread.start()
@@ -398,7 +408,8 @@ def test_stop_watch_manager_blocks_until_stop_completes_from_foreign_thread() ->
         "stop() coroutine was not awaited before _stop_watch_manager_sync returned"
     )
 
-    # Tidy up the background loop.
+    # Signal the background loop to exit and wait for the thread to settle.
+    loop_terminate.set()
     loop.call_soon_threadsafe(loop.stop)
     bg_thread.join(timeout=5)
 
@@ -406,11 +417,20 @@ def test_stop_watch_manager_blocks_until_stop_completes_from_foreign_thread() ->
 @pytest.mark.timeout(15)
 def test_stop_watch_manager_respects_timeout_from_foreign_thread() -> None:
     """When stop() takes longer than shutdown_timeout, the call returns
-    without raising and logs a warning."""
+    without raising and logs a warning.
+
+    Replaces asyncio.sleep(60) / asyncio.sleep(10) with an asyncio.Event
+    so the loop exits promptly once the timeout has been measured, removing
+    two long-sleep rendezvous.
+    """
     import asyncio
 
+    loop_terminate = threading.Event()
+
     async def _slow_stop() -> None:
-        await asyncio.sleep(60)  # Never completes within the test timeout.
+        # Block until the loop is told to terminate — does not complete
+        # within any realistic shutdown_timeout, which is the point.
+        await asyncio.get_event_loop().run_in_executor(None, loop_terminate.wait)
 
     fake_manager = MagicMock()
     fake_manager.is_started.return_value = True
@@ -427,7 +447,8 @@ def test_stop_watch_manager_respects_timeout_from_foreign_thread() -> None:
     async def _loop_main() -> None:
         loop_ref.append(asyncio.get_running_loop())
         loop_ready.set()
-        await asyncio.sleep(10)
+        # Keep the loop alive until the test signals it to stop.
+        await asyncio.get_event_loop().run_in_executor(None, loop_terminate.wait)
 
     bg_thread = threading.Thread(target=lambda: asyncio.run(_loop_main()), daemon=True)
     bg_thread.start()
@@ -448,6 +469,8 @@ def test_stop_watch_manager_respects_timeout_from_foreign_thread() -> None:
         "Expected a timeout warning; got: %s" % warning_calls
     )
 
+    # Unblock slow_stop and the loop_main coroutines, then stop the loop.
+    loop_terminate.set()
     loop.call_soon_threadsafe(loop.stop)
     bg_thread.join(timeout=5)
 
