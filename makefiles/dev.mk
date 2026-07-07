@@ -2,9 +2,15 @@
 
 # @SECTION Setup & Installation
 install: venv-setup  ## Install dependencies (auto-detects UV/pip, environment-aware)
+	@# The ``ui`` extra (reflex>=0.9 → click>=8.2) conflicts with the
+	@# ``ci`` and ``dev`` groups (semgrep → click<8.2), which uv rejects
+	@# under ``--all-extras --all-groups``.  UI-specific jobs (see
+	@# dev-tools/ci/run_ui_smoke.sh) install the ``[ui]`` extra
+	@# separately after this baseline sync; every other CI job is
+	@# UI-agnostic so leaving the extra out of the shared env is safe.
 	@if [ -n "$$CI" ]; then \
 		echo "CI detected: using frozen UV sync"; \
-		uv sync --frozen --all-groups --all-extras --quiet; \
+		uv sync --frozen --all-groups --quiet; \
 	elif command -v uv >/dev/null 2>&1; then \
 		echo "UV available"; \
 		if echo "$(MAKECMDGOALS)" | grep -q "_dev"; then \

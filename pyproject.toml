@@ -118,6 +118,16 @@ k8s-legacy = [
 ]
 
 # ── Feature extras ─────────────────────────────────────────────────────────
+# Reflex web UI — the wheel ships a pre-built SPA bundle in ``orb/ui/_static/``
+# so end users do NOT need Node/Bun at runtime (only builders running
+# ``dev-tools/package/build_ui.sh`` do).  Pin to 0.9.x: earlier versions
+# lack ``api_transformer`` and the React Router 7 build layout our
+# rxconfig/api-transformer assumes.
+# Install with: pip install orb-py[ui]
+ui = [
+    "reflex>=0.9,<0.10",
+]
+
 # CLI enhancements (colored output)
 cli = [
     "rich>=13.3.0",
@@ -366,6 +376,29 @@ Documentation = "https://finos.github.io/open-resource-broker/"
 Repository = "https://github.com/finos/open-resource-broker"
 "Bug Reports" = "https://github.com/finos/open-resource-broker/issues"
 
+[tool.uv]
+conflicts = [
+    [
+        { group = "ci" },
+        { extra = "ui" },
+    ],
+    [
+        { group = "dev" },
+        { extra = "ui" },
+    ],
+]
+# Overrides pin transitive deps across every resolution split (including
+# the ``ui``-only one that isn't reachable through the ``ci`` group's own
+# ``lxml>=6.1.0`` override).  GHSA-vfmq-68hx-4jfw affects lxml 5.x.
+# cyclonedx-python-lib>=11 switches its jsonschema extra from [format]
+# (which pulls GPL-3.0-only rfc3987) to [format-nongpl] (which uses the
+# Apache-2.0 rfc3987-syntax instead).  Without this override the ui-only
+# conflict split resolves cyclonedx-bom's transitive dep to 9.1.0.
+override-dependencies = [
+    "lxml>=6.1.1",
+    "cyclonedx-python-lib>=11.0.0",
+]
+
 [tool.setuptools.packages.find]
 where = ["src"]
 
@@ -379,7 +412,7 @@ include-package-data = true
 "*" = ["py.typed"]
 "orb.config" = ["default_config.json"]
 "orb.providers.aws.config" = ["*.json"]
-"orb.ui" = ["rxconfig.py"]
+"orb.ui" = ["rxconfig.py", "_static/**/*", "_static/*"]
 "orb.k8s_legacy.alembic" = ["alembic.ini", "script.py.mako"]
 "orb.k8s_legacy.alembic.versions" = ["*.py"]
 "orb.k8s_legacy.tests.resources" = ["*.yml", "*.tpl"]
@@ -558,7 +591,11 @@ classmethod-decorators = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**/*.py" = ["PLC0415"]  # Allow conditional imports in tests for optional dependencies
+"tests/**/*.py" = [
+    "PLC0415",  # Allow conditional imports in tests for optional dependencies
+    "N803",     # Allow PascalCase argument names (e.g. StateClass helper)
+    "N806",     # Allow PascalCase local names for dynamically-constructed test subclasses
+]
 
 [tool.ruff.format]
 quote-style = "double"
@@ -573,20 +610,26 @@ combine-as-imports = true
 [tool.pyright]
 pythonVersion = "3.12"
 pythonPlatform = "Linux"
-include = ["src/orb", "tests"]
+include = ["src/orb"]
 exclude = [
     ".venv", "build", "dist",
     # Legacy k8s plugin code predates pyright adoption and uses mypy.
     # The package is in maintenance mode pending the modern k8s provider;
     # type-checking is gated separately via ruff + the legacy tox config.
     "src/orb/k8s_legacy",
-    # These tests intentionally import non-existent modules to verify deleted code is gone
-    "tests/unit/test_asg_stack_deleted.py",
-    "tests/unit/application/test_application_comprehensive.py",
-    "tests/unit/infrastructure/test_infrastructure_comprehensive.py",
-    "tests/unit/providers/test_providers_comprehensive.py",
+    # Reflex uses a symbolic reactive Var[T] system where component props
+    # can accept either raw Python values OR Vars that resolve at render
+    # time.  Reflex's own type stubs are conservative and pyright flags
+    # every legal Var/value union as a mismatch (e.g. `color_scheme=` on
+    # rx.badge, `.contains()` on Var[str]).  Type-safety of the UI is
+    # gated by the Reflex compile step + runtime pytest suite; running
+    # pyright over generated Reflex APIs produces ~50 false positives
+    # per component that do not indicate real bugs.  Exclude the UI
+    # tree; Reflex-agnostic Python (state.py, api.py) is small and
+    # covered by tests.
+    "src/orb/ui",
 ]
-extraPaths = ["."]
+extraPaths = ["src"]
 typeCheckingMode = "basic"
 reportMissingImports = true
 reportMissingTypeStubs = false

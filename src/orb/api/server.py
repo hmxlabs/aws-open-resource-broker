@@ -1,5 +1,6 @@
 """FastAPI server factory and application setup."""
 
+import os
 import secrets
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, cast
@@ -51,9 +52,62 @@ class _LoopbackAdminAuthWrapper:
     test scenarios (where ``sys.modules["orb.api.server"]`` is mutated) because
     code that holds a reference to this class always reads the same set regardless
     of which module object ``orb.api.server`` currently points to.
+
+    Token cache invalidation: the token file's mtime is checked on each request
+    (cheap ``os.stat``).  When the mtime has changed since the last load the
+    file is reloaded automatically.  The daemon (or any privileged caller) can
+    also call ``rotate_token()`` on SIGHUP to force an immediate reload.
     """
 
     _tokens: ClassVar[set[str]] = set()
+    # Path of the token file that was last loaded; None if tokens were
+    # registered programmatically (e.g. in tests via _tokens.add()).
+    _token_file: ClassVar[Path | None] = None
+    # mtime of the token file at the time of the last successful load.
+    _token_file_mtime: ClassVar[float] = 0.0
+
+    @classmethod
+    def rotate_token(cls) -> None:
+        """Force an immediate reload of the token file.
+
+        Intended to be called by the daemon on SIGHUP so that a rotated token
+        becomes active without a full server restart.  If no token file is
+        registered (auth disabled or fresh install) the call is a no-op.
+        """
+        if cls._token_file is None:
+            return
+        cls._reload_token_file(cls._token_file)
+
+    @classmethod
+    def _reload_token_file(cls, token_file: Path) -> None:
+        """Load tokens from *token_file* and replace the current token set."""
+        try:
+            token = token_file.read_text(encoding="ascii").strip()
+            if token:
+                cls._tokens = {token}
+                try:
+                    cls._token_file_mtime = os.stat(token_file).st_mtime
+                except OSError:
+                    cls._token_file_mtime = 0.0
+                _server_logger.info("loopback-admin token reloaded from %s", token_file)
+        except OSError as exc:
+            _server_logger.debug("loopback-admin token reload skipped: %s", exc)
+
+    @classmethod
+    def _check_and_refresh(cls) -> None:
+        """Reload the token file if its mtime has changed since last load.
+
+        Called on each authenticate() invocation — ``os.stat`` is a single
+        syscall and is cheap enough for per-request use.
+        """
+        if cls._token_file is None:
+            return
+        try:
+            current_mtime = os.stat(cls._token_file).st_mtime
+        except OSError:
+            return
+        if current_mtime != cls._token_file_mtime:
+            cls._reload_token_file(cls._token_file)
 
     def __init__(self, inner: Any) -> None:
         self._inner = inner
@@ -61,6 +115,9 @@ class _LoopbackAdminAuthWrapper:
 
     async def authenticate(self, context: Any) -> Any:
         from orb.infrastructure.adapters.ports.auth import AuthResult, AuthStatus
+
+        # Cheap mtime check — reloads token file only when it has changed.
+        self._check_and_refresh()
 
         auth_header: str = context.headers.get("authorization", "")
         if auth_header.startswith("Bearer "):
@@ -123,7 +180,12 @@ def _load_loopback_token(server_config: Any) -> None:
         if token_file.exists():
             token = token_file.read_text(encoding="ascii").strip()
             if token:
-                _LoopbackAdminAuthWrapper._tokens.add(token)
+                _LoopbackAdminAuthWrapper._tokens = {token}
+                _LoopbackAdminAuthWrapper._token_file = token_file
+                try:
+                    _LoopbackAdminAuthWrapper._token_file_mtime = os.stat(token_file).st_mtime
+                except OSError:
+                    _LoopbackAdminAuthWrapper._token_file_mtime = 0.0
                 _server_logger.debug("loopback-admin token loaded from %s", token_file)
     except Exception as exc:
         _server_logger.debug("loopback-admin token load skipped: %s", exc)
@@ -154,6 +216,9 @@ class _LoopbackAdminTokenMiddleware:
 
     @staticmethod
     async def _dispatch(request: Any, call_next: Any) -> Any:
+        # Cheap mtime check so the token file is reloaded when rotated.
+        _LoopbackAdminAuthWrapper._check_and_refresh()
+
         auth = request.headers.get("authorization", "")
         if auth.startswith("Bearer "):
             candidate = auth[7:].strip()

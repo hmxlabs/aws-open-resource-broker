@@ -5,6 +5,8 @@ runtime selection and switching of provider strategies while maintaining
 clean separation of concerns and SOLID principles compliance.
 """
 
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import Enum
@@ -351,6 +353,29 @@ class ProviderStrategy(ABC):
         Asked after credentials are tested successfully.
         """
         return {}
+
+    @classmethod
+    def get_ui_column_schema(cls) -> list[Any]:
+        """Return UI column descriptors contributed by this provider strategy.
+
+        Each descriptor is a :class:`~orb.application.dto.system.UIColumnDescriptor`
+        instance declaring a column the UI should render for a given resource type.
+
+        The import is deferred so that provider packages without the application
+        DTO layer installed can still load without error.
+
+        Declared as a ``@classmethod`` so callers can retrieve the schema from
+        the class directly — no instance (and therefore no live AWS credentials
+        or I/O) is required.
+
+        Default implementation returns an empty list — providers opt in by
+        overriding this method.  Existing provider strategies that do not
+        override remain fully backward-compatible.
+
+        Returns:
+            List of UIColumnDescriptor instances (may be empty).
+        """
+        return []
 
     @classmethod
     def get_cli_extra_config_keys(cls) -> set[str]:

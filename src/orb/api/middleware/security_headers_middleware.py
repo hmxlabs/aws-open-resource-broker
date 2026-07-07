@@ -54,13 +54,17 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         # Content Security Policy — 'unsafe-inline' removed from script-src.
         # If inline scripts are genuinely needed, use nonce-based CSP instead.
         # 'unsafe-inline' is kept for style-src because Reflex injects inline styles.
+        # connect-src includes ws: and wss: to allow the Reflex /_event WebSocket
+        # to reach a backend that may be on a different host in split-mode deployments.
+        # WS connections are still protected by the browser's same-origin handshake
+        # and Reflex's own origin check at the WS upgrade stage.
         response.headers["Content-Security-Policy"] = (
             "default-src 'self'; "
             "script-src 'self'; "
             "style-src 'self' 'unsafe-inline'; "
             "img-src 'self' data:; "
             "font-src 'self'; "
-            "connect-src 'self'; "
+            "connect-src 'self' ws: wss:; "
             "frame-ancestors 'none'"
         )
 

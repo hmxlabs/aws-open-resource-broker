@@ -75,6 +75,16 @@ class ConfigurationManager:
         self._scheduler_override: Optional[str] = None
 
     @property
+    def config_file(self) -> str | None:
+        """Return the config file path this manager was initialised with.
+
+        Prefer this over accessing the private ``_config_file`` attribute
+        directly.  Returns ``None`` when the manager was constructed from an
+        in-memory dict without a backing file.
+        """
+        return self._config_file
+
+    @property
     def loader(self) -> ConfigurationLoader:
         """Lazy load configuration loader."""
         if self._loader is None:

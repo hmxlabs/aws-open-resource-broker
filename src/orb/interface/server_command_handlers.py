@@ -128,8 +128,22 @@ def _build_runtime(args):
 
         await _initialize_application()
 
-        if not api_only and ui_config and ui_config.enabled and ui_config.mode == "embedded":
-            return await run_embedded_foreground(ui_config, scheduler)
+        # --api-only forces split (API-only) mode regardless of config.
+        if api_only:
+            return await run_api_foreground(
+                server_config,
+                socket_path=socket_path,
+                reload=reload_flag,
+                log_level=log_level,
+            )
+
+        if ui_config and ui_config.enabled and ui_config.mode in ("embedded", "split", "dev"):
+            return await run_embedded_foreground(
+                ui_config,
+                server_config=server_config,
+                scheduler=scheduler,
+            )
+
         return await run_api_foreground(
             server_config,
             socket_path=socket_path,
@@ -143,11 +157,24 @@ def _build_runtime(args):
 def _health_url(server_config: Any, ui_config: Any | None) -> str:
     """Build the URL to probe for ``status``.
 
-    Embedded UI mounts ORB FastAPI at ``/orb`` on the UI backend port.
-    Standalone API exposes ``/health`` at the root.
+    ``embedded`` mode: FastAPI is mounted at ``/orb`` on ``server_config.port``
+    (single uvicorn, no Reflex), so the health endpoint is ``/orb/health``.
+
+    ``dev`` mode (legacy Reflex path): FastAPI lives at ``/orb`` on the Reflex
+    backend port, so the health endpoint is ``/orb/health`` on
+    ``ui_config.backend_port``.
+
+    All other cases (``split``, API-only, no UI config): the standard
+    ``/health`` at the root on ``server_config.port``.
     """
-    if ui_config and ui_config.enabled and ui_config.mode == "embedded":
-        return f"http://127.0.0.1:{ui_config.backend_port}/orb/health"
+    if ui_config and ui_config.enabled:
+        if ui_config.mode == "embedded":
+            host = server_config.host
+            if host in ("0.0.0.0", "::"):
+                host = "127.0.0.1"
+            return f"http://{host}:{server_config.port}/orb/health"
+        if ui_config.mode == "dev":
+            return f"http://127.0.0.1:{ui_config.backend_port}/orb/health"
     host = server_config.host
     if host in ("0.0.0.0", "::"):
         host = "127.0.0.1"
@@ -327,6 +354,14 @@ async def handle_server_reload(args) -> dict[str, Any]:
     pid_file, _log_file, _wd = _resolve_lifecycle_paths(server_config)
 
     if ui_config and ui_config.enabled and ui_config.mode == "embedded":
+        # Embedded mode: single uvicorn on server_config.port, API at /orb.
+        host = server_config.host
+        if host in ("0.0.0.0", "::"):
+            host = "127.0.0.1"
+        port = server_config.port
+        path = "/orb/api/v1/admin/reload-config"
+    elif ui_config and ui_config.enabled and ui_config.mode == "dev":
+        # Dev mode: Reflex backend process owns the DI container.
         host, port = "127.0.0.1", ui_config.backend_port
         path = "/orb/api/v1/admin/reload-config"
     else:

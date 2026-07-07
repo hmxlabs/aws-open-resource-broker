@@ -154,10 +154,23 @@ class AuthConfig(BaseModel):
 
 
 class CORSConfig(BaseModel):
-    """CORS configuration."""
+    """CORS configuration.
+
+    The default ``origins`` value is intentionally restrictive
+    (``["http://localhost:8000"]``) — the single-origin embedded-mode default.
+    Operators who bind the server to ``0.0.0.0`` (network exposure) MUST also
+    update ``origins`` and ``trusted_hosts`` to the actual client origins they
+    want to permit.
+    """
 
     enabled: bool = Field(True, description="Enable CORS")
-    origins: list[str] = Field(["*"], description="Allowed origins")
+    origins: list[str] = Field(
+        ["http://localhost:8000"],
+        description=(
+            "Allowed CORS origins.  Default is single-origin embedded-mode. "
+            "Operators binding to 0.0.0.0 MUST set this to their actual client origins."
+        ),
+    )
     methods: list[str] = Field(
         ["GET", "POST", "PUT", "DELETE", "OPTIONS"], description="Allowed methods"
     )
@@ -171,8 +184,12 @@ class ServerConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     enabled: bool = Field(False, description="Enable REST API server")
-    # Intentional binding for server deployment
-    host: str = Field("0.0.0.0", description="Server host")  # nosec B104 - intentional default for server deployment, overridable via config
+    # Bind to loopback by default; operators who need network exposure must
+    # explicitly set host="0.0.0.0" AND update cors.origins / trusted_hosts.
+    host: str = Field(
+        "127.0.0.1",
+        description="Server host (default loopback; use 0.0.0.0 for network exposure with explicit origins/trusted_hosts)",
+    )
     port: int = Field(8000, description="Server port")
     workers: int = Field(1, description="Number of worker processes")
     reload: bool = Field(False, description="Enable auto-reload for development")
@@ -191,7 +208,15 @@ class ServerConfig(BaseModel):
 
     # Security
     require_https: bool = Field(False, description="Require HTTPS for all requests")
-    trusted_hosts: list[str] = Field(["*"], description="Trusted host headers")
+    trusted_hosts: list[str] = Field(
+        ["localhost", "127.0.0.1", "testserver", "test"],
+        description=(
+            "Trusted host headers.  Default allows loopback + the "
+            "``testserver`` / ``test`` hostnames used by Starlette's "
+            "TestClient and httpx AsyncClient(base_url=...) fixtures.  "
+            "Operators binding to 0.0.0.0 MUST add their actual public hostname(s) here."
+        ),
+    )
     trusted_proxies: list[str] = Field(
         default_factory=list,
         description="IP addresses of trusted reverse proxies. When set, X-Forwarded-For is only "

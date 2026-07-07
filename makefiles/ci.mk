@@ -108,6 +108,10 @@ ci-tests-unit:  ## Run unit tests only (matches ci.yml unit-tests job)
 	@echo "Running unit tests (parallel)..."
 	$(call run-tool,pytest,$(TESTS_UNIT) $(PYTEST_PARALLEL) $(PYTEST_ARGS) $(PYTEST_COV_ARGS) --cov-report=xml:coverage-unit.xml --junitxml=junit-unit.xml)
 
+ci-tests-ui-unit:  ## Run UI unit tests (tests/ui/) on every pull_request
+	@echo "Running UI unit tests..."
+	$(call run-tool,pytest,tests/ui/ $(PYTEST_ARGS) $(PYTEST_COV_ARGS) --cov-report=xml:coverage-ui-unit.xml --junitxml=junit-ui-unit.xml)
+
 ci-tests-integration:  ## Run integration tests only (matches ci.yml integration-tests job)
 	@echo "Running integration tests (parallel)..."
 	$(call run-tool,pytest,$(TESTS_INTEGRATION) $(PYTEST_PARALLEL) $(PYTEST_ARGS) $(PYTEST_COV_ARGS) --cov-report=xml:coverage-integration.xml --junitxml=junit-integration.xml)
@@ -151,6 +155,14 @@ ci-tests-providers-serial:  ## Run the serial-marked subset of provider tests (l
 ci-tests-infrastructure:  ## Run infrastructure tests only (matches ci.yml infrastructure-tests job)
 	@echo "Running infrastructure tests (parallel)..."
 	$(call run-tool,pytest,$(TESTS_INFRASTRUCTURE) $(PYTEST_PARALLEL) $(PYTEST_ARGS) $(PYTEST_COV_ARGS) --cov-report=xml:coverage-infrastructure.xml --junitxml=junit-infrastructure.xml)
+
+# @SECTION UI Build
+
+ui-build:  ## Build the Reflex static bundle into src/orb/ui/_static
+	@./dev-tools/package/build_ui.sh
+
+ci-tests-ui-smoke:  ## Boot embedded UI + curl each page + shut down (matches ci.yml ui-smoke job)
+	@./dev-tools/ci/run_ui_smoke.sh
 
 ci-check:  ## Run comprehensive CI checks (matches GitHub Actions exactly)
 	@echo "Running comprehensive CI checks that match GitHub Actions pipeline..."
