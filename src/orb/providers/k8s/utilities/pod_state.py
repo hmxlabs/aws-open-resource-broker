@@ -32,6 +32,7 @@ FATAL_WAITING_REASONS: frozenset[str] = frozenset(
         "ErrImagePull",
         "CreateContainerConfigError",
         "CreateContainerError",
+        "CrashLoopBackOff",
     }
 )
 

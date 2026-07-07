@@ -19,10 +19,12 @@ with victim names that include non-highest ordinals, the handler:
 
 1. Computes the current top-of-stack ordinal range that *would* be
    removed by scaling down by ``len(machine_ids)``.
-2. Logs a WARNING that the actual victims will differ from the caller's
-   request (the controller will pick the highest ordinals).
-3. Patches ``spec.replicas`` to ``current - len(machine_ids)`` and lets
-   the controller do the eviction.
+2. Raises :class:`K8sError` when the caller-supplied victims are not
+   exactly that top-of-stack set — silently evicting different pods
+   would cause data loss.
+3. Otherwise patches ``spec.replicas`` to
+   ``current - len(machine_ids)`` and lets the controller do the
+   eviction.
 
 The full-release path (``machine_ids`` covers every pod for the request)
 patches ``spec.replicas: 0`` directly and then deletes the StatefulSet.
@@ -48,9 +50,10 @@ Module split
   which lists pods via the request-id label selector (cache-first when
   a watcher is wired) and reads back the controller view from the
   StatefulSet status.
-* ``release_hosts``    — selective via ordinal-aware scale-down (with a
-  WARNING when the requested victims are not the top-of-stack ordinals);
-  full-release via replicas patch to zero + StatefulSet delete.
+* ``release_hosts``    — selective via ordinal-aware scale-down; the
+  handler refuses the request when the caller-supplied victims are not
+  the top-of-stack ordinals.  Full-release via replicas patch to zero
+  + StatefulSet delete.
 """
 
 from __future__ import annotations
@@ -64,6 +67,7 @@ from orb.domain.base.provider_fulfilment import CheckHostsStatusResult
 from orb.domain.request.aggregate import Request
 from orb.domain.template.template_aggregate import Template
 from orb.providers.k8s.configuration.config import K8sProviderConfig
+from orb.providers.k8s.exceptions.k8s_errors import K8sError
 from orb.providers.k8s.infrastructure.handlers.base_handler import K8sHandlerBase
 from orb.providers.k8s.infrastructure.handlers.statefulset_status import StatefulSetStatusResolver
 from orb.providers.k8s.infrastructure.k8s_client import K8sClient
@@ -287,10 +291,11 @@ class K8sStatefulSetHandler(K8sHandlerBase):
             await self._delete_statefulset(namespace, statefulset_name)
             return
 
-        # Selective release — warn if the victims are not the top-of-stack
-        # ordinals.  The StatefulSet controller will always evict the
-        # highest ordinals regardless of what the caller passed.
-        self._warn_if_non_highest_ordinal_victims(
+        # Selective release — REFUSE when caller-supplied victims are not
+        # the top-of-stack ordinals.  Silently evicting different pods
+        # would cause data loss; the caller can either supply the correct
+        # top-of-stack victims or trigger a full release explicitly.
+        self._reject_non_highest_ordinal_victims(
             statefulset_name=statefulset_name,
             current_replicas=current_replicas,
             requested_victims=machine_ids,
@@ -300,7 +305,7 @@ class K8sStatefulSetHandler(K8sHandlerBase):
         new_replicas = max(current_replicas - len(machine_ids), 0)
         await self._patch_replicas(namespace, statefulset_name, target=new_replicas)
 
-    def _warn_if_non_highest_ordinal_victims(
+    def _reject_non_highest_ordinal_victims(
         self,
         *,
         statefulset_name: str,
@@ -308,16 +313,7 @@ class K8sStatefulSetHandler(K8sHandlerBase):
         requested_victims: list[str],
         request_id: str,
     ) -> None:
-        """Emit a WARNING when the requested victims are not the top-of-stack ordinals.
-
-        The StatefulSet controller will remove the ``len(requested_victims)``
-        highest ordinals in ``[0, current_replicas - 1]``.  If the
-        caller's ``requested_victims`` does not match that set we log a
-        WARNING so operators can audit the discrepancy.  We still scale
-        down — the caller asked to release *N* pods, and that is what
-        happens; the only thing that changes is *which* ordinals.
-        """
-        # Expected actual victims = the top-of-stack ordinals.
+        """Raise :class:`K8sError` when the requested victims are not top-of-stack."""
         eviction_count = len(requested_victims)
         if eviction_count == 0 or current_replicas <= 0:
             return
@@ -329,24 +325,18 @@ class K8sStatefulSetHandler(K8sHandlerBase):
         if requested_set == actual_victim_names:
             return
 
-        # Extract any ordinals that *can* be parsed from the requested
-        # names so the WARNING is concrete; unparseable names are
-        # reported verbatim.
         requested_ordinals: list[Optional[int]] = [
             parse_statefulset_pod_ordinal(name, statefulset_name) for name in requested_victims
         ]
 
-        self._logger.warning(
-            "StatefulSet selective release requested non-highest-ordinal victims for "
-            "request %s (statefulset=%s, current_replicas=%s); the controller will "
-            "evict the highest-ordinal pods instead.  requested_victims=%s "
-            "requested_ordinals=%s actual_victims=%s",
-            request_id,
-            statefulset_name,
-            current_replicas,
-            requested_victims,
-            requested_ordinals,
-            sorted(actual_victim_names),
+        raise K8sError(
+            "StatefulSet selective release refused for "
+            f"request {request_id} (statefulset={statefulset_name}, "
+            f"current_replicas={current_replicas}): the controller only supports "
+            "scale-down from the top of the ordinal stack, so the caller-supplied "
+            "victims cannot be honoured.  Either supply the top-of-stack pod names "
+            f"({sorted(actual_victim_names)}) or release every pod for the request. "
+            f"requested_victims={requested_victims} requested_ordinals={requested_ordinals}"
         )
 
     async def _patch_replicas(

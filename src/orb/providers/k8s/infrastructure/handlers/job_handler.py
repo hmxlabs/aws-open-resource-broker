@@ -54,6 +54,7 @@ from orb.domain.base.provider_fulfilment import CheckHostsStatusResult
 from orb.domain.request.aggregate import Request
 from orb.domain.template.template_aggregate import Template
 from orb.providers.k8s.configuration.config import K8sProviderConfig
+from orb.providers.k8s.exceptions.k8s_errors import K8sError
 from orb.providers.k8s.infrastructure.handlers.base_handler import K8sHandlerBase
 from orb.providers.k8s.infrastructure.handlers.job_status import JobStatusResolver
 from orb.providers.k8s.infrastructure.k8s_client import K8sClient
@@ -198,21 +199,23 @@ class K8sJobHandler(K8sHandlerBase):
 
         Selective release is **not supported** for Jobs — ``parallelism``
         cannot be safely mutated post-creation given ORB's
-        ``backoffLimit=0`` invariant.  Any call to ``release_hosts``
-        deletes the entire Job; ``machine_ids`` is logged for audit but
-        not honoured selectively.
-
-        The Job is deleted with ``propagation_policy='Background'`` so
-        the API call returns immediately and the controller cleans up
-        the owned pods asynchronously.
+        ``backoffLimit=0`` invariant.  When the caller-supplied
+        ``machine_ids`` covers every pod of the Job, the entire Job is
+        deleted; when it covers only a subset, the handler refuses the
+        request rather than silently deleting workloads the caller did
+        not ask to release.
 
         Args:
-            machine_ids: Pod names the caller wanted to release.  Logged
-                at info level for audit; not used for selective release.
+            machine_ids: Pod names the caller wants to release.  Must
+                cover every pod of the Job (length ==
+                ``provider_data["parallelism"]``); a subset is rejected.
             provider_data: The ``provider_data`` dict stamped onto the
-                Request aggregate at acquire time.  Carries ``namespace``
-                and ``job_name`` (falls back to deterministic defaults
-                when absent).
+                Request aggregate at acquire time.  Carries ``namespace``,
+                ``job_name`` and ``parallelism``.
+
+        Raises:
+            K8sError: When ``machine_ids`` covers fewer pods than the
+                Job was created with.
         """
         request_id = provider_data.get("request_id", "unknown")
         if not machine_ids:
@@ -225,9 +228,22 @@ class K8sJobHandler(K8sHandlerBase):
         namespace = self._resolve_namespace_from_provider_data(provider_data)
         job_name = self._resolve_job_name_from_provider_data(provider_data)
 
+        parallelism = int(provider_data.get("parallelism") or 0)
+        if parallelism and len(machine_ids) < parallelism:
+            raise K8sError(
+                "Job selective release refused for "
+                f"request {request_id} (job={namespace}/{job_name}): the Job "
+                f"controller does not support subset release (parallelism cannot be "
+                f"mutated post-creation).  Deleting the Job now would evict every "
+                f"pod, not just the {len(machine_ids)} caller requested.  Either "
+                f"release every pod for the request (len(machine_ids) == parallelism "
+                f"== {parallelism}) or leave the Job running.  requested_machine_ids="
+                f"{machine_ids}"
+            )
+
         self._logger.info(
             "Kubernetes job release: request_id=%s namespace=%s job=%s "
-            "requested_machine_ids=%s (deleting whole Job — selective release not supported)",
+            "requested_machine_ids=%s (deleting whole Job)",
             request_id,
             namespace,
             job_name,
