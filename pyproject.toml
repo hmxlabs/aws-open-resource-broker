@@ -181,8 +181,7 @@ test-aws = [
     "requests-mock>=1.11.0,<2.0.0",
 ]
 
-# k8s test dependencies — kmock HTTP-level API mock server.
-# kmock runs an in-process aiohttp server that mimics the Kubernetes apiserver.
+# Kubernetes test dependencies — kmock is an in-process HTTP-level K8s API mock.
 # Tests point the real kubernetes SDK client at the kmock URL so the full
 # client stack is exercised without a live cluster.
 test-k8s = [
@@ -439,7 +438,6 @@ include-package-data = true
 "orb.k8s_legacy.alembic" = ["alembic.ini", "script.py.mako"]
 "orb.k8s_legacy.alembic.versions" = ["*.py"]
 "orb.k8s_legacy.tests.resources" = ["*.yml", "*.tpl"]
-"orb.providers.k8s.hostfactory" = ["providers/k8s-hf/scripts/*.sh"]
 
 [tool.setuptools.data-files]
 "orb_scripts" = ["src/orb/infrastructure/scheduler/hostfactory/scripts/*.sh", "src/orb/infrastructure/scheduler/hostfactory/scripts/*.bat"]  # keep in sync with .project.yml build.package_root
