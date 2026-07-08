@@ -495,12 +495,26 @@ def create_fastapi_app(server_config: Any) -> Any:
 
         try:
             collector = get_container().get_optional(MetricsCollector)
-            if collector is None:
-                return Response(content="", media_type="text/plain; version=0.0.4")  # type: ignore[misc]
-            prometheus_text = collector.to_prometheus_text()
-            return Response(content=prometheus_text, media_type="text/plain; version=0.0.4")  # type: ignore[misc]
+            homegrown_text: str = collector.to_prometheus_text() if collector is not None else ""
         except Exception:
-            return Response(content="", media_type="text/plain; version=0.0.4")  # type: ignore[misc]
+            homegrown_text = ""
+
+        # Append prometheus_client REGISTRY output (k8s metrics live there).
+        # prometheus_client is an optional [monitoring] extra — guard the import
+        # so a minimal install without it still returns the homegrown text.
+        registry_text: str = ""
+        try:
+            from prometheus_client import REGISTRY, generate_latest
+
+            registry_text = generate_latest(REGISTRY).decode("utf-8")
+        except Exception:  # ImportError or any prometheus_client internal error
+            pass
+
+        body = homegrown_text
+        if registry_text:
+            body = body + "\n" + registry_text if body else registry_text
+
+        return Response(content=body, media_type="text/plain; version=0.0.4")  # type: ignore[misc]
 
     # Add info endpoint
     @app.get("/info", tags=["System"])

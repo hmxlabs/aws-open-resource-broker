@@ -236,6 +236,29 @@ class K8sMetrics:
         safe_event = _validate_label("event_type", event_type, WATCH_EVENT_TYPES)
         self.watch_events_total.labels(namespace=namespace, event_type=safe_event).inc()
 
+    def record_apiserver_latency(self, *, operation: str, seconds: float) -> None:
+        """Observe a single API server call latency sample.
+
+        ``operation`` is a free-form label (e.g. ``"list_pods"``) — keep
+        the cardinality low by using a small fixed set of operation names.
+        """
+        self.apiserver_latency_seconds.labels(operation=operation).observe(seconds)
+
+    def set_active_pods(self, *, namespace: str, count: int) -> None:
+        """Set the ``orb_k8s_active_pods`` gauge for *namespace*."""
+        self.active_pods.labels(namespace=namespace).set(count)
+
+    def set_active_requests(self, *, namespace: str, count: int) -> None:
+        """Set the ``orb_k8s_active_requests`` gauge for *namespace*."""
+        self.active_requests.labels(namespace=namespace).set(count)
+
+    def set_circuit_breaker_state(self, *, name: str, state: int) -> None:
+        """Set the ``orb_k8s_circuit_breaker_state`` gauge.
+
+        ``state`` must be one of: 0=closed, 1=open, 2=half_open.
+        """
+        self.circuit_breaker_state.labels(name=name).set(state)
+
     @staticmethod
     def registered_names() -> list[str]:
         """Return the canonical metric names exported by this module.

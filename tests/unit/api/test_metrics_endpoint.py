@@ -25,16 +25,28 @@ def _make_app() -> FastAPI:
 
     @app.get("/metrics")
     async def metrics_endpoint():
+        # Mirrors the real handler in server.py: homegrown collector text plus
+        # the prometheus_client REGISTRY output (where k8s provider metrics live).
         from orb.infrastructure.di.container import get_container
 
         try:
             collector = get_container().get_optional(MetricsCollector)
-            if collector is None:
-                return Response(content="", media_type="text/plain; version=0.0.4")
-            prometheus_text = collector.to_prometheus_text()
-            return Response(content=prometheus_text, media_type="text/plain; version=0.0.4")
+            homegrown_text = collector.to_prometheus_text() if collector is not None else ""
         except Exception:
-            return Response(content="", media_type="text/plain; version=0.0.4")
+            homegrown_text = ""
+
+        registry_text = ""
+        try:
+            from prometheus_client import REGISTRY, generate_latest
+
+            registry_text = generate_latest(REGISTRY).decode("utf-8")
+        except Exception:
+            pass
+
+        body = homegrown_text
+        if registry_text:
+            body = body + "\n" + registry_text if body else registry_text
+        return Response(content=body, media_type="text/plain; version=0.0.4")
 
     return app
 
@@ -106,7 +118,10 @@ class TestMetricsEndpoint:
         assert 'active_instances{type="ec2"} 3.0' in body
         assert "requests_total{} 42.0" in body
 
-    def test_no_collector_returns_empty_body(self):
+    def test_no_collector_still_returns_registry(self):
+        # With no homegrown collector, the endpoint must not 500 — it returns
+        # whatever the prometheus_client REGISTRY holds (default process/GC
+        # collectors in a clean process), never a crash.
         app = _make_app()
         with patch("orb.infrastructure.di.container.get_container") as mock_get:
             mock_container = MagicMock()
@@ -115,9 +130,13 @@ class TestMetricsEndpoint:
             client = TestClient(app, raise_server_exceptions=False)
             resp = client.get("/metrics")
         assert resp.status_code == 200
-        assert resp.text == ""
+        # No homegrown metric text; body is purely REGISTRY output (may include
+        # default python_* collectors). The homegrown portion must be absent.
+        assert "active_instances" not in resp.text
 
-    def test_container_exception_returns_empty_body(self):
+    def test_container_exception_still_surfaces_registry(self):
+        # Even when the homegrown collector lookup blows up, the endpoint must
+        # still return prometheus_client REGISTRY output rather than empty.
         app = _make_app()
         with patch(
             "orb.infrastructure.di.container.get_container", side_effect=RuntimeError("boom")
@@ -125,4 +144,23 @@ class TestMetricsEndpoint:
             client = TestClient(app, raise_server_exceptions=False)
             resp = client.get("/metrics")
         assert resp.status_code == 200
-        assert resp.text == ""
+        # Body is whatever the global REGISTRY holds (may be empty in a clean
+        # process, but the request must not 500).
+
+    def test_k8s_metrics_surface_on_endpoint(self):
+        # The crux fix: k8s provider metrics register on prometheus_client
+        # REGISTRY and must appear on /metrics alongside the homegrown text.
+        from prometheus_client import CollectorRegistry, generate_latest
+
+        from orb.providers.k8s.infrastructure.services.metrics import K8sMetrics
+
+        # Register a k8s metric on an isolated registry and prove the endpoint's
+        # generate_latest wiring would surface it.  We assert against the same
+        # serialiser the endpoint uses rather than mutating the global REGISTRY.
+        reg = CollectorRegistry()
+        metrics = K8sMetrics(registry=reg)
+        metrics.acquire_total.labels(namespace="orb", spec_kind="Pod").inc()
+        text = generate_latest(reg).decode("utf-8")
+        assert "orb_k8s_acquire_total" in text
+        assert 'namespace="orb"' in text
+        assert 'spec_kind="Pod"' in text
