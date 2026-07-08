@@ -7,6 +7,7 @@ orchestrating operations through focused services while maintaining clean
 architecture and single responsibility principle.
 """
 
+import asyncio
 import time
 from typing import TYPE_CHECKING, Any, Callable, Mapping, Optional
 
@@ -20,6 +21,7 @@ from orb.application.services.spot_placement_planner import (
     SpotPlacementPlanner,
 )
 from orb.domain.base.dependency_injection import injectable
+from orb.domain.base.operation_outcome import Accepted, Completed, Failed, OperationOutcome
 from orb.domain.base.ports import LoggingPort
 from orb.domain.base.ports.configuration_port import ConfigurationPort
 
@@ -42,6 +44,7 @@ from orb.providers.aws.services.instance_operation_service import AWSInstanceOpe
 from orb.providers.aws.services.template_validation_service import AWSTemplateValidationService
 
 if TYPE_CHECKING:
+    from orb.domain.request.aggregate import Request
     from orb.monitoring.health import HealthCheck
     from orb.providers.aws.infrastructure.adapters.aws_provisioning_adapter import (
         AWSProvisioningAdapter,
@@ -135,9 +138,179 @@ class AWSProviderStrategy(ProviderStrategy):
         AWSProviderConfig(**provider_config)  # raises ValidationError if invalid
         return raw
 
+    @classmethod
+    def is_image_resolution_needed(cls) -> bool:
+        """AWS uses SSM Parameter Store paths as AMI specifications.
+
+        The TemplateConfigurationManager must resolve those paths to
+        concrete AMI IDs before submitting a fleet request to EC2.
+        """
+        return True
+
     def resolve_api_alias(self, raw_api: str) -> str:
         """Resolve AWS-specific API name aliases to canonical registry keys."""
         return self._API_ALIASES.get(raw_api, raw_api)
+
+    @classmethod
+    def get_ui_column_schema(cls) -> list:  # type: ignore[override]
+        """Return AWS-specific UI column descriptors for all resource types."""
+        from orb.application.dto.system import UIColumnDescriptor
+
+        return [
+            # ------------------------------------------------------------------
+            # machines
+            # ------------------------------------------------------------------
+            UIColumnDescriptor(
+                key="aws_machine_instance_type",
+                path="provider_data.instance_type",
+                label="Instance Type",
+                kind="badge",
+                resource_type="machines",
+                provider="aws",
+                sortable=True,
+                default_visible=True,
+            ),
+            UIColumnDescriptor(
+                key="aws_availability_zone",
+                path="provider_data.availability_zone",
+                label="AZ",
+                kind="text",
+                resource_type="machines",
+                provider="aws",
+                sortable=True,
+                default_visible=True,
+            ),
+            UIColumnDescriptor(
+                key="aws_lifecycle",
+                path="provider_data.lifecycle",
+                label="Lifecycle",
+                kind="badge",
+                resource_type="machines",
+                provider="aws",
+                badge_color_map={"spot": "orange", "ondemand": "blue"},
+            ),
+            UIColumnDescriptor(
+                key="aws_image_id",
+                path="provider_data.image_id",
+                label="AMI",
+                kind="code",
+                resource_type="machines",
+                provider="aws",
+            ),
+            UIColumnDescriptor(
+                key="aws_subnet_id",
+                path="provider_data.subnet_id",
+                label="Subnet",
+                kind="code",
+                resource_type="machines",
+                provider="aws",
+            ),
+            # ------------------------------------------------------------------
+            # requests
+            # ------------------------------------------------------------------
+            UIColumnDescriptor(
+                key="aws_request_type",
+                path="provider_data.request_type",
+                label="Request Type",
+                kind="badge",
+                resource_type="requests",
+                provider="aws",
+                badge_color_map={
+                    "RunInstances": "teal",
+                    "EC2Fleet": "blue",
+                    "SpotFleet": "purple",
+                    "ASG": "orange",
+                },
+                default_visible=True,
+            ),
+            UIColumnDescriptor(
+                key="aws_launch_template_id",
+                path="provider_data.launch_template_id",
+                label="Launch Template",
+                kind="code",
+                resource_type="requests",
+                provider="aws",
+            ),
+            UIColumnDescriptor(
+                key="aws_launch_template_version",
+                path="provider_data.launch_template_version",
+                label="LT Version",
+                kind="text",
+                resource_type="requests",
+                provider="aws",
+            ),
+            UIColumnDescriptor(
+                key="aws_fulfillment_method",
+                path="provider_data.fulfillment_method",
+                label="Fulfillment Method",
+                kind="text",
+                resource_type="requests",
+                provider="aws",
+            ),
+            # ------------------------------------------------------------------
+            # templates
+            # ------------------------------------------------------------------
+            UIColumnDescriptor(
+                key="aws_provider_api",
+                path="provider_api",
+                label="Provider API",
+                kind="badge",
+                resource_type="templates",
+                provider="aws",
+                badge_color_map={
+                    "RunInstances": "teal",
+                    "EC2Fleet": "blue",
+                    "SpotFleet": "purple",
+                    "ASG": "orange",
+                    "aws": "indigo",
+                },
+                default_visible=True,
+                sortable=True,
+            ),
+            UIColumnDescriptor(
+                key="aws_template_instance_type",
+                path="instance_type",
+                label="Instance Type",
+                kind="text",
+                resource_type="templates",
+                provider="aws",
+                default_visible=True,
+                sortable=True,
+            ),
+            UIColumnDescriptor(
+                key="aws_allocation_strategy",
+                path="allocation_strategy",
+                label="Allocation Strategy",
+                kind="text",
+                resource_type="templates",
+                provider="aws",
+            ),
+            UIColumnDescriptor(
+                key="aws_price_type",
+                path="price_type",
+                label="Price Type",
+                kind="badge",
+                resource_type="templates",
+                provider="aws",
+                badge_color_map={"ondemand": "blue", "spot": "orange", "mixed": "purple"},
+            ),
+            UIColumnDescriptor(
+                key="aws_key_name",
+                path="key_name",
+                label="Key Name",
+                kind="text",
+                resource_type="templates",
+                provider="aws",
+            ),
+            UIColumnDescriptor(
+                key="aws_image_id",
+                path="image_id",
+                label="AMI",
+                kind="code",
+                resource_type="templates",
+                provider="aws",
+            ),
+        ]
 
     @property
     def provider_name(self) -> Optional[str]:
@@ -233,8 +406,7 @@ class AWSProviderStrategy(ProviderStrategy):
         """Route operations to appropriate services."""
         if operation.operation_type == ProviderOperationType.CREATE_INSTANCES:
             template_config = operation.parameters.get("template_config", {})
-            allocation_strategy = template_config.get("allocation_strategy")
-            if allocation_strategy == "spotPlacementScore":
+            if template_config.get("allocation_strategy") == "spotPlacementScore":
                 return self._execute_planned_spot_launches(operation)
             handlers = self._get_handler_registry().get_available_handlers()
             return await self._get_instance_service().create_instances(operation, handlers)
@@ -335,9 +507,7 @@ class AWSProviderStrategy(ProviderStrategy):
         if provider_api == "EC2Fleet":
             provider_data = result.get("provider_data")
             fleet_errors = (
-                provider_data.get("fleet_errors")
-                if isinstance(provider_data, Mapping)
-                else None
+                provider_data.get("fleet_errors") if isinstance(provider_data, Mapping) else None
             )
             if fleet_errors:
                 instance_ids = result.get("instance_ids")
@@ -431,9 +601,15 @@ class AWSProviderStrategy(ProviderStrategy):
         """Check AWS provider health status."""
         return self._get_health_service().check_health()
 
-    def generate_provider_name(self, config: dict[str, Any]) -> str:
+    @classmethod
+    def generate_provider_name(cls, config: dict[str, Any]) -> str:
         """Generate AWS provider name: aws_{profile}_{region}"""
-        return self._get_capability_service().generate_provider_name(config)
+        import re
+
+        profile = config.get("profile") or "instance-profile"
+        region = config.get("region", "us-east-1")
+        sanitized_profile = re.sub(r"[^a-zA-Z0-9\-_]", "-", str(profile))
+        return f"aws_{sanitized_profile}_{region}"
 
     def parse_provider_name(self, provider_name: str) -> dict[str, str]:
         """Parse AWS provider name back to components."""
@@ -583,8 +759,15 @@ class AWSProviderStrategy(ProviderStrategy):
         logic for discovering instances from resource IDs. This delegates to the
         correct handler's check_hosts_status method rather than using a generic
         service that lacks per-handler context.
+
+        The handler returns a CheckHostsStatusResult containing both instance
+        details and a ProviderFulfilment verdict.  The fulfilment is forwarded
+        in metadata so RequestStatusService can consume it without any
+        provider-specific logic.
         """
         try:
+            from orb.domain.base.provider_fulfilment import ProviderFulfilment
+
             resource_ids = operation.parameters.get("resource_ids", [])
             provider_api = operation.parameters.get("provider_api", "RunInstances")
             provider_api_value = (
@@ -616,25 +799,32 @@ class AWSProviderStrategy(ProviderStrategy):
                 operation.context.get("request_id") if operation.context else None
             )
 
+            requested_count = int(operation.parameters.get("requested_count") or 1)
             request = Request.create_new_request(
                 request_type=RequestType.ACQUIRE,
                 template_id=operation.parameters.get("template_id", "unknown"),
-                machine_count=1,
+                machine_count=requested_count,
                 provider_type="aws",
                 provider_name="aws-default",
                 request_id=request_id,
             )
             request.resource_ids = resource_ids
 
-            instance_details = handler.check_hosts_status(request)
+            # check_hosts_status performs blocking boto3 I/O; keep it off the async event loop.
+            check_result = await asyncio.to_thread(handler.check_hosts_status, request)
+            instance_details = check_result.instances
+            fulfilment: ProviderFulfilment = check_result.fulfilment
 
             metadata: dict[str, Any] = {
                 "operation": "describe_resource_instances",
                 "resource_ids": resource_ids,
                 "provider_api": provider_api_value,
                 "instance_count": len(instance_details),
+                # Forward the provider's fulfilment verdict to the application layer.
+                # RequestStatusService reads this as "provider_fulfilment" and trusts
+                # it exclusively — no count math or AWS-specific key inspection.
+                "provider_fulfilment": fulfilment,
             }
-            self._augment_capacity_metadata(metadata, provider_api_value, resource_ids)
 
             if not instance_details:
                 self._logger.info("No instances found for resources: %s", resource_ids)
@@ -651,7 +841,10 @@ class AWSProviderStrategy(ProviderStrategy):
                 "DESCRIBE_RESOURCE_INSTANCES_ERROR",
             )
 
+    # -------------------------------------------------------------------------
     # Infrastructure discovery methods (delegated to service)
+    # -------------------------------------------------------------------------
+
     def discover_infrastructure(self, provider_config: dict[str, Any]) -> dict[str, Any]:
         """Discover AWS infrastructure for provider."""
         return self._get_infrastructure_service().discover_infrastructure(provider_config)
@@ -674,24 +867,35 @@ class AWSProviderStrategy(ProviderStrategy):
         """Validate AWS infrastructure configuration."""
         return self._get_infrastructure_service().validate_infrastructure(provider_config)
 
-    # Credential methods (delegated to health service)
-    def get_available_credential_sources(self) -> list[dict]:
-        """Get available AWS credential sources."""
-        return self._get_health_service().get_available_credential_sources()
+    # Credential methods — classmethods: read only from the local environment
+    # (boto3 credential chain, profile files) and require no instance state.
+    @classmethod
+    def get_available_credential_sources(cls) -> list[dict]:
+        """Get available AWS credential sources from the local boto3 profile chain."""
+        from orb.providers.aws.profile_discovery import get_available_profiles
 
-    def test_credentials(self, credential_source: Optional[str] = None, **kwargs) -> dict:
-        """Test AWS credentials."""
-        return self._get_health_service().test_credentials(credential_source, **kwargs)
+        return get_available_profiles()
 
-    def get_credential_requirements(self) -> dict:
-        """AWS requires region."""
-        return self._get_health_service().get_credential_requirements()
+    @classmethod
+    def test_credentials(cls, credential_source: Optional[str] = None, **kwargs) -> dict:
+        """Test AWS credentials using the boto3 session factory."""
+        from orb.providers.aws.session_factory import AWSSessionFactory
 
-    def get_operational_requirements(self) -> dict:
-        """Get operational requirements for AWS."""
-        return self._get_health_service().get_operational_requirements()
+        region = kwargs.get("region")
+        return AWSSessionFactory.discover_credentials(credential_source, region)
 
-    def get_available_regions(self) -> list[tuple[str, str]]:
+    @classmethod
+    def get_credential_requirements(cls) -> dict:
+        """AWS profiles are region-independent; region is collected separately."""
+        return {}
+
+    @classmethod
+    def get_operational_requirements(cls) -> dict:
+        """AWS requires a region to operate."""
+        return {"region": {"required": True, "description": "AWS region"}}
+
+    @classmethod
+    def get_available_regions(cls) -> list[tuple[str, str]]:
         """Get common AWS regions as (region_id, display_name) tuples."""
         return [
             ("us-east-1", "N. Virginia"),
@@ -708,22 +912,63 @@ class AWSProviderStrategy(ProviderStrategy):
             ("sa-east-1", "São Paulo"),
         ]
 
-    def get_default_region(self) -> str:
+    @classmethod
+    def get_default_region(cls) -> str:
         """Return the default AWS region for CLI prompts."""
         return "us-east-1"
 
-    def get_cli_extra_config_keys(self) -> set[str]:
+    @classmethod
+    def get_operational_param_choices(cls, param: str) -> list[tuple[str, str]]:
+        """Return picker choices for an operational parameter, if any.
+
+        The generic ``orb init`` operational-params prompt consults this hook
+        to render a numbered picker for a parameter.  When the returned list
+        is empty the prompt falls back to free-text input.
+        """
+        if param == "region":
+            return cls.get_available_regions()
+        return []
+
+    @classmethod
+    def get_operational_param_default(cls, param: str) -> str:
+        """Return the default value for an operational parameter.
+
+        Consulted by the ``orb init`` operational-params prompt to pre-select
+        a picker entry (or pre-fill a free-text field) when the operator does
+        not choose explicitly.
+        """
+        if param == "region":
+            return cls.get_default_region()
+        return ""
+
+    @classmethod
+    def get_cli_extra_config_keys(cls) -> set[str]:
         """Return AWS keys that belong in provider config, not template_defaults."""
         return {"fleet_role"}
 
-    def get_cli_provider_config(self, args: Any) -> dict[str, Any]:
-        """Extract AWS provider config from init CLI args."""
+    @classmethod
+    def get_cli_provider_config(cls, args: Any) -> dict[str, Any]:
+        """Extract AWS provider config keys from parsed CLI args.
+
+        Reads ``--aws-profile`` and ``--aws-region`` (the AWS-scoped flags
+        registered via ``AWSCLISpec``).  Both values default to ``None``
+        (profile) or the canonical default region when not supplied; the
+        ``_get_default_config`` overlay via ``CLISpecRegistry`` will also
+        fill any remaining gaps from ``args.aws_profile`` / ``args.aws_region``.
+
+        Args:
+            args: Parsed argparse.Namespace from the ``orb init`` invocation.
+
+        Returns:
+            Dict with ``region`` and ``profile`` keys.
+        """
         return {
-            "profile": getattr(args, "profile", None) or None,
-            "region": getattr(args, "region", None) or self.get_default_region(),
+            "profile": getattr(args, "aws_profile", None) or None,
+            "region": getattr(args, "aws_region", None) or cls.get_default_region(),
         }
 
-    def get_cli_infrastructure_defaults(self, args: Any) -> dict[str, Any]:
+    @classmethod
+    def get_cli_infrastructure_defaults(cls, args: Any) -> dict[str, Any]:
         """Extract AWS-specific infrastructure defaults from parsed CLI args."""
         result: dict[str, Any] = {}
         if getattr(args, "subnet_ids", None):
@@ -740,7 +985,13 @@ class AWSProviderStrategy(ProviderStrategy):
             return
         from orb.providers.aws.health import register_aws_health_checks
 
-        register_aws_health_checks(health_check, self.aws_client)
+        storage_strategy = "json"
+        if self._config_port is not None:
+            try:
+                storage_strategy = self._config_port.get_storage_strategy()
+            except Exception:
+                pass
+        register_aws_health_checks(health_check, self.aws_client, storage_strategy)
 
     def cleanup(self) -> None:
         """Clean up AWS provider resources."""
@@ -751,100 +1002,6 @@ class AWSProviderStrategy(ProviderStrategy):
             self._initialized = False
         except Exception as e:
             self._logger.warning("Failed during AWS provider cleanup: %s", e, exc_info=True)
-
-    def _augment_capacity_metadata(
-        self, metadata: dict[str, Any], provider_api: str, resource_ids: list[str]
-    ) -> None:
-        """Add fleet capacity fulfillment data to metadata for fleet-based providers."""
-        if not resource_ids or not self.aws_client:
-            return
-        try:
-            resource_id = resource_ids[0]
-            capacity_fetchers: dict[str, Callable[[str], Optional[dict[str, Any]]]] = {
-                "EC2Fleet": self._fetch_ec2_fleet_capacity,
-                "SpotFleet": self._fetch_spot_fleet_capacity,
-                "ASG": self._fetch_asg_capacity,
-            }
-            fetcher = capacity_fetchers.get(provider_api)
-            if fetcher:
-                result = fetcher(resource_id)
-                if result is not None:
-                    metadata["fleet_capacity_fulfilment"] = result
-        except Exception as e:
-            self._logger.warning("Failed to augment capacity metadata: %s", e)
-
-    def _fetch_ec2_fleet_capacity(self, resource_id: str) -> Optional[dict[str, Any]]:
-        """Fetch capacity fulfillment data for an EC2Fleet resource."""
-        if self.aws_client is None:
-            raise AWSConfigurationError(
-                "aws_client must be injected before calling _fetch_ec2_fleet_capacity"
-            )
-        response = self.aws_client.ec2_client.describe_fleets(FleetIds=[resource_id])
-        fleets = response.get("Fleets", [])
-        if not fleets:
-            return None
-        fleet = fleets[0]
-        spec = fleet.get("TargetCapacitySpecification") or {}
-        target = spec.get("TotalTargetCapacity")
-        fulfilled = fleet.get("FulfilledCapacity") or 0
-        fleet_type_val = (fleet.get("Type") or "maintain").lower()
-        return {
-            "target_capacity_units": target,
-            "fulfilled_capacity_units": fulfilled,
-            "provisioned_instance_count": int(fulfilled),
-            "state": fleet.get("FleetState"),
-            "fleet_type": fleet_type_val,
-            "fulfillment_final": fleet_type_val == "instant",
-        }
-
-    def _fetch_spot_fleet_capacity(self, resource_id: str) -> Optional[dict[str, Any]]:
-        """Fetch capacity fulfillment data for a SpotFleet resource."""
-        if self.aws_client is None:
-            raise AWSConfigurationError(
-                "aws_client must be injected before calling _fetch_spot_fleet_capacity"
-            )
-        response = self.aws_client.ec2_client.describe_spot_fleet_requests(
-            SpotFleetRequestIds=[resource_id]
-        )
-        configs = response.get("SpotFleetRequestConfigs", [])
-        if not configs:
-            return None
-        cfg = configs[0].get("SpotFleetRequestConfig") or {}
-        fulfilled = cfg.get("FulfilledCapacity") or 0
-        return {
-            "target_capacity_units": cfg.get("TargetCapacity"),
-            "fulfilled_capacity_units": fulfilled,
-            "provisioned_instance_count": int(fulfilled),
-            "state": configs[0].get("SpotFleetRequestState"),
-            "fleet_type": (cfg.get("Type") or "request").lower(),
-        }
-
-    def _fetch_asg_capacity(self, resource_id: str) -> Optional[dict[str, Any]]:
-        """Fetch capacity fulfillment data for an Auto Scaling Group resource."""
-        if self.aws_client is None:
-            raise AWSConfigurationError(
-                "aws_client must be injected before calling _fetch_asg_capacity"
-            )
-        response = self.aws_client.autoscaling_client.describe_auto_scaling_groups(
-            AutoScalingGroupNames=[resource_id]
-        )
-        groups = response.get("AutoScalingGroups", [])
-        if not groups:
-            return None
-        group = groups[0]
-        instances = group.get("Instances") or []
-        fulfilled = sum(
-            int(inst.get("WeightedCapacity", 1))
-            for inst in instances
-            if inst.get("LifecycleState") == "InService"
-        )
-        provisioned = sum(1 for inst in instances if inst.get("LifecycleState") == "InService")
-        return {
-            "target_capacity_units": int(group.get("DesiredCapacity") or 0),
-            "fulfilled_capacity_units": fulfilled,
-            "provisioned_instance_count": provisioned,
-            "state": group.get("Status"),
-        }
 
     async def _handle_resolve_image(self, operation: ProviderOperation) -> ProviderResult:
         """Handle image resolution using registry-based service."""
@@ -892,6 +1049,180 @@ class AWSProviderStrategy(ProviderStrategy):
             cache=cache,
             logger=self._logger,
         )
+
+    # ------------------------------------------------------------------
+    # Typed provisioning interface — OperationOutcome
+    # ------------------------------------------------------------------
+
+    async def acquire(self, request: Request) -> OperationOutcome:
+        """Submit an acquisition request to AWS.
+
+        AWS provider operations return provider-side resource IDs while
+        instances may still be transitioning.
+
+        Args:
+            request: Domain request describing resources to acquire.
+
+        Returns:
+            ``Accepted`` with pending instance IDs on success.
+            ``Failed`` on provider rejection or configuration error.
+        """
+        try:
+            # Build operation using the strategy-layer types already imported at the
+            # module level (ProviderOperation / ProviderOperationType from
+            # orb.providers.base.strategy).  These are what execute_operation() expects.
+            operation = ProviderOperation(
+                operation_type=ProviderOperationType.CREATE_INSTANCES,
+                parameters={
+                    "template_config": {},
+                    "count": request.requested_count,
+                    "request_id": str(request.request_id),
+                    "request_metadata": dict(request.metadata),
+                },
+                context={
+                    "correlation_id": str(request.request_id),
+                    "request_id": str(request.request_id),
+                    "dry_run": request.metadata.get("dry_run", False),
+                },
+            )
+            result = await self.execute_operation(operation)
+
+            if not result.success:
+                return Failed(
+                    error=result.error_message or "AWS acquire failed",
+                    recoverable=False,
+                )
+
+            resource_ids: list[str] = (result.data or {}).get("resource_ids", [])
+            request_id = str(request.request_id)
+
+            self._logger.info(
+                "AWS acquire accepted: request_id=%s, pending_resource_ids=%s",
+                request_id,
+                resource_ids,
+            )
+            return Accepted(
+                request_id=request_id,
+                pending_resource_ids=resource_ids,
+                metadata=result.metadata or {},
+            )
+
+        except Exception as exc:
+            self._logger.error("AWS acquire failed: %s", exc, exc_info=True)
+            return Failed(error=str(exc), recoverable=False)
+
+    async def return_machines(self, machine_ids: list[str], request: Request) -> OperationOutcome:
+        """Submit a return (termination) request to AWS.
+
+        AWS terminates asynchronously — ``TerminateInstances`` returns
+        immediately while instances move through ``shutting-down``.  The
+        outcome is therefore ``Accepted`` with the terminating IDs.
+
+        Args:
+            machine_ids: EC2 instance IDs to terminate.
+            request: Domain request providing context.
+
+        Returns:
+            ``Accepted`` with terminating instance IDs on success.
+            ``Failed`` on provider rejection or configuration error.
+        """
+        try:
+            operation = ProviderOperation(
+                operation_type=ProviderOperationType.TERMINATE_INSTANCES,
+                parameters={
+                    "instance_ids": machine_ids,
+                    "request_id": str(request.request_id),
+                    "template_id": request.template_id,
+                    "provider_api": request.provider_api or "RunInstances",
+                },
+                context={
+                    "correlation_id": str(request.request_id),
+                    "request_id": str(request.request_id),
+                },
+            )
+            result = await self.execute_operation(operation)
+
+            if not result.success:
+                return Failed(
+                    error=result.error_message or "AWS return_machines failed",
+                    recoverable=False,
+                )
+
+            self._logger.info(
+                "AWS termination accepted: request_id=%s, terminating=%s",
+                request.request_id,
+                machine_ids,
+            )
+            return Accepted(
+                request_id=str(request.request_id),
+                pending_resource_ids=list(machine_ids),
+                metadata=result.metadata or {},
+            )
+
+        except Exception as exc:
+            self._logger.error("AWS return_machines failed: %s", exc, exc_info=True)
+            return Failed(error=str(exc), recoverable=False)
+
+    async def get_status(self, resource_ids: list[str], request: Request) -> OperationOutcome:
+        """Query AWS instance status for previously submitted resources.
+
+        Returns ``Completed`` only when *all* instances have reached a
+        terminal state (``running`` for acquire, ``terminated`` for return).
+        Returns ``Accepted`` (still in-progress) otherwise.
+
+        Args:
+            resource_ids: EC2 instance or resource IDs to check.
+            request: Domain request providing context.
+
+        Returns:
+            ``Completed`` when all instances are terminal.
+            ``Accepted``  when one or more instances are still transitioning.
+            ``Failed``    when all instances failed or a hard error occurred.
+        """
+        try:
+            operation = ProviderOperation(
+                operation_type=ProviderOperationType.GET_INSTANCE_STATUS,
+                parameters={
+                    "instance_ids": resource_ids,
+                    "template_id": request.template_id,
+                    "provider_api": request.provider_api or "RunInstances",
+                },
+                context={
+                    "correlation_id": str(request.request_id),
+                    "request_id": str(request.request_id),
+                },
+            )
+            result = await self.execute_operation(operation)
+
+            if not result.success:
+                return Failed(
+                    error=result.error_message or "AWS get_status failed",
+                    recoverable=True,
+                )
+
+            instances: list[dict[str, Any]] = (result.data or {}).get("instances", [])
+            terminal_states = frozenset({"running", "terminated", "stopped", "failed"})
+            non_terminal = [
+                inst for inst in instances if inst.get("status", "") not in terminal_states
+            ]
+
+            if non_terminal:
+                still_pending = [inst.get("instance_id", "") for inst in non_terminal]
+                return Accepted(
+                    request_id=str(request.request_id),
+                    pending_resource_ids=still_pending,
+                    metadata=result.metadata or {},
+                )
+
+            completed_ids = [inst.get("instance_id", "") for inst in instances]
+            return Completed(
+                resource_ids=completed_ids,
+                metadata=result.metadata or {},
+            )
+
+        except Exception as exc:
+            self._logger.error("AWS get_status failed: %s", exc, exc_info=True)
+            return Failed(error=str(exc), recoverable=True)
 
     def __str__(self) -> str:
         """Return string representation for debugging."""

@@ -5,6 +5,8 @@ runtime selection and switching of provider strategies while maintaining
 clean separation of concerns and SOLID principles compliance.
 """
 
+from __future__ import annotations
+
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import Enum
@@ -235,6 +237,27 @@ class ProviderStrategy(ABC):
         with concurrent.futures.ThreadPoolExecutor() as executor:
             return await loop.run_in_executor(executor, self.execute_operation, operation)  # type: ignore[arg-type]
 
+    async def start_daemon_services(self) -> None:
+        """Start background services that require an asyncio event loop.
+
+        Default implementation is a no-op.  Providers that maintain background
+        tasks (watch streams, periodic reconcilers, garbage collectors) override
+        this to start them.
+
+        Lifecycle contract:
+
+        * ``initialize`` must be cheap and synchronous: validate config, set up
+          lazy state, return ``True``.  No I/O, no event-loop work, no
+          background tasks.
+        * ``start_daemon_services`` runs after ``initialize`` succeeds and only
+          in long-lived daemon contexts (the REST API server).  CLI commands
+          never call it because they don't keep a loop running long enough for
+          background tasks to be useful and shouldn't pay the cost.
+
+        Implementations must be idempotent: calling more than once is safe.
+        """
+        return
+
     @abstractmethod
     def get_capabilities(self) -> ProviderCapabilities:
         """
@@ -257,8 +280,9 @@ class ProviderStrategy(ABC):
             Current health status of the provider
         """
 
+    @classmethod
     @abstractmethod
-    def generate_provider_name(self, config: dict[str, Any]) -> str:
+    def generate_provider_name(cls, config: dict[str, Any]) -> str:
         """Generate provider name based on provider-specific components.
 
         Args:
@@ -284,19 +308,34 @@ class ProviderStrategy(ABC):
         """Get the naming pattern for this provider type.
 
         Returns:
-            Pattern string (e.g., "{type}_{profile}_{region}")
+            Pattern string describing the provider-specific naming convention
         """
 
-    def get_available_credential_sources(self) -> list[dict]:
+    @classmethod
+    def get_available_credential_sources(cls) -> list[dict]:
         """Get available credential sources for this provider.
 
+        Each entry in the returned list must contain:
+
+        - ``name`` (str | None): technical identifier passed to
+          ``test_credentials`` as ``credential_source``.
+        - ``description`` (str): human-readable label shown in ``orb init``.
+        - ``config_delta`` (dict): provider-config keys to merge into the
+          provider config when this source is selected.  The base
+          ``init_command_handler`` calls ``provider_config.update(config_delta)``
+          so providers declare exactly which keys they populate.  An empty dict
+          means the selected source contributes no extra config keys (e.g. an
+          environment-credential entry that needs no profile name).
+
         Returns:
-            List of credential sources with name and description.
-            Default implementation returns empty list.
+            List of credential source dicts.  Default implementation returns
+            an empty list (providers that ship no credential discovery skip the
+            selection step entirely).
         """
         return []
 
-    def test_credentials(self, credential_source: Optional[str] = None, **kwargs) -> dict:
+    @classmethod
+    def test_credentials(cls, credential_source: Optional[str] = None, **kwargs) -> dict:
         """Test credentials and return metadata.
 
         Args:
@@ -309,7 +348,8 @@ class ProviderStrategy(ABC):
         """
         return {"success": False, "error": "Credential testing not implemented"}
 
-    def get_credential_requirements(self) -> dict:
+    @classmethod
+    def get_credential_requirements(cls) -> dict:
         """Get required credential parameters for this provider.
 
         Returns:
@@ -318,7 +358,8 @@ class ProviderStrategy(ABC):
         """
         return {}
 
-    def get_operational_requirements(self) -> dict:
+    @classmethod
+    def get_operational_requirements(cls) -> dict:
         """What's needed to operate after authentication (e.g. region, project).
 
         Returns a dict of param_name -> {"required": bool, "description": str}.
@@ -326,23 +367,31 @@ class ProviderStrategy(ABC):
         """
         return {}
 
-    def get_available_regions(self) -> list[tuple[str, str]]:
-        """Get available regions as (region_id, display_name) tuples.
+    @classmethod
+    def get_ui_column_schema(cls) -> list[Any]:
+        """Return UI column descriptors contributed by this provider strategy.
+
+        Each descriptor is a :class:`~orb.application.dto.system.UIColumnDescriptor`
+        instance declaring a column the UI should render for a given resource type.
+
+        The import is deferred so that provider packages without the application
+        DTO layer installed can still load without error.
+
+        Declared as a ``@classmethod`` so callers can retrieve the schema from
+        the class directly — no instance (and therefore no live AWS credentials
+        or I/O) is required.
+
+        Default implementation returns an empty list — providers opt in by
+        overriding this method.  Existing provider strategies that do not
+        override remain fully backward-compatible.
 
         Returns:
-            List of (region_id, display_name) tuples.
-            Empty list means the provider accepts free-text region input.
+            List of UIColumnDescriptor instances (may be empty).
         """
         return []
 
-    def get_default_region(self) -> str:
-        """Return the default region string for CLI prompts.
-
-        Override in provider-specific strategies.
-        """
-        return ""
-
-    def get_cli_extra_config_keys(self) -> set[str]:
+    @classmethod
+    def get_cli_extra_config_keys(cls) -> set[str]:
         """Return the set of infrastructure_defaults keys that belong in provider
         config rather than template_defaults.
 
@@ -351,15 +400,30 @@ class ProviderStrategy(ABC):
         """
         return set()
 
-    def get_cli_provider_config(self, args: Any) -> dict[str, Any]:
-        """Extract provider-specific init config from parsed CLI args.
+    @classmethod
+    def get_cli_provider_config(cls, args: Any) -> dict[str, Any]:
+        """Extract provider-specific config keys from parsed CLI args.
 
-        Override in provider-specific strategies.
-        Default returns empty dict.
+        Returns a dict of key/value pairs that should populate the
+        ``provider_instance.config`` block written by ``orb init``.  The
+        returned dict is passed through the init helpers as a single
+        ``provider_config`` argument rather than spreading individual
+        positional parameters such as ``region`` and ``profile``.
+
+        Override in provider-specific strategies to expose the full set of
+        provider config fields.  The base implementation returns an empty
+        dict so providers that have not yet adopted this slot are unaffected.
+
+        Args:
+            args: Parsed argparse.Namespace from the ``orb init`` invocation.
+
+        Returns:
+            Dict mapping provider config key names to their CLI-sourced values.
         """
         return {}
 
-    def get_cli_infrastructure_defaults(self, args: Any) -> dict[str, Any]:
+    @classmethod
+    def get_cli_infrastructure_defaults(cls, args: Any) -> dict[str, Any]:
         """Extract provider-specific infrastructure defaults from parsed CLI args.
 
         Override in provider-specific strategies.

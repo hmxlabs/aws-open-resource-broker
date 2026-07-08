@@ -22,6 +22,7 @@ if TYPE_CHECKING:
     from orb.application.services.provider_registry_service import ProviderRegistryService
     from orb.domain.base.ports.configuration_port import ConfigurationPort
     from orb.domain.base.ports.logging_port import LoggingPort
+    from orb.domain.template.template_aggregate import Template
 
 
 class BaseSchedulerStrategy(SchedulerPort, ABC):
@@ -247,7 +248,7 @@ class BaseSchedulerStrategy(SchedulerPort, ABC):
         return self._coalesce_directory(
             config_override=getattr(self.config_manager.app_config.scheduler, "config_dir", None),
             env_var_name="CONFIG_DIR",
-            default_factory=lambda: self._get_platform_config_dir(),
+            default_factory=self._get_platform_config_dir,
         )
 
     def get_working_directory(self) -> str:
@@ -255,7 +256,7 @@ class BaseSchedulerStrategy(SchedulerPort, ABC):
         return self._coalesce_directory(
             config_override=getattr(self.config_manager.app_config.scheduler, "work_dir", None),
             env_var_name="WORK_DIR",
-            default_factory=lambda: self._get_platform_work_dir(),
+            default_factory=self._get_platform_work_dir,
         )
 
     def get_logs_directory(self) -> str:
@@ -263,7 +264,7 @@ class BaseSchedulerStrategy(SchedulerPort, ABC):
         return self._coalesce_directory(
             config_override=getattr(self.config_manager.app_config.scheduler, "log_dir", None),
             env_var_name="LOG_DIR",
-            default_factory=lambda: self._get_platform_logs_dir(),
+            default_factory=self._get_platform_logs_dir,
         )
 
     def get_log_level(self) -> str:
@@ -416,7 +417,7 @@ class BaseSchedulerStrategy(SchedulerPort, ABC):
         """Default implementation - clean to_dict without scheduler-specific formatting."""
         return template.to_dict()
 
-    def format_template_for_provider(self, template: TemplateDTO) -> dict[str, Any]:
+    def format_template_for_provider(self, template: "TemplateDTO | Template") -> dict[str, Any]:
         """Format either a stored template DTO or a domain template for provider operations."""
         if isinstance(template, TemplateDTO):
             return template.to_template_config()

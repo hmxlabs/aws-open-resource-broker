@@ -219,8 +219,7 @@ async def main() -> None:
             else:
                 # Rich console output can wrap long structured strings, which may break
                 # consumers that try to parse stdout as exact JSON.
-                if not args.quiet:
-                    print(formatted_output)
+                print(formatted_output)
 
             if exit_code != 0:
                 sys.exit(exit_code)

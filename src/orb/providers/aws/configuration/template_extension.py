@@ -77,14 +77,6 @@ class AWSTemplateExtensionConfig(BaseModel):
         None, description="AWS Context field for EC2 Fleet, ASG, and Spot Fleet"
     )
 
-    # AWS DTO-only fields preserved by TemplateDTO.provider_config round-trips.
-    launch_template_id: Optional[str] = Field(
-        None, description="EC2 Launch Template ID for provider-specific template storage"
-    )
-    abis_instance_requirements: Optional[dict[str, Any]] = Field(
-        None, description="Attribute-based instance selection requirements"
-    )
-
     @field_validator("subnet_ids")
     @classmethod
     def validate_subnet_ids(cls, v: Optional[list[str]]) -> Optional[list[str]]:

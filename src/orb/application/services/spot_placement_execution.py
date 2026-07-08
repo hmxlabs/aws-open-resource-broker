@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable, Mapping
+from typing import Any, Callable, Mapping
 
 from orb.application.services.spot_placement_planner import PlacementPlanEntry
 from orb.domain.base.exceptions import DomainException
@@ -96,91 +96,6 @@ def build_planned_execution_metadata(
 
 class SpotPlacementExecutionService:
     """Execute a placement plan via provider callbacks."""
-
-    async def execute_plan_async(
-        self,
-        plan: list[PlacementPlanEntry],
-        total_count: int,
-        build_child_template: Callable[[PlacementPlanEntry], Any],
-        build_child_request: Callable[[int, int], Any],
-        launch_child: Callable[[Any, Any], Awaitable[Mapping[str, Any]]],
-        is_capacity_like_failure: Callable[[dict[str, Any]], bool],
-    ) -> SpotPlacementExecutionSummary:
-        """Async variant of ``execute_plan`` for native async provider handlers."""
-        resource_ids: list[str] = []
-        instances: list[dict[str, Any]] = []
-        child_results: list[dict[str, Any]] = []
-        failed_subplans: list[dict[str, Any]] = []
-        carryover = 0
-        fulfilled = 0
-        terminated_early = False
-        terminal_error_message: str | None = None
-
-        for idx, plan_entry in enumerate(plan):
-            requested_for_entry = plan_entry.planned_count + carryover
-            if requested_for_entry <= 0:
-                continue
-
-            child_template = build_child_template(plan_entry)
-            child_request = build_child_request(requested_for_entry, idx)
-            try:
-                raw_result = await launch_child(child_request, child_template)
-            except DomainException as exc:
-                raw_result = self._domain_exception_child_result(exc)
-
-            child_result = self._normalize_child_result(
-                plan_entry=plan_entry,
-                requested_count=requested_for_entry,
-                raw_result=raw_result,
-            )
-            child_results.append(child_result)
-
-            if child_result["success"]:
-                resource_ids.extend(child_result["resource_ids"])
-                instances.extend(child_result["instances"])
-                fulfilled_for_child = child_result["fulfilled_count"]
-                fulfilled += fulfilled_for_child
-                carryover = max(requested_for_entry - fulfilled_for_child, 0)
-                if carryover == 0:
-                    continue
-
-                failed_subplans.append(child_result)
-                if is_capacity_like_failure(child_result):
-                    continue
-
-                terminated_early = True
-                terminal_error_message = child_result["error_message"]
-                break
-
-            failed_subplans.append(child_result)
-            if is_capacity_like_failure(child_result):
-                carryover = requested_for_entry
-                continue
-
-            if resource_ids or instances:
-                terminated_early = True
-                terminal_error_message = child_result["error_message"]
-                break
-
-            return SpotPlacementExecutionSummary(
-                resource_ids=[],
-                instances=[],
-                child_results=child_results,
-                failed_subplans=failed_subplans,
-                unfulfilled_count=total_count,
-                terminated_early=True,
-                terminal_error_message=child_result["error_message"],
-            )
-
-        return SpotPlacementExecutionSummary(
-            resource_ids=resource_ids,
-            instances=instances,
-            child_results=child_results,
-            failed_subplans=failed_subplans,
-            unfulfilled_count=max(total_count - fulfilled, carryover),
-            terminated_early=terminated_early,
-            terminal_error_message=terminal_error_message,
-        )
 
     def execute_plan(
         self,

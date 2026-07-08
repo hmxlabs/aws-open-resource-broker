@@ -23,6 +23,7 @@ def _make_request(request_type="return"):
     req.request_type.value = request_type
     req.provider_name = "test-provider"
     req.requested_count = 2
+    req.provider_data = {}
     return req
 
 
@@ -94,16 +95,20 @@ class TestReturnRequestCompletion:
         assert status == RequestStatus.COMPLETED.value
 
     def test_return_request_without_provider_machines_stays_in_progress_while_follow_up_pending(self):
+        self.req.provider_data = {"follow_up_context": {"follow_up_kind": "termination"}}
+
         status, message = self.svc.determine_status_from_machines(
             db_machines=[],
             provider_machines=[],
             request=self.req,
-            provider_metadata={"termination_follow_up_pending": True},
+            provider_metadata={},
         )
         assert status == RequestStatus.IN_PROGRESS.value
         assert "follow-up cleanup" in message
 
     def test_return_request_with_all_terminated_stays_in_progress_while_follow_up_pending(self):
+        self.req.provider_data = {"follow_up_context": {"follow_up_kind": "termination"}}
+
         machines = [
             _make_machine(MachineStatus.TERMINATED),
             _make_machine(MachineStatus.TERMINATED),
@@ -112,28 +117,10 @@ class TestReturnRequestCompletion:
             db_machines=machines,  # type: ignore[arg-type]
             provider_machines=machines,  # type: ignore[arg-type]
             request=self.req,
-            provider_metadata={"termination_follow_up_pending": True},
+            provider_metadata={},
         )
         assert status == RequestStatus.IN_PROGRESS.value
         assert "follow-up cleanup" in message
-
-    def test_return_request_fails_when_provider_follow_up_cleanup_fails(self):
-        status, message = self.svc.determine_status_from_machines(
-            db_machines=[],
-            provider_machines=[],
-            request=self.req,
-            provider_metadata={
-                "termination_follow_up_failed": True,
-                "termination_follow_up_details": [
-                    {"last_delete_error": "delete retries exhausted"}
-                ],
-            },
-        )
-        assert status == RequestStatus.FAILED.value
-        assert message == (
-            "Return request failed: provider follow-up cleanup failed: "
-            "delete retries exhausted"
-        )
 
 
 class _FakeUnitOfWork(AbstractContextManager):

@@ -552,9 +552,9 @@ class CreateReturnRequestHandler(BaseCommandHandler[CreateReturnRequestCommand, 
         if not isinstance(provider_data, dict) or not provider_data:
             return
 
-        updated_request = with_request_follow_up_context(request, provider_data)
-
         with self.uow_factory.create_unit_of_work() as uow:
+            current_request = uow.requests.get_by_id(request.request_id) or request
+            updated_request = with_request_follow_up_context(current_request, provider_data)
             events = uow.requests.save(updated_request)
             for event in events or []:
                 self.event_publisher.publish(event)  # type: ignore[union-attr]
@@ -631,18 +631,3 @@ class CreateReturnRequestHandler(BaseCommandHandler[CreateReturnRequestCommand, 
             RequestStatus.IN_PROGRESS,
             "Termination accepted: waiting for instances to reach terminated state",
         )
-
-    async def _update_request_to_in_progress_with_message(self, request: Any, message: str) -> None:
-        """Persist an in-progress return message after submit without claiming completion."""
-        try:
-            await self._update_request_status(
-                request,
-                RequestStatus.IN_PROGRESS,
-                message,
-            )
-        except Exception as update_error:
-            self.logger.error(
-                "Failed to update request status to in_progress: %s",
-                update_error,
-                exc_info=True,
-            )

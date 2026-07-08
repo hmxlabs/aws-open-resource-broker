@@ -1,6 +1,8 @@
 """AWS Provider Registration - Register AWS provider with the provider registry."""
 
+import json
 from contextlib import suppress
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional
 
 # Use TYPE_CHECKING to avoid direct infrastructure import
@@ -95,7 +97,11 @@ def create_aws_strategy(provider_config: Any) -> Any:
 
             if strategy.aws_client is not None:
                 health_check = get_container().get(HealthCheckPort)
-                register_aws_health_checks(health_check, strategy.aws_client)
+                storage_strategy = "json"
+                if config_port is not None:
+                    with suppress(Exception):
+                        storage_strategy = config_port.get_storage_strategy()
+                register_aws_health_checks(health_check, strategy.aws_client, storage_strategy)
 
         # Set provider name for identification
         if hasattr(strategy, "name") and provider_name:
@@ -199,6 +205,22 @@ def create_aws_validator(provider_config: Any = None) -> Any:
         raise RuntimeError(f"Failed to create AWS validator: {e!s}")
 
 
+def _load_aws_default_api() -> Optional[str]:
+    """Extract the configured default provider API from aws_defaults.json."""
+    try:
+        defaults_file = Path(__file__).parent / "config" / "aws_defaults.json"
+        data = json.loads(defaults_file.read_text())
+        return (
+            data.get("provider", {})
+            .get("provider_defaults", {})
+            .get("aws", {})
+            .get("template_defaults", {})
+            .get("provider_api")
+        )
+    except Exception:
+        return None
+
+
 def register_aws_provider(
     registry: "Optional[ProviderRegistry]" = None,
     logger: "Optional[LoggingPort]" = None,
@@ -240,6 +262,7 @@ def register_aws_provider(
                 resolver_factory=create_aws_resolver,
                 validator_factory=create_aws_validator,
                 strategy_class=AWSProviderStrategy,
+                default_api=_load_aws_default_api(),
             )
 
         # Register AWS template store
@@ -366,7 +389,6 @@ def register_aws_extensions(logger: Optional["LoggingPort"] = None) -> None:
 
         if logger:
             logger.debug("AWS template extensions registered successfully")
-        # Remove print statement - should use structured logging
 
     except Exception as e:
         error_msg = f"Failed to register AWS template extensions: {e}"
@@ -416,6 +438,34 @@ def get_aws_extension_defaults() -> dict:
     return default_config.to_template_defaults()
 
 
+def register_aws_auth_strategies(logger: Optional["LoggingPort"] = None) -> None:
+    """Register AWS authentication strategies with the auth registry."""
+    try:
+        from orb.infrastructure.auth.registry import get_auth_registry
+
+        registry = get_auth_registry()
+
+        if not registry.is_registered("iam"):
+            from orb.providers.aws.auth.iam_strategy import IAMAuthStrategy
+
+            registry.register_strategy("iam", IAMAuthStrategy)
+            if logger:
+                logger.debug("AWS IAM auth strategy registered")
+
+        if not registry.is_registered("cognito"):
+            from orb.providers.aws.auth.cognito_strategy import CognitoAuthStrategy
+
+            registry.register_strategy("cognito", CognitoAuthStrategy)
+            if logger:
+                logger.debug("AWS Cognito auth strategy registered")
+
+    except Exception as e:
+        error_msg = f"Failed to register AWS auth strategies: {e}"
+        if logger:
+            logger.error(error_msg, exc_info=True)
+        raise
+
+
 def initialize_aws_provider(
     template_factory: Optional[TemplateFactory] = None,
     logger: Optional["LoggingPort"] = None,
@@ -436,6 +486,9 @@ def initialize_aws_provider(
         # Register AWS extensions
         register_aws_extensions(logger)
 
+        # Register AWS authentication strategies
+        register_aws_auth_strategies(logger)
+
         # Register AWS template factory if provided
         if template_factory:
             register_aws_template_factory(template_factory, logger)
@@ -445,6 +498,18 @@ def initialize_aws_provider(
         from orb.providers.aws.cli.aws_cli_spec import AWSCLISpec
 
         CLISpecRegistry.register("aws", AWSCLISpec())
+
+        from orb.infrastructure.scheduler.hostfactory.field_mapping_registry import (
+            FieldMappingRegistry,
+        )
+        from orb.providers.aws.scheduler.hostfactory_field_mapping import AWSFieldMapping
+
+        FieldMappingRegistry.register("aws", AWSFieldMapping())
+
+        from orb.providers.aws.defaults_loader import AWSDefaultsLoader
+        from orb.providers.registry.defaults_loader_registry import DefaultsLoaderRegistry
+
+        DefaultsLoaderRegistry.register("aws", AWSDefaultsLoader())
 
         if logger:
             logger.info("AWS provider initialization completed successfully")
@@ -491,25 +556,25 @@ def register_aws_services_with_di(container) -> None:
         container.register_singleton(TemplateAdapterPort, create_aws_template_adapter)
         logger.debug("AWS Template Adapter registered with DI container")
 
-        # Register TemplateExampleGeneratorPort backed by AWSHandlerFactory.
-        # The factory is constructed with no AWS client because generate_example_templates
-        # only calls handler classmethods — no live AWS connection is needed.
-        from orb.domain.base.ports.template_example_generator_port import (
-            TemplateExampleGeneratorPort,
+        # Register the AWS template example generator into the per-provider registry.
+        # The handler factory is constructed with no AWS client because
+        # generate_example_templates only calls handler classmethods; no live
+        # AWS connection is needed.
+        from orb.infrastructure.registry.template_example_generator_registry import (
+            TemplateExampleGeneratorRegistry,
         )
         from orb.providers.aws.adapters.template_example_generator_adapter import (
             AWSTemplateExampleGeneratorAdapter,
         )
         from orb.providers.aws.infrastructure.aws_handler_factory import AWSHandlerFactory
 
-        def create_template_example_generator(c):
-            factory = AWSHandlerFactory(aws_client=None, logger=c.get(LoggingPort))  # type: ignore[arg-type]
-            return AWSTemplateExampleGeneratorAdapter(aws_handler_factory=factory)
-
-        container.register_singleton(
-            TemplateExampleGeneratorPort, create_template_example_generator
+        aws_handler_factory = AWSHandlerFactory(aws_client=None, logger=logger)  # type: ignore[arg-type]
+        TemplateExampleGeneratorRegistry.register(
+            "aws", AWSTemplateExampleGeneratorAdapter(aws_handler_factory=aws_handler_factory)
         )
-        logger.debug("TemplateExampleGeneratorPort registered with DI container")
+        logger.debug(
+            "AWS TemplateExampleGeneratorAdapter registered in TemplateExampleGeneratorRegistry"
+        )
 
         logger.debug("AWS utility services registered with DI container")
 

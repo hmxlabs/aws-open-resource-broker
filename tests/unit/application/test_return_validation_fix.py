@@ -158,8 +158,12 @@ class TestReturnValidationFix:
         request.request_id = "ret-001"
         request.provider_data = {}
 
+        persisted_request = Mock()
+        persisted_request.request_id = "ret-001"
+        persisted_request.provider_data = {}
         updated_request = Mock()
-        request.set_provider_data.return_value = updated_request
+        persisted_request.set_provider_data.return_value = updated_request
+        self.mock_uow.requests.get_by_id.return_value = persisted_request
         self.mock_uow.requests.save.return_value = []
 
         command_bus = Mock()
@@ -190,8 +194,9 @@ class TestReturnValidationFix:
             ["machine-001"], request, "azure-default"
         )
 
-        request.set_provider_data.assert_called_once()
-        persisted_provider_data = request.set_provider_data.call_args.args[0]
+        persisted_request.set_provider_data.assert_called_once()
+        request.set_provider_data.assert_not_called()
+        persisted_provider_data = persisted_request.set_provider_data.call_args.args[0]
         assert persisted_provider_data["follow_up_context"]["termination_requests"][0][
             "pending_resource_cleanup"
         ]["resource_id"] == "vmss-demo"
@@ -200,7 +205,7 @@ class TestReturnValidationFix:
         statuses = [call.args[0].status for call in command_bus.execute.await_args_list]
         assert statuses == [RequestStatus.IN_PROGRESS, RequestStatus.IN_PROGRESS]
         messages = [call.args[0].message for call in command_bus.execute.await_args_list]
-        assert messages[-1] == "Termination initiated, waiting for provider confirmation"
+        assert messages[-1] == "Termination accepted: waiting for instances to reach terminated state"
 
 
 if __name__ == "__main__":

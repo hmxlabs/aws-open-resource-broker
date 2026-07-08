@@ -50,6 +50,11 @@ class ProviderStrategyClass(Protocol):
         """Generate a provider instance name from provider config."""
         ...
 
+    @classmethod
+    def get_ui_column_schema(cls) -> list[Any]:
+        """Return provider-specific UI column descriptors."""
+        ...
+
 
 class ProviderRegistryPort(ABC):
     """Port that the application layer uses to interact with the provider registry.

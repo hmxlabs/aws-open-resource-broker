@@ -33,11 +33,13 @@ from botocore.exceptions import ClientError
 from orb.domain.base.dependency_injection import injectable
 from orb.domain.base.ports import LoggingPort
 from orb.domain.base.ports.configuration_port import ConfigurationPort
+from orb.domain.base.provider_fulfilment import CheckHostsStatusResult, ProviderFulfilment
 from orb.domain.request.aggregate import Request
 from orb.domain.template.template_aggregate import Template
 from orb.infrastructure.adapters.ports.request_adapter_port import RequestAdapterPort
 from orb.infrastructure.error.decorators import handle_infrastructure_exceptions
 from orb.infrastructure.resilience import CircuitBreakerOpenError
+from orb.providers.aws.aws_fleet_capacity import FleetCapacityFulfilment
 from orb.providers.aws.domain.template.aws_template_aggregate import AWSTemplate
 from orb.providers.aws.domain.template.value_objects import AWSAllocationStrategy, AWSFleetType
 from orb.providers.aws.exceptions.aws_exceptions import (
@@ -53,6 +55,9 @@ from orb.providers.aws.infrastructure.handlers.ec2_fleet.release_manager import 
     EC2FleetReleaseManager,
 )
 from orb.providers.aws.infrastructure.handlers.shared.base_context_mixin import BaseContextMixin
+from orb.providers.aws.infrastructure.handlers.shared.fleet_fulfilment import (
+    compute_capacity_based_fulfilment,
+)
 from orb.providers.aws.infrastructure.handlers.shared.fleet_grouping_mixin import FleetGroupingMixin
 from orb.providers.aws.infrastructure.launch_template.manager import (
     AWSLaunchTemplateManager,
@@ -157,7 +162,9 @@ class EC2FleetHandler(AWSHandler, BaseContextMixin, FleetGroupingMixin):
                 # lazily by the check_hosts_status / _check_single_fleet_status polling path.
                 instance_ids = fleet_result.get("instance_ids", [])
                 if instance_ids:
-                    instances = [{"instance_id": iid} for iid in instance_ids]
+                    instances = [
+                        {"instance_id": iid, "resource_id": fleet_id} for iid in instance_ids
+                    ]
                     self._logger.info(
                         "EC2Fleet instant fleet created with %d instance(s): %s",
                         len(instance_ids),
@@ -187,7 +194,7 @@ class EC2FleetHandler(AWSHandler, BaseContextMixin, FleetGroupingMixin):
                     "fleet_type": fleet_type_value,
                     "fleet_errors": fleet_errors,
                     "error_codes": collect_provider_error_codes(fleet_errors),
-                    "fulfillment_final": fleet_type is not AWSFleetType.INSTANT,
+                    "requires_async_polling": fleet_type is AWSFleetType.INSTANT,
                     "capacity_constrained": capacity_constrained,
                 },
             }
@@ -356,18 +363,9 @@ class EC2FleetHandler(AWSHandler, BaseContextMixin, FleetGroupingMixin):
             metadata_updates["instance_ids"] = instance_ids
         return {"metadata_updates": metadata_updates}
 
-    def _resolve_provider_api(
-        self, request: Request, aws_template: Optional[AWSTemplate] = None
-    ) -> str:
-        """Resolve the provider_api value to stamp onto instance data."""
-        if aws_template and aws_template.provider_api is not None:
-            return (
-                aws_template.provider_api.value
-                if hasattr(aws_template.provider_api, "value")
-                else str(aws_template.provider_api)
-            )
-        metadata = getattr(request, "metadata", {}) or {}
-        return metadata.get("provider_api", "EC2Fleet")
+    def _default_provider_api(self) -> str:
+        """Return the handler default provider API."""
+        return "EC2Fleet"
 
     def _create_fleet_config(
         self,
@@ -384,24 +382,62 @@ class EC2FleetHandler(AWSHandler, BaseContextMixin, FleetGroupingMixin):
             lt_version=launch_template_version,
         )
 
-    def check_hosts_status(self, request: Request) -> list[dict[str, Any]]:
+    def check_hosts_status(self, request: Request) -> CheckHostsStatusResult:
         """Check the status of instances in the fleet."""
         self._logger.debug(f" check_hosts_status {request}")
         if not request.resource_ids:
             raise AWSInfrastructureError("No Fleet ID found in request")
 
-        all_results: list[dict] = []
+        all_instances: list[dict[str, Any]] = []
+        fleet_results: list[CheckHostsStatusResult] = []
         for fleet_id in request.resource_ids:
             try:
-                results = self._check_single_fleet_status(fleet_id, request)
-                all_results.extend(results)
+                result = self._check_single_fleet_status(fleet_id, request)
+                all_instances.extend(result.instances)
+                fleet_results.append(result)
             except Exception as e:
                 self._logger.warning(
                     "Failed to check status for fleet %s, skipping: %s", fleet_id, e
                 )
-        return all_results
 
-    def _check_single_fleet_status(self, fleet_id: str, request: Request) -> list[dict]:
+        if not fleet_results:
+            return CheckHostsStatusResult(
+                instances=[],
+                fulfilment=ProviderFulfilment(
+                    state="in_progress",
+                    message="No fleet status available; will retry",
+                ),
+            )
+
+        if len(fleet_results) == 1:
+            return CheckHostsStatusResult(
+                instances=all_instances,
+                fulfilment=fleet_results[0].fulfilment,
+            )
+
+        states = [result.fulfilment.state for result in fleet_results]
+        if all(state == "fulfilled" for state in states):
+            combined_state = "fulfilled"
+            combined_message = f"All {len(fleet_results)} fleets fulfilled"
+        elif any(state == "in_progress" for state in states):
+            combined_state = "in_progress"
+            combined_message = "One or more fleets still provisioning"
+        elif any(state == "failed" for state in states):
+            combined_state = "failed"
+            combined_message = "One or more fleets failed"
+        elif any(state == "partial" for state in states):
+            combined_state = "partial"
+            combined_message = "One or more fleets partially fulfilled"
+        else:
+            combined_state = "in_progress"
+            combined_message = "Waiting for fleet fulfilment"
+
+        return CheckHostsStatusResult(
+            instances=all_instances,
+            fulfilment=ProviderFulfilment(state=combined_state, message=combined_message),
+        )
+
+    def _check_single_fleet_status(self, fleet_id: str, request: Request) -> CheckHostsStatusResult:
         """Check the status of instances in a single fleet."""
         try:
             fleet_type_value = request.metadata.get("fleet_type")
@@ -446,11 +482,15 @@ class EC2FleetHandler(AWSHandler, BaseContextMixin, FleetGroupingMixin):
 
             self._logger.debug(f" check_hosts_status final fleet_type: {fleet_type}")
 
+            capacity = self._fetch_ec2_fleet_capacity(fleet)
+            target_capacity = capacity.target_capacity_units
+            fulfilled_capacity = float(capacity.fulfilled_capacity_units)
+
             self._logger.debug(
                 "Fleet status: %s, Target capacity: %s, Fulfilled capacity: %s",
                 fleet.get("FleetState"),
-                fleet.get("TargetCapacitySpecification", {}).get("TotalTargetCapacity"),
-                fleet.get("FulfilledCapacity", 0),
+                target_capacity,
+                fulfilled_capacity,
             )
 
             instance_ids = []
@@ -488,9 +528,20 @@ class EC2FleetHandler(AWSHandler, BaseContextMixin, FleetGroupingMixin):
                     f" check_hosts_status instance_ids: {fleet_id} :: {instance_ids}"
                 )
 
+            per_fleet_requested = (
+                int(target_capacity) if target_capacity is not None else request.requested_count
+            )
+
             if not instance_ids:
                 self._logger.info("No active instances found in fleet %s", fleet_id)
-                return []
+                fulfilment = self._compute_ec2fleet_fulfilment(
+                    fleet_type=fleet_type,
+                    instances=[],
+                    target_capacity=target_capacity,
+                    fulfilled_capacity=fulfilled_capacity,
+                    requested_count=per_fleet_requested,
+                )
+                return CheckHostsStatusResult(instances=[], fulfilment=fulfilment)
 
             instance_details = self._get_instance_details(
                 instance_ids,
@@ -498,9 +549,17 @@ class EC2FleetHandler(AWSHandler, BaseContextMixin, FleetGroupingMixin):
                 resource_id=fleet_id,
                 provider_api="EC2Fleet",
             )
-            return self._format_instance_data(
+            instances = self._format_instance_data(
                 instance_details, fleet_id, self._resolve_provider_api(request)
             )
+            fulfilment = self._compute_ec2fleet_fulfilment(
+                fleet_type=fleet_type,
+                instances=instances,
+                target_capacity=target_capacity,
+                fulfilled_capacity=fulfilled_capacity,
+                requested_count=per_fleet_requested,
+            )
+            return CheckHostsStatusResult(instances=instances, fulfilment=fulfilment)
 
         except ClientError as e:
             error = self._convert_client_error(e)
@@ -509,6 +568,107 @@ class EC2FleetHandler(AWSHandler, BaseContextMixin, FleetGroupingMixin):
         except Exception as e:
             self._logger.error("Unexpected error checking EC2 Fleet status: %s", str(e))
             raise AWSInfrastructureError(f"Failed to check EC2 Fleet status: {e!s}")
+
+    @staticmethod
+    def _fetch_ec2_fleet_capacity(
+        fleet: dict[str, Any],
+        active_instance_count: int = 0,
+    ) -> FleetCapacityFulfilment:
+        """Extract normalized capacity from a DescribeFleets entry."""
+        spec = fleet.get("TargetCapacitySpecification") or {}
+        target_capacity: int | None = spec.get("TotalTargetCapacity")
+        fulfilled_raw: float = fleet.get("FulfilledCapacity") or 0.0
+        fulfilled_units = int(fulfilled_raw)
+        fulfillment_complete = target_capacity is not None and fulfilled_raw >= target_capacity
+        return FleetCapacityFulfilment(
+            target_capacity_units=target_capacity,
+            fulfilled_capacity_units=fulfilled_units,
+            provisioned_instance_count=active_instance_count,
+            fulfillment_complete=fulfillment_complete,
+        )
+
+    def _compute_ec2fleet_fulfilment(
+        self,
+        fleet_type: Optional[AWSFleetType],
+        instances: list[dict[str, Any]],
+        target_capacity: Optional[int],
+        fulfilled_capacity: float,
+        requested_count: int,
+    ) -> ProviderFulfilment:
+        """Compute ProviderFulfilment for an EC2 Fleet request."""
+        running_count = sum(1 for instance in instances if instance.get("status") == "running")
+        pending_count = sum(
+            1 for instance in instances if instance.get("status") in ("pending", "starting")
+        )
+        failed_count = sum(
+            1 for instance in instances if instance.get("status") in ("failed", "error")
+        )
+        target_units = target_capacity if target_capacity is not None else requested_count
+
+        if fleet_type == AWSFleetType.INSTANT:
+            if running_count >= requested_count and failed_count == 0:
+                return ProviderFulfilment(
+                    state="fulfilled",
+                    message=f"Instant fleet: {running_count} instance(s) running",
+                    target_units=target_units,
+                    fulfilled_units=running_count,
+                    running_count=running_count,
+                    pending_count=pending_count,
+                    failed_count=failed_count,
+                )
+            if pending_count > 0:
+                return ProviderFulfilment(
+                    state="in_progress",
+                    message=(
+                        f"Instant fleet: {running_count}/{requested_count} running, "
+                        f"{pending_count} pending"
+                    ),
+                    target_units=target_units,
+                    fulfilled_units=running_count,
+                    running_count=running_count,
+                    pending_count=pending_count,
+                    failed_count=failed_count,
+                )
+            if running_count > 0:
+                return ProviderFulfilment(
+                    state="partial",
+                    message=(
+                        f"Instant fleet: {running_count}/{requested_count} instance(s) running"
+                    ),
+                    target_units=target_units,
+                    fulfilled_units=running_count,
+                    running_count=running_count,
+                    pending_count=pending_count,
+                    failed_count=failed_count,
+                )
+            if not instances:
+                return ProviderFulfilment(
+                    state="in_progress",
+                    message="Instant fleet: waiting for instances",
+                    target_units=target_units,
+                    fulfilled_units=0,
+                    running_count=0,
+                    pending_count=0,
+                    failed_count=0,
+                )
+            return ProviderFulfilment(
+                state="failed",
+                message="Instant fleet: all instances failed",
+                target_units=target_units,
+                fulfilled_units=0,
+                running_count=running_count,
+                pending_count=pending_count,
+                failed_count=failed_count,
+            )
+
+        return compute_capacity_based_fulfilment(
+            target_capacity=target_capacity,
+            fulfilled_capacity=fulfilled_capacity,
+            running_count=running_count,
+            pending_count=pending_count,
+            failed_count=failed_count,
+            provider_label="Fleet",
+        )
 
     def release_hosts(
         self,

@@ -237,7 +237,7 @@ class MachineSyncService:
             if not isinstance(pending_cleanup, dict):
                 continue
 
-            resource_id = pending_cleanup.get("vmss_name")
+            resource_id = pending_cleanup.get("resource_id")
             if resource_id in (None, ""):
                 continue
 
@@ -393,10 +393,8 @@ class MachineSyncService:
                         #     Stamp a terminal "Terminated" if provider didn't
                         #     supply something more specific (EC2's StateReason).
                         #   - Otherwise pass through whatever provider returned.
-                        from orb.domain.machine.machine_status import MachineStatus as _MS
-
                         _new_reason = provider_machine.status_reason
-                        if provider_machine.status == _MS.TERMINATED:
+                        if provider_machine.status == MachineStatus.TERMINATED:
                             if not _new_reason or "in progress" in (_new_reason or "").lower():
                                 _new_reason = "Terminated"
                         machine_data["status_reason"] = _new_reason

@@ -20,6 +20,7 @@ The return path is unchanged.
 import dataclasses
 from typing import Optional, Tuple
 
+from orb.application.services.request_follow_up_context import get_request_follow_up_context
 from orb.domain.base import UnitOfWorkFactory
 from orb.domain.base.exceptions import ProviderContractError
 from orb.domain.base.ports.logging_port import LoggingPort
@@ -123,18 +124,8 @@ class RequestStatusService:
         """Determine return request status from machine termination states."""
         db_machine_count = len(db_machines)
         follow_up_pending_message = "Return in progress: awaiting provider follow-up cleanup"
-
-        if provider_metadata.get("termination_follow_up_failed"):
-            details = provider_metadata.get("termination_follow_up_details", [{}])
-            error = details[0].get("last_delete_error") if details else None
-            message = "Return request failed: provider follow-up cleanup failed"
-            if error:
-                message = f"{message}: {error}"
-            return RequestStatus.FAILED.value, message
-
-        termination_follow_up_pending = bool(
-            provider_metadata.get("termination_follow_up_pending", False)
-        )
+        follow_up_context = get_request_follow_up_context(request)
+        termination_follow_up_pending = follow_up_context.get("follow_up_kind") == "termination"
 
         # For return requests: empty provider_machines *with* DB records means all
         # instances are gone from AWS — genuinely terminated.  But if we have

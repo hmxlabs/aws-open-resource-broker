@@ -22,11 +22,11 @@ from orb.domain.base.ports import (
     LoggingPort,
 )
 from orb.infrastructure.template.dtos import TemplateDTO
-from orb.providers.aws.configuration.template_extension import AWSTemplateExtensionConfig
+from orb.providers.aws.domain.template.aws_template_dto_config import AWSTemplateDTOConfig
 
 
 def _provider_config_dict(dto: TemplateDTO) -> dict[str, Any]:
-    assert isinstance(dto.provider_config, AWSTemplateExtensionConfig)
+    assert isinstance(dto.provider_config, AWSTemplateDTOConfig)
     return dto.provider_config.model_dump(exclude_none=True)
 
 
