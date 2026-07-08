@@ -15,6 +15,8 @@ instance-dict mapping) — it carries no state of its own.
 
 from __future__ import annotations
 
+import threading
+import time
 from typing import TYPE_CHECKING, Any, Optional
 
 from orb.domain.base.provider_fulfilment import CheckHostsStatusResult, ProviderFulfilment
@@ -29,6 +31,11 @@ class DeploymentStatusResolver:
 
     def __init__(self, handler: K8sDeploymentHandler) -> None:
         self._handler = handler
+        # Per-workload TTL cache:
+        #   (namespace, deployment_name) -> (view, fetch_monotonic_ts, stored_requested_count)
+        # Guarded by _cache_lock so concurrent check_hosts_status calls are safe.
+        self._controller_cache: dict[tuple[str, str], tuple[dict[str, Any], float, int]] = {}
+        self._cache_lock = threading.Lock()
 
     def check_hosts_status(self, request: Request) -> CheckHostsStatusResult:
         """Return per-pod details + the Deployment-driven fulfilment verdict.
@@ -56,7 +63,9 @@ class DeploymentStatusResolver:
             # fulfilment verdict on the Deployment status because the
             # controller's view is authoritative for selective scale.
             cached_instances = handler.apply_pod_timeouts(list(cached.instances))
-            controller_view = self.read_deployment_status(namespace, deployment_name)
+            controller_view = self._get_cached_deployment_status(
+                namespace, deployment_name, requested_count=request.requested_count
+            )
             fulfilment = self.compute_fulfilment(
                 cached_instances,
                 request.requested_count,
@@ -67,10 +76,14 @@ class DeploymentStatusResolver:
         selector = handler.build_label_selector(request)
 
         try:
+            # resource_version='0' serves from the apiserver reflector cache
+            # (sub-ms, ~500 ms staleness) instead of reading from etcd.
+            # Acceptable for status polls — not used on create/update paths.
             response = handler.with_retry(
                 handler.client.core_v1.list_namespaced_pod,
                 namespace=namespace,
                 label_selector=selector,
+                resource_version="0",
                 operation_name="list_namespaced_pod",
             )
         except Exception as exc:
@@ -97,13 +110,73 @@ class DeploymentStatusResolver:
             handler._instance_dict_for_pod(pod, namespace=namespace) for pod in pods
         ]
         instances = handler.apply_pod_timeouts(instances)
-        controller_view = self.read_deployment_status(namespace, deployment_name)
+        controller_view = self._get_cached_deployment_status(
+            namespace, deployment_name, requested_count=request.requested_count
+        )
         fulfilment = self.compute_fulfilment(
             instances,
             request.requested_count,
             controller_view=controller_view,
         )
         return CheckHostsStatusResult(instances=instances, fulfilment=fulfilment)
+
+    def _get_cached_deployment_status(
+        self, namespace: str, deployment_name: str, *, requested_count: int
+    ) -> dict[str, Any]:
+        """Return the controller view, serving from the TTL cache when fresh.
+
+        Cache semantics:
+
+        * **TTL disabled** — when ``controller_status_cache_ttl_seconds <= 0``
+          the cache is bypassed entirely (no store, no read) to avoid
+          unbounded dict growth during high-frequency polls.
+        * **Scale-down guard** — a cached entry is only served when the
+          *stored* ``requested_count`` equals the *current* ``requested_count``
+          AND the stored view shows the workload fully ready.  If the replica
+          target has changed since the entry was stored (e.g. scale 5 → 3),
+          the entry is treated as a miss and a fresh GET is issued.
+        * **TOCTOU guard** — the fetch timestamp is captured *before* the
+          blocking GET.  On store, an existing entry is only overwritten when
+          its timestamp is older than the new one, so a slow thread cannot
+          clobber a fresher entry with a stale view.
+
+        The TTL is controlled by
+        ``K8sProviderConfig.controller_status_cache_ttl_seconds`` (default 5 s).
+        """
+        ttl = self._handler.config.controller_status_cache_ttl_seconds
+
+        # TTL <= 0 means disabled — bypass cache entirely (Finding 5).
+        if ttl <= 0:
+            return self.read_deployment_status(namespace, deployment_name)
+
+        cache_key = (namespace, deployment_name)
+        now = time.monotonic()
+
+        with self._cache_lock:
+            entry = self._controller_cache.get(cache_key)
+            if entry is not None:
+                view, ts, stored_requested = entry  # type: ignore[misc]
+                ready = view.get("ready_replicas")
+                # Finding 1: only serve when stored requested_count matches current
+                # AND workload was fully ready when stored.
+                fully_ready = isinstance(ready, int) and ready >= stored_requested
+                if stored_requested == requested_count and fully_ready and now - ts < ttl:
+                    return view
+
+        # Cache miss, expired, workload not fully ready, or requested_count changed —
+        # fetch outside the lock to avoid blocking concurrent callers during the API
+        # GET.  Capture the timestamp BEFORE the GET (Finding 2 / TOCTOU guard).
+        fetch_ts = time.monotonic()
+        view = self.read_deployment_status(namespace, deployment_name)
+
+        with self._cache_lock:
+            existing = self._controller_cache.get(cache_key)
+            # Only overwrite if there is no existing entry or the existing entry
+            # is older than this fetch (Finding 2: don't clobber a newer entry).
+            if existing is None or existing[1] < fetch_ts:  # type: ignore[misc]
+                self._controller_cache[cache_key] = (view, fetch_ts, requested_count)  # type: ignore[assignment]
+
+        return view
 
     def read_deployment_status(self, namespace: str, deployment_name: str) -> dict[str, Any]:
         """Read ``availableReplicas``/``readyReplicas``/``conditions`` from the controller.

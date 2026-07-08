@@ -299,6 +299,22 @@ class K8sProviderConfig(BaseSettings, BaseProviderConfig):  # type: ignore[misc]
         ),
     )
 
+    # Controller-status cache
+    controller_status_cache_ttl_seconds: float = Field(
+        5.0,
+        description=(
+            "How long (in seconds) to serve a cached ``read_namespaced_*`` controller "
+            "response before re-issuing the GET to the API server.  Applied to "
+            "Deployment, StatefulSet and Job status polls.  At the default of 5 s, "
+            "1 000 concurrent requests polling every 5 s produce at most ~200 "
+            "controller GETs/s instead of the unthrottled ~200 GETs/s per workload.  "
+            "Set to 0 (or any value <= 0) to disable the cache entirely — every poll "
+            "will issue a direct GET.  Disabling prevents unbounded in-memory growth "
+            "in environments where the handler is polled at very high frequency; the "
+            "cache dict is not populated at all when TTL <= 0."
+        ),
+    )
+
     # Prometheus metrics
     metrics_enabled: bool = Field(
         True,

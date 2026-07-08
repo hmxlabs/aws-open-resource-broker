@@ -29,7 +29,12 @@ class PodStatusResolver:
     def __init__(self, handler: K8sPodHandler) -> None:
         self._handler = handler
 
-    def check_hosts_status(self, request: Request) -> CheckHostsStatusResult:
+    def check_hosts_status(
+        self,
+        request: Request,
+        *,
+        consistent_read: bool = False,
+    ) -> CheckHostsStatusResult:
         """Return per-pod details + the fulfilment verdict for ``request``.
 
         Cache-first read path: when a :class:`PodStateCache` has been
@@ -38,6 +43,18 @@ class PodStatusResolver:
         A cache miss (no entry) or a stale cache (any entry older than
         :attr:`K8sProviderConfig.stale_cache_timeout_seconds`)
         falls back to a single ``list_namespaced_pod`` call.
+
+        Parameters
+        ----------
+        request:
+            The request whose pods are being queried.
+        consistent_read:
+            When ``True``, omit ``resource_version='0'`` from the fallback
+            list call, forcing a consistent read from etcd instead of the
+            apiserver reflector cache.  Use on any path that must confirm
+            release completion — the ~500 ms reflector lag can otherwise
+            cause just-deleted pods to appear alive (Finding 4).  Defaults
+            to ``False`` (reflector-cached read) for normal status polls.
         """
         handler = self._handler
         cached = handler._read_from_cache(request)
@@ -49,12 +66,22 @@ class PodStatusResolver:
         namespace = handler._resolve_request_namespace(request)
         selector = handler.build_label_selector(request)
 
+        # resource_version='0' serves from the apiserver reflector cache
+        # (sub-ms, ~500 ms staleness) instead of reading from etcd.
+        # Acceptable for status polls — omitted when consistent_read=True
+        # (e.g. release-confirmation paths that need a strong read).
+        list_kwargs: dict[str, Any] = {
+            "namespace": namespace,
+            "label_selector": selector,
+            "operation_name": "list_namespaced_pod",
+        }
+        if not consistent_read:
+            list_kwargs["resource_version"] = "0"
+
         try:
             response = handler.with_retry(
                 handler.client.core_v1.list_namespaced_pod,
-                namespace=namespace,
-                label_selector=selector,
-                operation_name="list_namespaced_pod",
+                **list_kwargs,
             )
         except Exception as exc:
             handler._logger.error(
