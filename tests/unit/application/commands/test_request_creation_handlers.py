@@ -19,17 +19,7 @@ async def test_load_template_converts_template_dto_to_domain_template() -> None:
             provider_type="azure",
             provider_name="azure-default",
             provider_api="VMSS",
-            vm_size="Standard_D4s_v5",
-            provider_config={
-                "resource_group": "rg-test",
-                "location": "eastus2",
-                "image": {
-                    "publisher": "Canonical",
-                    "offer": "0001-com-ubuntu-server-jammy",
-                    "sku": "22_04-lts-gen2",
-                    "version": "latest",
-                },
-            },
+            network_zones=["eastus2"],
         )
     )
     container = Mock()
@@ -44,6 +34,7 @@ async def test_load_template_converts_template_dto_to_domain_template() -> None:
         query_bus=query_bus,
         provider_selection_port=Mock(),
         provisioning_service=Mock(),
+        provider_validation_service=Mock(),
     )
 
     template = await handler._load_template("azure-cheapest-vmss")

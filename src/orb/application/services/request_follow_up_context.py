@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-from orb.domain.request.aggregate import Request
+from typing import Any
+
 from orb.domain.base.follow_up_context import (
     DeploymentPollingFollowUpContext,
     FollowUpContext,
     TerminationFollowUpContext,
 )
-from typing import Any
+from orb.domain.request.aggregate import Request
 
 FOLLOW_UP_CONTEXT_KEY = "follow_up_context"
 

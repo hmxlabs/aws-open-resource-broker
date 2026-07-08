@@ -86,7 +86,7 @@ async def test_async_submitted_create_is_not_retried():
     assert result.is_final is True
     assert provider_selection_port.execute_operation.await_count == 1
     provider_config_port.get_provider_instance_config.assert_called_once_with("azure-default")
-    container.get.assert_called_with(SchedulerPort)
+    container.get.assert_any_call(SchedulerPort)
 
 
 @pytest.mark.unit

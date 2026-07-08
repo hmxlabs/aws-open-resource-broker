@@ -6,6 +6,8 @@ from unittest.mock import MagicMock
 import pytest
 
 from orb.application.services.request_status_service import RequestStatusService
+from orb.domain.base.exceptions import ProviderContractError
+from orb.domain.base.provider_fulfilment import ProviderFulfilment
 from orb.domain.machine.machine_status import MachineStatus
 from orb.domain.request.aggregate import Request
 from orb.domain.request.request_types import RequestStatus
@@ -19,6 +21,7 @@ def _make_service():
 def _make_request(request_type="return"):
     req = MagicMock()
     req.request_type.value = request_type
+    req.provider_name = "test-provider"
     req.requested_count = 2
     return req
 
@@ -191,11 +194,13 @@ def test_acquire_request_with_pending_machine_does_not_complete_from_fulfillment
         provider_machines=[pending_machine],  # type: ignore[arg-type]
         request=req,
         provider_metadata={
-            "fleet_capacity_fulfilment": {
-                "target_capacity_units": 1,
-                "fulfilled_capacity_units": 1,
-                "fulfillment_final": True,
-            }
+            "provider_fulfilment": ProviderFulfilment(
+                state="in_progress",
+                message="0/1 instances running, waiting for 1 more",
+                target_units=1,
+                fulfilled_units=0,
+                pending_count=1,
+            )
         },
     )
 
@@ -214,8 +219,14 @@ def test_acquire_request_with_terminal_planned_shortfall_becomes_partial():
         provider_machines=[running_machine],  # type: ignore[arg-type]
         request=req,
         provider_metadata={
-            "terminal_error_message": "OperationNotAllowed: quota exceeded",
-            "unfulfilled_count": 1,
+            "provider_fulfilment": ProviderFulfilment(
+                state="partial",
+                message="1/2 instances running: OperationNotAllowed: quota exceeded",
+                target_units=2,
+                fulfilled_units=1,
+                running_count=1,
+                failed_count=1,
+            )
         },
     )
 
@@ -233,8 +244,13 @@ def test_acquire_request_with_terminal_planned_shortfall_and_no_instances_become
         provider_machines=[],
         request=req,
         provider_metadata={
-            "terminal_error_message": "OperationNotAllowed: quota exceeded",
-            "unfulfilled_count": 2,
+            "provider_fulfilment": ProviderFulfilment(
+                state="failed",
+                message="OperationNotAllowed: quota exceeded",
+                target_units=2,
+                fulfilled_units=0,
+                failed_count=2,
+            )
         },
     )
 
@@ -242,20 +258,15 @@ def test_acquire_request_with_terminal_planned_shortfall_and_no_instances_become
     assert message == "OperationNotAllowed: quota exceeded"
 
 
-def test_acquire_request_with_malformed_unfulfilled_count_becomes_failed():
+def test_acquire_request_without_provider_fulfilment_raises_contract_error():
     svc = _make_service()
     req = _make_request("acquire")
     req.requested_count = 2
 
-    status, message = svc.determine_status_from_machines(
-        db_machines=[],
-        provider_machines=[],
-        request=req,
-        provider_metadata={
-            "terminal_error_message": "OperationNotAllowed: quota exceeded",
-            "unfulfilled_count": "not-an-int",
-        },
-    )
-
-    assert status == RequestStatus.FAILED.value
-    assert message == "Provider reported malformed unfulfilled_count metadata"
+    with pytest.raises(ProviderContractError, match="ProviderFulfilment"):
+        svc.determine_status_from_machines(
+            db_machines=[],
+            provider_machines=[],
+            request=req,
+            provider_metadata={},
+        )

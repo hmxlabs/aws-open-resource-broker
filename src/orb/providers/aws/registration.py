@@ -8,12 +8,12 @@ if TYPE_CHECKING:
     from orb.domain.base.ports import LoggingPort
     from orb.providers.registry import ProviderRegistry
 
-# Template extension imports for our new functionality
-from orb.domain.template.extensions import TemplateExtensionRegistry
+from orb.infrastructure.registry.template_extension_registry import TemplateExtensionRegistry
 from orb.domain.template.factory import TemplateFactory
-from orb.domain.base.ports.provider_cli_spec_port import CLISpecRegistry
+from orb.infrastructure.registry.cli_spec_registry import CLISpecRegistry
 from orb.providers.aws.cli.aws_cli_spec import AWSCLISpec
 from orb.providers.aws.configuration.template_extension import AWSTemplateExtensionConfig
+from orb.providers.aws.domain.template.aws_template_dto_config import AWSTemplateDTOConfig
 
 
 def create_aws_strategy(provider_config: Any) -> Any:
@@ -362,7 +362,7 @@ def register_aws_extensions(logger: Optional["LoggingPort"] = None) -> None:
     """
     try:
         # Register AWS template extension configuration
-        TemplateExtensionRegistry.register_extension("aws", AWSTemplateExtensionConfig)
+        TemplateExtensionRegistry.register_extension("aws", AWSTemplateDTOConfig)
 
         if logger:
             logger.debug("AWS template extensions registered successfully")
@@ -441,7 +441,7 @@ def initialize_aws_provider(
             register_aws_template_factory(template_factory, logger)
 
         # Register AWS CLI spec
-        from orb.domain.base.ports.provider_cli_spec_port import CLISpecRegistry
+        from orb.infrastructure.registry.cli_spec_registry import CLISpecRegistry
         from orb.providers.aws.cli.aws_cli_spec import AWSCLISpec
 
         CLISpecRegistry.register("aws", AWSCLISpec())

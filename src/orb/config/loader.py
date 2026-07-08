@@ -191,7 +191,31 @@ class ConfigurationLoader:
     @classmethod
     def _load_strategy_defaults(cls, config_manager=None) -> dict[str, Any]:
         merged: dict[str, Any] = {}
-        cls._merge_config(merged, cls._load_provider_defaults())
+        try:
+            from orb.providers.registry import DefaultsLoaderRegistry
+
+            # Ensure at least the built-in loaders are registered even when
+            # _load_strategy_defaults is called before a full application
+            # bootstrap (e.g. bare config loading in tests or the CLI parser).
+            # This mirrors what the old pkgutil.iter_modules approach did
+            # implicitly — importing each provider's registration module
+            # triggered side-effect registrations.
+            if not DefaultsLoaderRegistry.registered_providers():
+                from orb.providers.registration import register_all_defaults_loaders
+
+                register_all_defaults_loaders()
+
+            for provider_type, loader in DefaultsLoaderRegistry.all().items():
+                try:
+                    defaults = loader.load_defaults()
+                    if defaults:
+                        cls._merge_config(merged, defaults)
+                except Exception as e:
+                    get_config_logger().warning(
+                        "Failed to load defaults from provider '%s': %s", provider_type, e
+                    )
+        except Exception as e:
+            get_config_logger().warning("Failed to load provider defaults: %s", e)
         try:
             from orb.infrastructure.scheduler.registry import get_scheduler_registry
 
@@ -199,29 +223,6 @@ class ConfigurationLoader:
         except Exception as e:
             get_config_logger().warning("Failed to load scheduler defaults: %s", e)
         return merged
-
-    @classmethod
-    def _load_provider_defaults(cls) -> dict[str, Any]:
-        """Load static provider defaults without bootstrapping provider registries."""
-        merged: dict[str, Any] = {}
-        provider_default_loaders = {
-            "aws": cls._load_aws_provider_defaults,
-        }
-
-        for provider_type, load_defaults in provider_default_loaders.items():
-            try:
-                cls._merge_config(merged, load_defaults())
-            except Exception as e:
-                get_config_logger().warning(
-                    "Failed to load %s provider defaults: %s", provider_type, e
-                )
-        return merged
-
-    @staticmethod
-    def _load_aws_provider_defaults() -> dict[str, Any]:
-        from orb.providers.aws.strategy.aws_provider_strategy import AWSProviderStrategy
-
-        return AWSProviderStrategy.get_defaults_config()
 
     @classmethod
     def _load_default_config(cls) -> dict[str, Any]:
@@ -472,7 +473,8 @@ class ConfigurationLoader:
                 )
 
             # Propagate scripts_dir written by `orb init` back into the config model
-            if scripts_dir := config.get("scripts_dir"):
+            if config.get("scripts_dir"):
+                scripts_dir = config["scripts_dir"]
                 get_config_logger().debug("scripts_dir from config: %s", scripts_dir)
                 os.environ.setdefault("ORB_SCRIPTS_DIR", scripts_dir)
 

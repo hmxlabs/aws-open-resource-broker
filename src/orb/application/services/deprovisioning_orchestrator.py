@@ -195,6 +195,7 @@ class DeprovisioningOrchestrator:
                     "resource_mapping": {iid: (resource_id, 1) for iid in instance_ids},
                     "request_id": origin_request_id,
                     "request_metadata": self._build_request_metadata(request),
+                    "request": request,
                 },
                 context={
                     "correlation_id": str(request.request_id),

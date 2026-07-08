@@ -1,5 +1,6 @@
 """Machine sync service for provider integration."""
 
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Optional, Tuple
 
 if TYPE_CHECKING:
@@ -89,6 +90,7 @@ class MachineSyncService:
                     "provider_api": request.provider_api,
                     "template_id": request.template_id,
                     "request_metadata": self._build_request_metadata(request),
+                    "requested_count": request.requested_count,
                 }
             # Fallback to instance-level discovery for requests without resource tracking
             elif db_machines:
@@ -102,6 +104,7 @@ class MachineSyncService:
             else:
                 return [], {}
 
+            parameters = {**parameters, "request": request}
             operation = ProviderOperation(
                 operation_type=operation_type,
                 parameters=parameters,
@@ -299,11 +302,17 @@ class MachineSyncService:
         )
 
     def _create_terminated_machine(self, existing: Machine) -> Machine:
-        """Return a copy of an existing DB machine with status set to TERMINATED."""
+        """Return a copy of an existing DB machine with status set to TERMINATED.
+
+        Clears any in-flight ``status_reason`` (e.g. ``"Termination in
+        progress"``) and stamps a terminal reason so the UI doesn't show
+        stale progress text on a terminal machine.
+        """
         from orb.domain.machine.machine_status import MachineStatus
 
         machine_data = existing.model_dump()
         machine_data["status"] = MachineStatus.TERMINATED
+        machine_data["status_reason"] = "Terminated"
         machine_data["version"] = existing.version + 1
         return Machine.model_validate(machine_data)
 
@@ -315,8 +324,25 @@ class MachineSyncService:
         return Machine.model_validate(machine_data)
 
     async def sync_machines_with_provider(
-        self, request: Request, db_machines: list[Machine], provider_machines: list[Machine]
+        self,
+        request: Request,
+        db_machines: list[Machine],
+        provider_machines: list[Machine],
+        now: Optional[datetime] = None,
     ) -> Tuple[list[Machine], dict]:
+        """Sync machines with provider state and stamp first/last_status_check on the request.
+
+        Stamping is a deliberate write triggered by this sync cycle, not by the
+        caller (which may be a query handler).  Moving the write here keeps
+        query handlers read-only while ensuring every sync cycle records the
+        poll timestamp regardless of which caller initiated the sync.
+
+        Args:
+            request: The request whose machines are being synced.
+            db_machines: Current machines in the database.
+            provider_machines: Current machines as reported by the provider.
+            now: Timestamp to use for status-check stamps (defaults to UTC now).
+        """
         try:
             existing_by_id = {str(m.machine_id.value): m for m in db_machines}
             updated_machines = []
@@ -343,6 +369,7 @@ class MachineSyncService:
                         or existing.vpc_id != provider_machine.vpc_id
                         or existing.status_reason != provider_machine.status_reason
                         or existing.provider_data != provider_machine.provider_data
+                        or (provider_machine.resource_id and not existing.resource_id)
                     )
 
                     # Debug logging
@@ -360,7 +387,19 @@ class MachineSyncService:
                         machine_data["private_dns_name"] = provider_machine.private_dns_name
                         machine_data["public_dns_name"] = provider_machine.public_dns_name
                         machine_data["price_type"] = provider_machine.price_type
-                        machine_data["status_reason"] = provider_machine.status_reason
+                        # status_reason normalisation:
+                        #   - On reaching a terminal status (TERMINATED), in-flight
+                        #     reasons like "Termination in progress" are stale.
+                        #     Stamp a terminal "Terminated" if provider didn't
+                        #     supply something more specific (EC2's StateReason).
+                        #   - Otherwise pass through whatever provider returned.
+                        from orb.domain.machine.machine_status import MachineStatus as _MS
+
+                        _new_reason = provider_machine.status_reason
+                        if provider_machine.status == _MS.TERMINATED:
+                            if not _new_reason or "in progress" in (_new_reason or "").lower():
+                                _new_reason = "Terminated"
+                        machine_data["status_reason"] = _new_reason
                         machine_data["provider_data"] = provider_machine.provider_data
                         machine_data["launch_time"] = (
                             provider_machine.launch_time or existing.launch_time
@@ -370,6 +409,8 @@ class MachineSyncService:
                         machine_data["vpc_id"] = provider_machine.vpc_id
                         machine_data["version"] = existing.version + 1
                         machine_data["tags"] = provider_machine.tags
+                        if provider_machine.resource_id and not existing.resource_id:
+                            machine_data["resource_id"] = provider_machine.resource_id
 
                         updated_machine = Machine.model_validate(machine_data)
                         to_upsert.append(updated_machine)
@@ -393,6 +434,27 @@ class MachineSyncService:
                         uow.machines.save(machine)
 
                 self.logger.info(f"Updated {len(to_upsert)} machines from provider sync")
+
+            # Stamp first_status_check (once, immutable) and last_status_check
+            # on every sync cycle. Mutation lives here (not in the query
+            # handler) to keep queries read-only.
+            try:
+                _now = now or datetime.now(timezone.utc)
+                updated_request = request.record_status_check(now=_now)
+                with self.uow_factory.create_unit_of_work() as uow:
+                    uow.requests.save(updated_request)
+                self.logger.debug(
+                    "Stamped status_check timestamps on request %s (first=%s)",
+                    request.request_id,
+                    updated_request.first_status_check,
+                )
+            except Exception as stamp_err:
+                # Non-fatal — the sync result is still valid even if stamping fails.
+                self.logger.warning(
+                    "Failed to stamp status_check on request %s: %s",
+                    request.request_id,
+                    stamp_err,
+                )
 
             return updated_machines, {}
 

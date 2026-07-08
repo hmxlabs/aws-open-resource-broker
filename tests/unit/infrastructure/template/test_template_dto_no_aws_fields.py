@@ -7,7 +7,7 @@ import pytest
 from pydantic import ValidationError
 
 from orb.infrastructure.template.dtos import TemplateDTO
-from orb.providers.aws.configuration.template_extension import AWSTemplateExtensionConfig
+from orb.providers.aws.domain.template.aws_template_dto_config import AWSTemplateDTOConfig
 from orb.providers.aws.domain.template.aws_template_aggregate import (
     ABISInstanceRequirements,
     AWSFleetType,
@@ -94,7 +94,7 @@ def _make_aws_template(**kwargs) -> AWSTemplate:
 
 
 def _provider_config_dict(dto: TemplateDTO) -> dict:
-    assert isinstance(dto.provider_config, AWSTemplateExtensionConfig)
+    assert isinstance(dto.provider_config, AWSTemplateDTOConfig)
     return dto.provider_config.model_dump(exclude_none=True)
 
 
@@ -104,7 +104,7 @@ class TestFromDomainPacksAWSFieldsIntoProviderConfig:
     def test_provider_config_is_typed(self):
         template = _make_aws_template(fleet_type=AWSFleetType.MAINTAIN)
         dto = TemplateDTO.from_domain(template)
-        assert isinstance(dto.provider_config, AWSTemplateExtensionConfig)
+        assert isinstance(dto.provider_config, AWSTemplateDTOConfig)
 
     def test_fleet_type_in_metadata(self):
         template = _make_aws_template(fleet_type=AWSFleetType.MAINTAIN)
@@ -139,6 +139,7 @@ class TestFromDomainPacksAWSFieldsIntoProviderConfig:
         template = _make_aws_template(provider_api="RunInstances")
         dto = TemplateDTO.from_domain(template)
         assert "fleet_type" not in _provider_config_dict(dto)
+        assert "fleet_type" not in dto.to_template_config()
         assert not hasattr(dto, "fleet_type") or "fleet_type" not in dto.model_fields
 
     def test_existing_metadata_preserved(self):
@@ -170,7 +171,7 @@ class TestProviderConfigValidation:
             TemplateDTO(
                 template_id="tpl-unregistered",
                 provider_type="unregistered-provider",
-                provider_config=AWSTemplateExtensionConfig.model_validate({}),
+                provider_config=AWSTemplateDTOConfig.model_validate({}),
             )
 
 

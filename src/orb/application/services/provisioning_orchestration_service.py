@@ -1,15 +1,22 @@
 """Service for orchestrating provider provisioning operations."""
 
 import asyncio
-from dataclasses import dataclass
-from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Any, Callable
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
+from typing import TYPE_CHECKING, Any, Callable, assert_never
 
 if TYPE_CHECKING:
     from orb.domain.base.ports.provider_selection_port import ProviderSelectionPort
     from orb.infrastructure.resilience.strategy.circuit_breaker import CircuitBreakerStrategy
 
 from orb.domain.base.exceptions import QuotaError
+from orb.domain.base.operation_outcome import (
+    Accepted,
+    Completed,
+    Failed,
+    OperationOutcome,
+    RequiresFollowUp,
+)
 from orb.domain.base.ports import ConfigurationPort, ContainerPort, LoggingPort, ProviderConfigPort
 from orb.domain.base.results import ProviderSelectionResult
 from orb.domain.request.aggregate import Request
@@ -20,7 +27,24 @@ from orb.infrastructure.resilience.exceptions import CircuitBreakerOpenError
 
 @dataclass
 class ProvisioningResult:
-    """Result of provisioning operation."""
+    """Result of provisioning operation.
+
+    The ``outcome`` field carries the typed :class:`OperationOutcome` returned
+    by the provider.  ``is_final`` is preserved for backward compatibility and
+    is derived from ``outcome`` when it is present.
+
+    ``Accepted``         → ``is_final = False`` (provider is still processing)
+    ``Completed``        → ``is_final = True``
+    ``RequiresFollowUp`` → ``is_final = False`` (background work remains)
+    ``Failed``           → ``is_final = True``
+    ``None`` (legacy)    → honour the explicit ``is_final`` value
+
+    Provider error fields (all optional, only set on failure):
+      ``provider_error_code``    — provider API error code (e.g. ``UnauthorizedOperation``)
+      ``provider_error_message`` — human-readable message from the provider response
+      ``provider_request_id``    — provider request ID for support cases
+      ``error_source``           — service.operation label (e.g. ``aws.ec2.RunInstances``)
+    """
 
     success: bool
     resource_ids: list[str]
@@ -30,6 +54,62 @@ class ProvisioningResult:
     error_message: str | None = None
     fulfilled_count: int = 0
     is_final: bool = True
+    outcome: OperationOutcome | None = field(default=None)
+    # Provider error detail fields — populated when the failure originates from
+    # a provider API call so callers can surface actionable diagnostics to the user.
+    provider_error_code: str | None = None
+    provider_error_message: str | None = None
+    provider_request_id: str | None = None
+    error_source: str | None = None
+
+    def __post_init__(self) -> None:
+        """Derive ``is_final`` from ``outcome`` when an outcome is provided."""
+        if self.outcome is not None:
+            match self.outcome:
+                case Accepted():
+                    self.is_final = False
+                case Completed():
+                    self.is_final = True
+                case RequiresFollowUp():
+                    self.is_final = False
+                case Failed():
+                    self.is_final = True
+                case _ as unreachable:
+                    assert_never(unreachable)
+
+
+def _extract_provider_error_fields(exc: BaseException) -> dict[str, Any]:
+    """Extract provider error fields from a provider exception (if applicable).
+
+    Returns a dict suitable for **-unpacking into ProvisioningResult.  When the
+    exception carries no provider error attributes the dict will contain only
+    None values so the ProvisioningResult fields stay empty (safe default).
+
+    Attribute lookup order (first non-None value wins):
+      provider_error_code  → ``provider_error_code`` then ``aws_error_code``
+      provider_error_message → ``provider_error_message`` then ``aws_error_message``
+      provider_request_id  → ``provider_request_id`` then ``aws_request_id``
+      error_source         → ``error_source``
+
+    The ``aws_*`` names are kept as a backward-compatible fallback so that
+    existing AWS exception classes do not need to be modified.
+    """
+    provider_error_code: str | None = getattr(exc, "provider_error_code", None) or getattr(
+        exc, "aws_error_code", None
+    )
+    provider_error_message: str | None = getattr(exc, "provider_error_message", None) or getattr(
+        exc, "aws_error_message", None
+    )
+    provider_request_id: str | None = getattr(exc, "provider_request_id", None) or getattr(
+        exc, "aws_request_id", None
+    )
+    error_source: str | None = getattr(exc, "error_source", None)
+    return {
+        "provider_error_code": provider_error_code,
+        "provider_error_message": provider_error_message,
+        "provider_request_id": provider_request_id,
+        "error_source": error_source,
+    }
 
 
 class ProvisioningOrchestrationService:
@@ -59,12 +139,14 @@ class ProvisioningOrchestrationService:
         default_config: dict[str, Any] = {
             "max_retries": request_config.get("fulfillment_max_retries", 3),
             "timeout_seconds": request_config.get("fulfillment_timeout_seconds", 300),
+            "dispatch_timeout_seconds": request_config.get("dispatch_timeout_seconds", 300),
             "batch_size": request_config.get("fulfillment_batch_size", 1000),
             "fallback_template_id": request_config.get("fulfillment_fallback_template_id"),
         }
         config = {**default_config, **request.metadata.get("fulfillment_config", {})}
         max_retries: int = int(config["max_retries"])
         timeout_seconds: float = float(config["timeout_seconds"])
+        dispatch_timeout_seconds: float = float(config["dispatch_timeout_seconds"])
         batch_size: int = int(config["batch_size"])
 
         started_at = datetime.now(timezone.utc)
@@ -104,38 +186,18 @@ class ProvisioningOrchestrationService:
             request = request.update_metadata({"provisioning_attempt": attempt_number})
 
             try:
+                remaining_timeout_seconds = max(
+                    timeout_seconds
+                    - (datetime.now(timezone.utc) - started_at).total_seconds(),
+                    0.001,
+                )
                 last_result = await self._dispatch_single_attempt(
                     template,
                     request,
                     selection_result,
                     attempt_count,
-                    operation_timeout_seconds=max(timeout_seconds - elapsed, 0.0),
+                    min(dispatch_timeout_seconds, remaining_timeout_seconds),
                 )
-            except TimeoutError:
-                self._logger.warning(
-                    "Provisioning operation timed out after %.1fs for request %s",
-                    timeout_seconds,
-                    request.request_id,
-                )
-                last_result = ProvisioningResult(
-                    success=False,
-                    resource_ids=[],
-                    machine_ids=[],
-                    instances=[],
-                    provider_data={
-                        "operation_status": "timeout",
-                        "submission_status": "unknown",
-                        "timed_out": True,
-                        "timeout_seconds": timeout_seconds,
-                    },
-                    error_message=(
-                        "Provisioning operation timed out; provider submission status is unknown"
-                    ),
-                    fulfilled_count=0,
-                    is_final=True,
-                )
-                accumulated_provider_data.update(last_result.provider_data)
-                break
             except Exception as e:
                 if not isinstance(e, CircuitBreakerOpenError):
                     raise
@@ -189,6 +251,37 @@ class ProvisioningOrchestrationService:
                 self._record_provider_failure(selection_result.provider_name)
                 break
 
+            # Checkpoint: persist the resource IDs returned by this attempt before
+            # proceeding.  This closes the crash window between the provider creating
+            # resources (e.g. k8s pods) and the caller writing the final request row.
+            # A startup reconciler can re-associate any orphan provider resources with
+            # the dangling request row using the request-id label / tag.
+            # The write is best-effort: a DB failure is logged but does not abort the
+            # provisioning loop because the resource_ids are still tracked in memory
+            # and the caller performs a full persist on return.
+            if last_result.resource_ids:
+                request, checkpoint_ok = await asyncio.to_thread(
+                    self._persist_resource_ids_checkpoint, request, last_result.resource_ids
+                )
+                if not checkpoint_ok:
+                    self._logger.warning(
+                        "Resource-ID checkpoint persist failed for request %s attempt %d — "
+                        "continuing with in-memory state; provider resources %s are recorded "
+                        "only in memory until the final persist succeeds",
+                        request.request_id,
+                        attempt_number,
+                        last_result.resource_ids,
+                    )
+
+            # Async provider accepted the request and is provisioning out of
+            # band; polling owns the final status from here.  Retrying would
+            # create a second fleet alongside the one already provisioning,
+            # which then shows up as a phantom failure when it reports empty.
+            # Break out and let the status-check loop drive the single
+            # accepted fleet to completion.
+            if isinstance(last_result.outcome, Accepted):
+                break
+
             if remaining > 0 and not last_result.is_final:
                 # Partial fulfillment, retry may help — persist ACQUIRING status
                 self._logger.info(
@@ -198,7 +291,7 @@ class ProvisioningOrchestrationService:
                     request.requested_count,
                     remaining,
                 )
-                request, persist_ok = await self._persist_acquiring(request)
+                request, persist_ok = await asyncio.to_thread(self._persist_acquiring, request)
                 if not persist_ok:
                     self._logger.warning(
                         "ACQUIRING persist failed for request %s on attempt %d — "
@@ -224,11 +317,51 @@ class ProvisioningOrchestrationService:
             is_final=last_result.is_final if last_result else True,
         )
 
-    async def _persist_acquiring(self, request: Request) -> tuple[Request, bool]:
-        """Persist ACQUIRING status off the event loop between retry attempts."""
-        return await asyncio.to_thread(self._persist_acquiring_sync, request)
+    def _persist_resource_ids_checkpoint(
+        self, request: Request, new_resource_ids: list[str]
+    ) -> tuple[Request, bool]:
+        """Persist newly acquired provider resource IDs onto the request row.
 
-    def _persist_acquiring_sync(self, request: Request) -> tuple[Request, bool]:
+        Called immediately after a successful provider dispatch so that the DB
+        always contains the resource IDs returned by the provider, even if ORB
+        crashes before the caller writes the final request row.  Orphan provider
+        resources (e.g. k8s pods) carry a request-id label/tag; a startup
+        reconciler can match them to a request row whose resource_ids list
+        already contains the resource ID, avoiding duplicate creation.
+
+        The status is advanced to ACQUIRING when the request is still PENDING
+        so that status queries reflect that work has begun.
+
+        Returns:
+            (updated_request, success) — success is False when the DB write
+            failed.  The caller continues with the in-memory request; the final
+            persist in the handler will still carry the correct resource IDs.
+        """
+        from orb.domain.base import UnitOfWorkFactory
+
+        try:
+            updated = request
+            for rid in new_resource_ids:
+                updated = updated.add_resource_id(rid)
+            # Advance PENDING → ACQUIRING so the request is visibly in-flight;
+            # any other active status is left unchanged.
+            if updated.status == RequestStatus.PENDING:
+                updated = updated.update_status(
+                    RequestStatus.ACQUIRING, "Provider resources created, waiting for completion"
+                )
+            uow_factory = self._container.get(UnitOfWorkFactory)
+            with uow_factory.create_unit_of_work() as uow:
+                uow.requests.save(updated)
+            return updated, True
+        except Exception as e:
+            self._logger.warning(
+                "Failed to persist resource-ID checkpoint for request %s: %s",
+                request.request_id,
+                e,
+            )
+            return request, False
+
+    def _persist_acquiring(self, request: Request) -> tuple[Request, bool]:
         """Persist request with ACQUIRING status between retry attempts.
 
         Returns:
@@ -262,6 +395,92 @@ class ProvisioningOrchestrationService:
                 "Failed to reset circuit breaker state for %s: %s", provider_name, e
             )
 
+    def recover_stuck_acquiring_requests(self, timeout_seconds: int = 3600) -> int:
+        """Transition ACQUIRING requests that have exceeded their timeout to FAILED.
+
+        Called at startup to clean up rows that were left in ACQUIRING state by
+        a previous ORB process that crashed or was killed mid-provisioning.  Any
+        request whose ``created_at`` timestamp is older than ``timeout_seconds``
+        is failed with an explanatory message.  Resource IDs already recorded on
+        the request row are preserved so operators can investigate orphaned
+        provider resources.
+
+        Args:
+            timeout_seconds: Age threshold in seconds.  Requests in ACQUIRING
+                state with ``created_at`` older than this are failed.  Defaults
+                to 3600 s (one hour) which matches the
+                ``request.default_timeout`` config default.
+
+        Returns:
+            The number of requests that were transitioned to FAILED.
+        """
+        from orb.domain.base import UnitOfWorkFactory
+        from orb.domain.request.repository import RequestRepository
+
+        cutoff: datetime = datetime.now(timezone.utc) - timedelta(seconds=timeout_seconds)
+        failed_count = 0
+
+        try:
+            uow_factory = self._container.get(UnitOfWorkFactory)
+            with uow_factory.create_unit_of_work() as uow:
+                repo: RequestRepository = uow.requests  # type: ignore[assignment]
+                acquiring = repo.find_by_status(RequestStatus.ACQUIRING)
+
+            expired = [r for r in acquiring if r.created_at is not None and r.created_at < cutoff]
+
+            if not acquiring:
+                self._logger.debug(
+                    "startup scan: no ACQUIRING requests found — nothing to recover."
+                )
+                return 0
+
+            if not expired:
+                self._logger.debug(
+                    "startup scan: %d ACQUIRING request(s) found, none older than %ds — "
+                    "leaving untouched.",
+                    len(acquiring),
+                    timeout_seconds,
+                )
+                return 0
+
+            self._logger.info(
+                "startup scan: %d ACQUIRING request(s) found; %d exceed timeout of %ds "
+                "and will be transitioned to FAILED.",
+                len(acquiring),
+                len(expired),
+                timeout_seconds,
+            )
+
+            for request in expired:
+                try:
+                    failed_request = request.update_status(
+                        RequestStatus.FAILED,
+                        "Request abandoned in ACQUIRING state (timeout exceeded)",
+                        force=True,
+                    )
+                    uow_factory2 = self._container.get(UnitOfWorkFactory)
+                    with uow_factory2.create_unit_of_work() as uow2:
+                        uow2.requests.save(failed_request)
+                    failed_count += 1
+                    self._logger.info(
+                        "startup scan: failed ACQUIRING request %s "
+                        "(created_at=%s, resource_ids=%s)",
+                        request.request_id,
+                        request.created_at.isoformat() if request.created_at else "unknown",
+                        request.resource_ids,
+                    )
+                except Exception as exc:
+                    self._logger.warning(
+                        "startup scan: could not recover ACQUIRING request %s: %s",
+                        request.request_id,
+                        exc,
+                    )
+
+        except Exception as exc:
+            self._logger.warning("startup scan: ACQUIRING recovery scan failed: %s", exc)
+
+        return failed_count
+
     def _record_provider_failure(self, provider_name: str) -> None:
         """Increment circuit breaker failure count and open circuit if threshold is reached."""
         import time
@@ -283,7 +502,7 @@ class ProvisioningOrchestrationService:
         request: Request,
         selection_result: ProviderSelectionResult,
         count: int,
-        operation_timeout_seconds: float,
+        dispatch_timeout_seconds: float = 300.0,
     ) -> ProvisioningResult:
         """Dispatch a single provisioning attempt for `count` instances."""
         try:
@@ -302,6 +521,8 @@ class ProvisioningOrchestrationService:
                     "count": count,
                     "request_id": str(request.request_id),
                     "request_metadata": dict(request.metadata),
+                    "request": request,
+                    "template": template,
                 },
                 context={
                     "correlation_id": str(request.request_id),
@@ -312,52 +533,82 @@ class ProvisioningOrchestrationService:
 
             self._provider_config_port.get_provider_instance_config(selection_result.provider_name)
 
-            async with asyncio.timeout(operation_timeout_seconds):
+            async with asyncio.timeout(dispatch_timeout_seconds):
                 result = await self._provider_selection_port.execute_operation(
                     selection_result.provider_name, operation
                 )
-            result_data = result.data if isinstance(result.data, dict) else {}
 
             if result.success:
                 self._logger.debug("Provider result.data: %s", result.data)
                 self._logger.debug("Provider result.metadata: %s", result.metadata)
 
-                resource_ids = result_data.get("resource_ids", [])
-                instances = result_data.get("instances", [])
+                resource_ids = result.data.get("resource_ids", [])
+                instances = result.data.get("instances", [])
 
-                provider_data = result_data.get("provider_data", None) or (
-                    result.metadata or {}
-                ).get("provider_data", {})
-                fulfillment_final = provider_data.get("fulfillment_final", False)
-                has_capacity_error = provider_data.get("capacity_constrained", False)
+                # Handler provider_data is now flat-merged into result.metadata
+                # by the instance-operation service. Read fulfillment signals
+                # from the top-level metadata. Falls back to result.data's
+                # provider_data sub-key for handlers that have not yet been
+                # migrated to the flat shape (e.g. legacy code paths).
+                metadata_dict: dict[str, Any] = dict(result.metadata or {})
+                provider_data = metadata_dict.pop("provider_data", None)
+                legacy_provider_data = result.data.get("provider_data") or {}
+                for provider_payload in (provider_data, legacy_provider_data):
+                    if not isinstance(provider_payload, dict):
+                        continue
+                    for k, v in provider_payload.items():
+                        metadata_dict.setdefault(k, v)
 
-                # Merge routing telemetry (strategy-level) into provider_data so it
-                # reaches persistence alongside the provider-level data. Exclude
-                # the provider_data key itself from metadata, otherwise it would
-                # re-nest the already-extracted dict under provider_data["provider_data"].
-                merged_provider_data: dict[str, Any] = dict(provider_data)
-                metadata_extras = {
-                    k: v for k, v in (result.metadata or {}).items() if k != "provider_data"
-                }
-                merged_provider_data.update(metadata_extras)
+                # ``requires_async_polling`` — True means the caller must
+                # continue polling the provider before the request is settled.
+                # Defaults to False so handlers that do not set the key (e.g.
+                # non-AWS providers) behave as synchronous/complete by default.
+                requires_async_polling = bool(metadata_dict.get("requires_async_polling", False))
+                has_capacity_error = bool(metadata_dict.get("capacity_constrained", False))
+
+                merged_provider_data: dict[str, Any] = dict(metadata_dict)
                 if result.routing_info:
                     merged_provider_data.update(result.routing_info)
+                # Surface the capacity-constrained signal on the outcome
+                # metadata so status handlers + telemetry can distinguish
+                # "still pending" (provider just hasn't reported yet) from
+                # "stuck pending" (provider returned a capacity error).
+                # Provider handlers set the flag; consumers read it.
+                if "capacity_constrained" in metadata_dict:
+                    merged_provider_data["capacity_constrained"] = has_capacity_error
+
+                # requires_async_polling=False means the provider has finished
+                # provisioning and the result is final — emit Completed.
+                # True means instances exist but the provider may deliver more;
+                # emit Accepted so the polling loop owns the final transition.
+                if not requires_async_polling:
+                    outcome: OperationOutcome = Completed(
+                        resource_ids=resource_ids,
+                        metadata=merged_provider_data,
+                    )
+                else:
+                    outcome = Accepted(
+                        request_id=str(request.request_id),
+                        pending_resource_ids=resource_ids,
+                        metadata=merged_provider_data,
+                    )
 
                 self._record_provider_success(selection_result.provider_name)
                 return ProvisioningResult(
                     success=True,
                     resource_ids=resource_ids,
-                    machine_ids=result_data.get("instance_ids", []),
+                    machine_ids=result.data.get("instance_ids", []),
                     instances=instances,
                     provider_data=merged_provider_data,
                     fulfilled_count=len(instances),
-                    is_final=(not has_capacity_error and len(instances) >= count)
-                    or fulfillment_final,
+                    outcome=outcome,
+                    # is_final derived from outcome in __post_init__
                 )
             else:
-                provider_data = result_data.get("provider_data", None) or (
-                    result.metadata or {}
-                ).get("provider_data", {})
+                provider_data = dict(result.metadata or {})
+                nested_provider_data = provider_data.pop("provider_data", None)
+                if isinstance(nested_provider_data, dict):
+                    provider_data = {**nested_provider_data, **provider_data}
                 return ProvisioningResult(
                     success=False,
                     resource_ids=[],
@@ -365,18 +616,39 @@ class ProvisioningOrchestrationService:
                     instances=[],
                     provider_data=provider_data,
                     error_message=result.error_message,
+                    outcome=Failed(
+                        error=result.error_message or "Provider returned failure",
+                        recoverable=False,
+                    ),
                 )
 
         except CircuitBreakerOpenError:
             raise  # do not swallow — let it propagate to execute_provisioning
 
         except TimeoutError:
-            # Re-raise so the caller's asyncio.timeout handler can record it as
-            # a timeout result; otherwise the broad `except Exception` below
-            # would catch it and degrade it to a generic "Provisioning failed".
-            raise
+            timeout_msg = "Provisioning operation timed out; provider submission status is unknown"
+            self._logger.warning(
+                "Dispatch timed out after %.1fs for provider %s (request %s)",
+                dispatch_timeout_seconds,
+                selection_result.provider_name,
+                str(request.request_id) if hasattr(request, "request_id") else "unknown",
+            )
+            return ProvisioningResult(
+                success=False,
+                resource_ids=[],
+                machine_ids=[],
+                instances=[],
+                provider_data={
+                    "operation_status": "timeout",
+                    "submission_status": "unknown",
+                    "timed_out": True,
+                },
+                error_message=timeout_msg,
+                outcome=Failed(error=timeout_msg, recoverable=True),
+            )
 
         except QuotaError as e:
+            quota_msg = f"Quota exceeded: {e}"
             self._logger.error(
                 "Quota error during provisioning for template %s: %s",
                 template.template_id if hasattr(template, "template_id") else "unknown",
@@ -389,17 +661,20 @@ class ProvisioningOrchestrationService:
                     "error_type": type(e).__name__,
                 },
             )
+            aws_fields = _extract_provider_error_fields(e)
             return ProvisioningResult(
                 success=False,
                 resource_ids=[],
                 machine_ids=[],
                 instances=[],
                 provider_data={},
-                error_message=f"Quota exceeded: {e}",
-                is_final=True,
+                error_message=quota_msg,
+                outcome=Failed(error=quota_msg, recoverable=False),
+                **aws_fields,
             )
 
         except Exception as e:
+            generic_msg = f"Provisioning failed: {e}"
             self._logger.error(
                 "Provisioning dispatch failed for template %s: %s",
                 template.template_id if hasattr(template, "template_id") else "unknown",
@@ -413,11 +688,14 @@ class ProvisioningOrchestrationService:
                     "error_type": type(e).__name__,
                 },
             )
+            aws_fields = _extract_provider_error_fields(e)
             return ProvisioningResult(
                 success=False,
                 resource_ids=[],
                 machine_ids=[],
                 instances=[],
                 provider_data={},
-                error_message=f"Provisioning failed: {e}",
+                error_message=generic_msg,
+                outcome=Failed(error=generic_msg, recoverable=False),
+                **aws_fields,
             )

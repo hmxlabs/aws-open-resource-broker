@@ -1,9 +1,29 @@
-"""Request status service for business logic."""
+"""Request status service for business logic.
 
+Acquire path (fulfilment-based)
+---------------------------------
+The application layer trusts the provider's ``ProviderFulfilment`` verdict
+exclusively.  No count math.  No provider-specific key inspection.
+
+Every provider's ``check_hosts_status`` MUST return a ``CheckHostsStatusResult``
+with a ``ProviderFulfilment``.  If the fulfilment is missing the service raises
+``ProviderContractError`` — a hard error, not a silent fallback.
+
+Return path
+-----------
+``determine_status_from_machines`` still uses the existing machine-status
+counting for return requests because termination is observable via instance
+states (shutting-down → terminated) without a fleet-level capacity concept.
+The return path is unchanged.
+"""
+
+import dataclasses
 from typing import Optional, Tuple
 
 from orb.domain.base import UnitOfWorkFactory
+from orb.domain.base.exceptions import ProviderContractError
 from orb.domain.base.ports.logging_port import LoggingPort
+from orb.domain.base.provider_fulfilment import ProviderFulfilment
 from orb.domain.machine.aggregate import Machine
 from orb.domain.request.aggregate import Request
 from orb.domain.request.request_types import RequestStatus, RequestType
@@ -27,235 +47,238 @@ class RequestStatusService:
         request: Request,
         provider_metadata: dict,
     ) -> Tuple[Optional[str], Optional[str]]:
-        """Determine request status from machine states."""
+        """Determine request status from machine states.
+
+        For acquire requests the provider MUST supply a ``ProviderFulfilment``
+        via ``provider_metadata["provider_fulfilment"]``.  Any legacy
+        ``fleet_capacity_fulfilment`` key is ignored — the provider contract
+        is the only truth.
+
+        For return requests the existing machine-state counting logic is used.
+        """
         try:
-            db_machine_count = len(db_machines)
-
-            # Determine new status based on request type
             if request.request_type.value == "return":
-                follow_up_pending_message = (
-                    "Return in progress: awaiting provider follow-up cleanup"
+                return self._determine_return_status(
+                    db_machines, provider_machines, request, provider_metadata
                 )
-                if provider_metadata.get("termination_follow_up_failed"):
-                    details = provider_metadata.get("termination_follow_up_details", [{}])
-                    error = details[0].get("last_delete_error") if details else None
-                    message = "Return request failed: provider follow-up cleanup failed"
-                    if error:
-                        message = f"{message}: {error}"
-                    return RequestStatus.FAILED.value, message
-                termination_follow_up_pending = bool(
-                    provider_metadata.get("termination_follow_up_pending", False)
-                )
-
-                # For return requests, provider disappearance is only final once
-                # any provider-owned follow-up cleanup has also completed.
-                if not provider_machines:
-                    if termination_follow_up_pending:
-                        return (
-                            RequestStatus.IN_PROGRESS.value,
-                            follow_up_pending_message,
-                        )
-                    return (
-                        RequestStatus.COMPLETED.value,
-                        f"Return request completed: all machines terminated "
-                        f"(no longer visible in provider) (total in DB: {db_machine_count})",
-                    )
-
-                shutting_down_count = sum(
-                    1 for m in provider_machines if m.status.value in ["shutting-down", "stopping"]
-                )
-                terminated_count = sum(
-                    1 for m in provider_machines if m.status.value in ["terminated", "stopped"]
-                )
-                running_count = sum(1 for m in provider_machines if m.status.value == "running")
-                failed_count = sum(1 for m in provider_machines if m.status.value == "failed")
-                total_count = len(provider_machines)
-
-                # shutting-down/stopping are transient — only terminated/stopped are truly done
-                effectively_done_count = terminated_count
-                if (
-                    effectively_done_count == total_count
-                    and running_count == 0
-                    and termination_follow_up_pending
-                ):
-                    return (
-                        RequestStatus.IN_PROGRESS.value,
-                        follow_up_pending_message,
-                    )
-                if effectively_done_count == total_count and running_count == 0:
-                    return (
-                        RequestStatus.COMPLETED.value,
-                        f"Return request completed: {terminated_count} terminated, "
-                        f"{shutting_down_count} shutting down "
-                        f"(total in DB: {db_machine_count})",
-                    )
-                elif running_count > 0:
-                    return (
-                        RequestStatus.IN_PROGRESS.value,
-                        f"Return in progress: {running_count} machines still running, "
-                        f"awaiting termination (total in DB: {db_machine_count})",
-                    )
-                elif failed_count > 0:
-                    return (
-                        RequestStatus.FAILED.value,
-                        f"Return request failed: {failed_count} machines failed to terminate "
-                        f"(total in DB: {db_machine_count})",
-                    )
-                else:
-                    return RequestStatus.IN_PROGRESS.value, "Instances terminating"
-            # Acquisition request logic
             else:
-                machines_to_check = provider_machines if provider_machines else db_machines
-
-                fleet_errors = provider_metadata.get("fleet_errors") or []
-                fleet_capacity = provider_metadata.get("fleet_capacity_fulfilment") or {}
-                capacity_state = str(fleet_capacity.get("state") or "").lower()
-                terminal_error_message = provider_metadata.get("terminal_error_message")
-                unfulfilled_count = provider_metadata.get("unfulfilled_count")
-                if terminal_error_message and unfulfilled_count is not None and not isinstance(
-                    unfulfilled_count, int
-                ):
-                    return (
-                        RequestStatus.FAILED.value,
-                        "Provider reported malformed unfulfilled_count metadata",
-                    )
-                planned_terminal_shortfall = bool(terminal_error_message) and (
-                    unfulfilled_count is None or unfulfilled_count > 0
+                return self._determine_acquire_status(
+                    db_machines, provider_machines, request, provider_metadata
                 )
-
-                if not machines_to_check:
-                    if fleet_errors:
-                        error_message = next(
-                            (
-                                str(error.get("error_message"))
-                                for error in fleet_errors
-                                if isinstance(error, dict) and error.get("error_message")
-                            ),
-                            None,
-                        )
-                        error_code = next(
-                            (
-                                str(error.get("error_code"))
-                                for error in fleet_errors
-                                if isinstance(error, dict) and error.get("error_code")
-                            ),
-                            None,
-                        )
-                        detail = error_message or error_code or "Provider reported provisioning errors"
-                        return RequestStatus.FAILED.value, detail
-
-                    if capacity_state == "failed":
-                        return (
-                            RequestStatus.FAILED.value,
-                            "Provider reported failed state before any instances were visible",
-                        )
-
-                    if planned_terminal_shortfall:
-                        return RequestStatus.FAILED.value, str(terminal_error_message)
-
-                    # No machines yet and no terminal signal — provider may still
-                    # be submitting. Keep the request in_progress so the caller
-                    # polls again rather than stalling on a "no transition" None.
-                    return (
-                        RequestStatus.IN_PROGRESS.value,
-                        "No instances visible yet — continuing to poll",
-                    )
-
-                running_count = sum(1 for m in machines_to_check if m.status.value == "running")
-                pending_count = sum(
-                    1 for m in machines_to_check if m.status.value in ["pending", "starting"]
-                )
-                failed_count = sum(1 for m in machines_to_check if m.status.value == "failed")
-                total_count = len(machines_to_check)
-
-                # Use fleet capacity metrics when available (fleets/ASGs report their own
-                # target and fulfilled capacity). Fall back to instance counts otherwise.
-                effective_target = (
-                    fleet_capacity.get("target_capacity_units") or request.requested_count
-                )
-                fulfilled_from_metadata = fleet_capacity.get("fulfilled_capacity_units")
-                effective_fulfilled: float = (
-                    float(fulfilled_from_metadata)
-                    if fulfilled_from_metadata is not None
-                    else float(running_count + pending_count)
-                )
-
-                # Fleet metadata (FulfilledCapacity) can lag or use floating-point values
-                # that don't exactly match target. Use running instance count as the
-                # authoritative signal when it meets the requested count.
-                fulfillment_final = fleet_capacity.get("fulfillment_final", False)
-                fleet_errors = provider_metadata.get("fleet_errors") or []
-
-                instance_target = request.requested_count
-                if running_count >= instance_target and failed_count == 0:
-                    return RequestStatus.COMPLETED.value, "All instances running successfully"
-
-                # Capacity metadata can confirm that the provider fulfilled the requested
-                # count, but it must not promote the request to complete while any
-                # instance is still in a pending/starting state.
-                if (
-                    pending_count == 0
-                    and effective_fulfilled >= effective_target
-                    and failed_count == 0
-                ):
-                    return RequestStatus.COMPLETED.value, "All instances running successfully"
-                elif planned_terminal_shortfall and pending_count == 0:
-                    if running_count > 0:
-                        return (
-                            RequestStatus.PARTIAL.value,
-                            f"{running_count}/{instance_target} instances running: {terminal_error_message}",
-                        )
-                    return RequestStatus.FAILED.value, str(terminal_error_message)
-                elif fulfillment_final and pending_count == 0:
-                    error_detail = (
-                        f": {'; '.join(e.get('error_code', '') for e in fleet_errors if e.get('error_code'))}"
-                        if fleet_errors
-                        else ""
-                    )
-                    if running_count > 0:
-                        return (
-                            RequestStatus.PARTIAL.value,
-                            f"{running_count}/{instance_target} instances running{error_detail}",
-                        )
-                    else:
-                        return RequestStatus.FAILED.value, f"All instances failed{error_detail}"
-                elif failed_count == total_count and total_count > 0:
-                    return RequestStatus.FAILED.value, "All instances failed"
-                elif pending_count > 0:
-                    return (
-                        RequestStatus.IN_PROGRESS.value,
-                        f"{running_count}/{effective_target} instances running, waiting for {pending_count} more",
-                    )
-                elif running_count > 0 and (running_count + failed_count) >= effective_target:
-                    return (
-                        RequestStatus.PARTIAL.value,
-                        f"{running_count}/{effective_target} instances running",
-                    )
-                elif running_count > 0:
-                    return (
-                        RequestStatus.IN_PROGRESS.value,
-                        f"{running_count}/{effective_target} instances running, waiting for more",
-                    )
-                else:
-                    return RequestStatus.IN_PROGRESS.value, "Instances starting"
-
+        except ProviderContractError:
+            raise
         except Exception as e:
             self.logger.error(f"Failed to determine status from machines: {e}")
             return RequestStatus.IN_PROGRESS.value, "Status determination failed — will retry"
 
-    async def update_request_status(self, request: Request, status: str, message: str) -> Request:
-        """Update request status."""
+    # ------------------------------------------------------------------
+    # Acquire path — trusts ProviderFulfilment exclusively
+    # ------------------------------------------------------------------
+
+    def _determine_acquire_status(
+        self,
+        db_machines: list[Machine],
+        provider_machines: list[Machine],
+        request: Request,
+        provider_metadata: dict,
+    ) -> Tuple[Optional[str], Optional[str]]:
+        """Map ProviderFulfilment state to RequestStatus for acquire requests."""
+        fulfilment: Optional[ProviderFulfilment] = provider_metadata.get("provider_fulfilment")
+
+        if fulfilment is None:
+            provider_name = request.provider_name or "unknown"
+            raise ProviderContractError(
+                f"Provider {provider_name} did not emit "
+                "ProviderFulfilment for acquire request. Every provider's "
+                "check_hosts_status must return CheckHostsStatusResult with fulfilment."
+            )
+
+        state_map: dict[str, str] = {
+            "fulfilled": RequestStatus.COMPLETED.value,
+            "in_progress": RequestStatus.IN_PROGRESS.value,
+            "partial": RequestStatus.PARTIAL.value,
+            "failed": RequestStatus.FAILED.value,
+        }
+        mapped = state_map.get(fulfilment.state)
+        if mapped is None:
+            # Unknown state — treat as in_progress to be safe
+            self.logger.warning(
+                "Unknown fulfilment state '%s', treating as in_progress", fulfilment.state
+            )
+            return RequestStatus.IN_PROGRESS.value, fulfilment.message
+
+        return mapped, fulfilment.message
+
+    # ------------------------------------------------------------------
+    # Return path — machine-state counting (unchanged)
+    # ------------------------------------------------------------------
+
+    def _determine_return_status(
+        self,
+        db_machines: list[Machine],
+        provider_machines: list[Machine],
+        request: Request,
+        provider_metadata: dict,
+    ) -> Tuple[Optional[str], Optional[str]]:
+        """Determine return request status from machine termination states."""
+        db_machine_count = len(db_machines)
+        follow_up_pending_message = "Return in progress: awaiting provider follow-up cleanup"
+
+        if provider_metadata.get("termination_follow_up_failed"):
+            details = provider_metadata.get("termination_follow_up_details", [{}])
+            error = details[0].get("last_delete_error") if details else None
+            message = "Return request failed: provider follow-up cleanup failed"
+            if error:
+                message = f"{message}: {error}"
+            return RequestStatus.FAILED.value, message
+
+        termination_follow_up_pending = bool(
+            provider_metadata.get("termination_follow_up_pending", False)
+        )
+
+        # For return requests: empty provider_machines *with* DB records means all
+        # instances are gone from AWS — genuinely terminated.  But if we have
+        # neither DB records nor provider records we cannot distinguish "all gone"
+        # from a transient gap (e.g. provider API hiccup before any machines were
+        # ever stored).  Treat that ambiguous case as IN_PROGRESS to avoid
+        # prematurely stamping COMPLETED when provider_machines came back empty
+        # before the instances ever appeared.
+        if not provider_machines:
+            if termination_follow_up_pending:
+                return RequestStatus.IN_PROGRESS.value, follow_up_pending_message
+            if db_machines:
+                # We had machines on record, now provider reports none — genuinely terminated.
+                return (
+                    RequestStatus.COMPLETED.value,
+                    f"Return request completed: all machines terminated "
+                    f"(no longer visible in provider) (total in DB: {db_machine_count})",
+                )
+            # Neither our records nor the provider have any machines.  This is not
+            # sufficient evidence of termination — could be a transient DB/provider
+            # gap.  Await further polls before flipping to a terminal state.
+            return (
+                RequestStatus.IN_PROGRESS.value,
+                "Awaiting provider confirmation of termination",
+            )
+
+        shutting_down_count = sum(
+            1 for m in provider_machines if m.status.value in ["shutting-down", "stopping"]
+        )
+        terminated_count = sum(
+            1 for m in provider_machines if m.status.value in ["terminated", "stopped"]
+        )
+        running_count = sum(1 for m in provider_machines if m.status.value == "running")
+        failed_count = sum(1 for m in provider_machines if m.status.value == "failed")
+
+        # Compare against the number of machines the caller submitted for return.
+        completion_target = request.requested_count
+
+        effectively_done_count = terminated_count
+        if effectively_done_count >= completion_target and running_count == 0:
+            if termination_follow_up_pending:
+                return RequestStatus.IN_PROGRESS.value, follow_up_pending_message
+            return (
+                RequestStatus.COMPLETED.value,
+                f"Return request completed: {terminated_count} terminated, "
+                f"{shutting_down_count} shutting down "
+                f"(total in DB: {db_machine_count})",
+            )
+        elif running_count > 0:
+            return (
+                RequestStatus.IN_PROGRESS.value,
+                f"Return in progress: {running_count} machines still running, "
+                f"awaiting termination (total in DB: {db_machine_count})",
+            )
+        elif failed_count > 0:
+            return (
+                RequestStatus.FAILED.value,
+                f"Return request failed: {failed_count} machines failed to terminate "
+                f"(total in DB: {db_machine_count})",
+            )
+        else:
+            return RequestStatus.IN_PROGRESS.value, "Instances terminating"
+
+    async def update_request_status(
+        self,
+        request: Request,
+        status: str,
+        message: str,
+        provider_metadata: Optional[dict] = None,
+    ) -> Request:
+        """Update request status and optionally cache the latest ProviderFulfilment.
+
+        When ``provider_metadata`` is supplied and contains a ``provider_fulfilment``
+        key, the fulfilment is serialised and stored as ``request.metadata["last_fulfilment"]``.
+        That snapshot is later read by ``RequestDTO.from_domain`` so capacity fields
+        (target_units, fulfilled_units, running_count, pending_count) appear in every
+        response without requiring the caller to re-pass the fulfilment explicitly.
+
+        Terminal requests are mostly immutable, but PARTIAL is allowed to
+        upgrade to COMPLETED. Multi-fleet requests can be stamped PARTIAL on
+        a first sync when one fleet is still reporting transient state; once
+        every fleet's instances are running, the next sync correctly produces
+        a 'fulfilled' verdict and the request should reflect that — not stay
+        stuck PARTIAL forever.
+
+        Downgrades (COMPLETED -> PARTIAL/FAILED, CANCELLED -> anything, etc.)
+        remain blocked.
+        """
         try:
             status_enum = RequestStatus(status)
 
             # Save updated request
             with self.uow_factory.create_unit_of_work() as uow:
-                current_request = uow.requests.get_by_id(request.request_id) or request
+                persisted_request = uow.requests.get_by_id(request.request_id)
+                current_request = (
+                    persisted_request if isinstance(persisted_request, Request) else request
+                )
+
+                if current_request.status.is_terminal():
+                    is_upgrade_to_complete = (
+                        current_request.status == RequestStatus.PARTIAL
+                        and status_enum == RequestStatus.COMPLETED
+                    )
+                    if not is_upgrade_to_complete:
+                        return current_request
+
                 updated_request = current_request.update_status(status_enum, message)
+
+                # Reconcile the persisted counters with reality. The acquire
+                # fulfilment path transitions directly via ``update_status``,
+                # which does not touch ``successful_count`` — it is only
+                # bumped by ``update_with_provisioning_result``. That works
+                # for batched-instance providers but not for instant fulfilment
+                # (e.g. EC2Fleet instant) where the provider reports
+                # "fulfilled" without emitting instance_ids. Use the request's
+                # own machine_ids list — which is the authoritative count of
+                # machines associated with this request — as the source of
+                # truth for ``successful_count`` whenever it disagrees with
+                # the persisted value.
+                if status_enum in (
+                    RequestStatus.COMPLETED,
+                    RequestStatus.PARTIAL,
+                    RequestStatus.IN_PROGRESS,
+                ):
+                    actual_count = len(updated_request.machine_ids)
+                    if actual_count and actual_count != updated_request.successful_count:
+                        updated_request = updated_request.model_copy(
+                            update={"successful_count": actual_count}
+                        )
+
+                # Cache the latest ProviderFulfilment snapshot so DTO callers can surface it.
+                if provider_metadata:
+                    fulfilment = provider_metadata.get("provider_fulfilment")
+                    if fulfilment is not None:
+                        updated_request = updated_request.with_last_fulfilment(
+                            dataclasses.asdict(fulfilment)
+                        )
+
                 uow.requests.save(updated_request)
 
-            self.logger.info(f"Updated request {request.request_id.value} status to {status}")
-            return updated_request
+                self.logger.info(
+                    f"Updated request {current_request.request_id.value} status to {status}"
+                    )
+                return updated_request
 
         except Exception as e:
             self.logger.error(f"Failed to update request status: {e}")
