@@ -8,9 +8,7 @@ from orb.domain.base.configuration_service import DomainConfigurationService
 from orb.domain.base.ports.configuration_port import ConfigurationPort
 from orb.domain.base.ports.container_port import ContainerPort
 from orb.domain.base.ports.logging_port import LoggingPort
-from orb.domain.base.ports.provider_registry_port import ProviderRegistryPort
 from orb.domain.base.ports.provider_selection_port import ProviderSelectionPort
-from orb.domain.constants import PROVIDER_TYPE_AWS
 from orb.domain.services.filter_service import FilterService
 from orb.domain.services.generic_filter_service import GenericFilterService
 from orb.domain.services.template_validation_domain_service import TemplateValidationDomainService
@@ -68,18 +66,15 @@ def register_domain_services(container: DIContainer) -> None:
 
     container.register_singleton(DeprovisioningOrchestrator, create_deprovisioning_orchestrator)
 
-    # Provider validation service (SRP refactoring)
+    # Provider validation service
+    # Per-request validation is delegated to ProviderSelectionPort.validate_template_requirements,
+    # which is already provider-agnostic.  A static validator is not wired at boot time so that
+    # any registered provider can supply its own validator when selected.
     def create_provider_validation_service(c):
-        validator = None
-        try:
-            validator = c.get(ProviderRegistryPort).create_validator(PROVIDER_TYPE_AWS)
-        except Exception as e:
-            c.get(LoggingPort).debug("Could not create AWS provider validator: %s", e)
         return ProviderValidationService(
             container=c.get(ContainerPort),
             logger=c.get(LoggingPort),
             provider_selection_port=c.get(ProviderSelectionPort),
-            validator=validator,
         )
 
     container.register_singleton(ProviderValidationService, create_provider_validation_service)

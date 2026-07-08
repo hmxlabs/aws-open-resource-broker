@@ -75,7 +75,7 @@ Templates can be defined in JSON or YAML format:
   "name": "My AWS Template",
   "provider_api": "aws",
   "image_id": "ami-12345678",
-  "instance_type": "t3.medium",
+  "machine_type": "t3.medium",
   "key_name": "my-keypair",
   "security_group_ids": ["sg-12345678"],
   "subnet_ids": ["subnet-12345678"],
@@ -94,7 +94,7 @@ template_id: my-aws-template
 name: My AWS Template
 provider_api: aws
 image_id: ami-12345678
-instance_type: t3.medium
+machine_type: t3.medium
 key_name: my-keypair
 security_group_ids:
   - sg-12345678
@@ -179,7 +179,7 @@ $ orb templates list
       "name": "Basic AWS Template",
       "provider_api": "aws",
       "image_id": "ami-12345678",
-      "instance_type": "t3.medium"
+      "machine_type": "t3.medium"
     }
   ],
   "total_count": 1,
@@ -195,7 +195,7 @@ $ orb templates show aws-basic
     "name": "Basic AWS Template",
     "provider_api": "aws",
     "image_id": "ami-12345678",
-    "instance_type": "t3.medium",
+    "machine_type": "t3.medium",
     "key_name": "my-keypair",
     "security_group_ids": ["sg-12345678"],
     "subnet_ids": ["subnet-12345678"],
@@ -248,7 +248,7 @@ $ orb templates validate --file invalid-template.json
   "valid": false,
   "validation_errors": [
     "Missing required field: template_id",
-    "Invalid instance_type: must be valid EC2 instance type"
+    "Invalid machine_type: must be a valid instance type"
   ],
   "validation_warnings": [
     "No tags specified: recommended for resource management"
@@ -295,7 +295,7 @@ $ orb templates refresh
 ```bash
 $ orb templates list --format table
 +---------------+--------------------+------------+---------------+-------------+
-│ Template ID     │ Name                 │ Provider API │ Image ID        │ Instance Type │
+│ Template ID     │ Name                 │ Provider API │ Image ID        │ Machine Type  │
 +---------------+--------------------+------------+---------------+-------------+
 │ aws-basic       │ Basic AWS Template   │ aws          │ ami-12345678    │ t3.medium     │
 │ aws-spot        │ Spot Instance Temp   │ aws          │ ami-87654321    │ t3.large      │

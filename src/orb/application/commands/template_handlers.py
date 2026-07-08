@@ -49,8 +49,9 @@ class CreateTemplateHandler(BaseCommandHandler[CreateTemplateCommand, None]):  #
             raise ValueError("template_id is required")
         if not command.provider_api:
             raise ValueError("provider_api is required")
-        if not command.image_id:
-            raise ValueError("image_id is required")
+        # image_id presence is provider-specific: AWS requires it, other providers
+        # (e.g. GCP uses image_family/image_project, Azure uses image_reference).
+        # Enforcement is delegated to the provider's own validator.
 
     async def execute_command(self, command: CreateTemplateCommand) -> None:
         """Create new template via TemplateConfigurationManager."""

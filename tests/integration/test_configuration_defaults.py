@@ -57,13 +57,13 @@ def test_template_defaults_integration():
         print(f"   - Template ID: {template.template_id}")
         print(f"   - Subnet IDs: {template.subnet_ids}")
         print(f"   - Security Groups: {template.security_group_ids}")
-        print(f"   - Instance Type: {template.instance_type}")
+        print(f"   - Machine Type: {template.machine_type}")
         print(f"   - Provider API: {template.provider_api}")
 
         # Verify defaults were applied
         assert template.subnet_ids, "subnet_ids should have defaults applied"
         assert template.security_group_ids, "security_group_ids should have defaults applied"
-        assert template.instance_type, "instance_type should have defaults applied"
+        assert template.machine_type, "machine_type should have defaults applied"
 
         print("PASS: Configuration defaults successfully applied to missing fields")
 

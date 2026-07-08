@@ -41,7 +41,7 @@ Returns all available templates.
     {
       "template_id": "aws-basic",
       "provider_api": "RunInstances",
-      "instance_type": "t3.medium",
+      "machine_type": "t3.medium",
       "image_id": "ami-0abcdef1234567890",
       "subnet_ids": ["subnet-aaa111"],
       "security_group_ids": ["sg-11111111"],
@@ -81,7 +81,7 @@ Returns a single template by ID.
   "template": {
     "template_id": "aws-basic",
     "provider_api": "RunInstances",
-    "instance_type": "t3.medium",
+    "machine_type": "t3.medium",
     "image_id": "ami-0abcdef1234567890",
     "subnet_ids": ["subnet-aaa111"],
     "security_group_ids": ["sg-11111111"],
@@ -112,7 +112,7 @@ Creates a new template.
 {
   "template_id": "aws-spot",
   "provider_api": "SpotFleet",
-  "instance_type": "c5.xlarge",
+  "machine_type": "c5.xlarge",
   "image_id": "ami-0abcdef1234567890",
   "subnet_ids": ["subnet-aaa111"],
   "security_group_ids": ["sg-11111111"],
@@ -129,7 +129,7 @@ Creates a new template.
 | `template_id` | string | Yes | Unique template identifier |
 | `provider_api` | string | No | Provider API type (default: `aws`) |
 | `image_id` | string | No | AMI ID |
-| `instance_type` | string | No | EC2 instance type |
+| `machine_type` | string | No | Machine / instance type (e.g. `t3.medium`). The alias `instance_type` is also accepted for backward compatibility but is deprecated. |
 | `key_name` | string | No | EC2 key pair name |
 | `security_group_ids` | list[string] | No | Security group IDs |
 | `subnet_ids` | list[string] | No | Subnet IDs |
@@ -152,7 +152,7 @@ Creates a new template.
 ```bash
 curl -X POST http://localhost:8000/api/v1/templates/ \
   -H "Content-Type: application/json" \
-  -d '{"template_id": "aws-spot", "provider_api": "SpotFleet", "instance_type": "c5.xlarge"}'
+  -d '{"template_id": "aws-spot", "provider_api": "SpotFleet", "machine_type": "c5.xlarge"}'
 ```
 
 ---
@@ -171,7 +171,7 @@ Updates an existing template.
 **Request Body** (JSON, all fields optional, accepts `camelCase` or `snake_case`):
 ```json
 {
-  "instance_type": "m5.large",
+  "machine_type": "m5.large",
   "tags": {
     "Environment": "staging"
   }
@@ -194,7 +194,7 @@ Updates an existing template.
 ```bash
 curl -X PUT http://localhost:8000/api/v1/templates/aws-basic \
   -H "Content-Type: application/json" \
-  -d '{"instance_type": "m5.large"}'
+  -d '{"machine_type": "m5.large"}'
 ```
 
 ---

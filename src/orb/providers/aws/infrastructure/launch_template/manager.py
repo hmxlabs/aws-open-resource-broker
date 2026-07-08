@@ -34,7 +34,7 @@ _OVERRIDE_FIELDS = frozenset(
         "security_group_ids",
         "key_name",
         "user_data",
-        "instance_profile",
+        "machine_role",
         "root_device_volume_size",
         "iops",
         "ebs_optimized",
@@ -358,9 +358,9 @@ class AWSLaunchTemplateManager:
                 "ascii"
             )
 
-        if aws_template.instance_profile:
+        if aws_template.machine_role:
             lt_data["IamInstanceProfile"] = {
-                "Name": self._extract_instance_profile_name(aws_template.instance_profile)
+                "Name": self._extract_instance_profile_name(aws_template.machine_role)
             }
 
         ebs_optimized = getattr(aws_template, "ebs_optimized", None)
@@ -625,8 +625,8 @@ class AWSLaunchTemplateManager:
                 else None
             ),
             "instance_profile": (
-                self._extract_instance_profile_name(template.instance_profile)
-                if hasattr(template, "instance_profile") and template.instance_profile
+                self._extract_instance_profile_name(template.machine_role)
+                if hasattr(template, "machine_role") and template.machine_role
                 else None
             ),
             "ebs_optimized": (getattr(template, "ebs_optimized", None)),
@@ -656,7 +656,7 @@ class AWSLaunchTemplateManager:
             "has_security_groups": bool(template.security_group_ids),
             "has_key_name": hasattr(template, "key_name") and bool(template.key_name),
             "has_user_data": hasattr(template, "user_data") and bool(template.user_data),
-            "has_instance_profile": bool(template.instance_profile),
+            "has_instance_profile": bool(template.machine_role),
             "has_ebs_optimized": getattr(template, "ebs_optimized", None) is not None,
             "has_monitoring": hasattr(template, "monitoring_enabled")
             and template.monitoring_enabled is not None,
@@ -765,9 +765,9 @@ class AWSLaunchTemplateManager:
             )
             launch_template_data["UserData"] = encoded_user_data
 
-        if aws_template.instance_profile:
+        if aws_template.machine_role:
             # Extract instance profile name from ARN if needed
-            instance_profile_name = aws_template.instance_profile
+            instance_profile_name = aws_template.machine_role
             if instance_profile_name.startswith("arn:aws:iam::"):
                 # Extract the role name from the ARN
                 # ARN format: arn:aws:iam::account-id:role/role-name

@@ -1,9 +1,10 @@
 """Template configuration value object - core template domain logic."""
 
+import warnings
 from datetime import datetime
 from typing import Any, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 
 
 class Template(BaseModel):
@@ -21,7 +22,10 @@ class Template(BaseModel):
     description: Optional[str] = None
 
     # Instance configuration
-    instance_type: Optional[str] = None
+    machine_type: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("machine_type", "instance_type"),
+    )
     image_id: Optional[str] = None
     max_instances: int = 1
 
@@ -54,7 +58,10 @@ class Template(BaseModel):
     # Access and security (generic concepts)
     key_name: Optional[str] = None  # SSH key, etc.
     user_data: Optional[str] = None  # cloud-init, etc.
-    instance_profile: Optional[str] = None  # IAM role, service principal
+    machine_role: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("machine_role", "instance_profile"),
+    )  # IAM role, service principal, or service account
 
     # Advanced configuration (extensible)
     monitoring_enabled: Optional[bool] = None
@@ -62,9 +69,6 @@ class Template(BaseModel):
     # Tags and metadata
     tags: dict[str, Any] = Field(default_factory=dict)
     metadata: dict[str, Any] = Field(default_factory=dict)
-
-    # Provider-specific data (keyed by provider name, e.g. {"aws": {...}})
-    provider_data: dict[str, Any] = Field(default_factory=dict)
 
     # Provider configuration (multi-provider support)
     provider_type: Optional[str] = None
@@ -87,7 +91,31 @@ class Template(BaseModel):
         Note:
             Sets default name from template_id if not provided.
             Sets default timestamps if not provided.
+            The deprecated ``instance_type`` keyword argument is accepted and
+            silently promoted to ``machine_type``; a DeprecationWarning is
+            emitted to encourage callers to update.
         """
+        # Promote deprecated instance_type kwarg → machine_type.
+        # validation_alias handles model_validate() paths; __init__ kwargs need
+        # explicit handling here because Pydantic v2 validation_alias is not
+        # applied to __init__ keyword arguments.
+        if "instance_type" in data and "machine_type" not in data:
+            warnings.warn(
+                "Template field 'instance_type' is deprecated; use 'machine_type' instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            data["machine_type"] = data.pop("instance_type")
+
+        # Promote deprecated instance_profile kwarg → machine_role.
+        if "instance_profile" in data and "machine_role" not in data:
+            warnings.warn(
+                "Template field 'instance_profile' is deprecated; use 'machine_role' instead.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            data["machine_role"] = data.pop("instance_profile")
+
         # Set default name if not provided
         if "name" not in data and "template_id" in data:
             data["name"] = data["template_id"]
@@ -176,9 +204,9 @@ class Template(BaseModel):
         """Update configuration fields and return a new template instance."""
         return self.model_copy(update=configuration)
 
-    def update_instance_type(self, new_instance_type: str) -> "Template":
-        """Update the instance type and return a new template instance."""
-        return self.model_copy(update={"instance_type": new_instance_type})
+    def update_machine_type(self, new_machine_type: str) -> "Template":
+        """Update the machine type and return a new template instance."""
+        return self.model_copy(update={"machine_type": new_machine_type})
 
     def update_image_id(self, new_image_id: str) -> "Template":
         """Update the image ID and return a new template instance."""

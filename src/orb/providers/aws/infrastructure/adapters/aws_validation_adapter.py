@@ -220,9 +220,11 @@ class AWSValidationAdapter(BaseProviderValidationAdapter):
             warnings: List to append validation warnings to
             validated_fields: List to append validated field names to
         """
-        # Validate AMI ID format (skip check for SSM parameter paths)
+        # AWS requires image_id (AMI ID or SSM parameter path)
         image_id = template_config.get("image_id")
-        if image_id:
+        if not image_id:
+            errors.append("image_id is required for AWS templates")
+        else:
             validated_fields.append("image_id")
             if not image_id.startswith("/") and not image_id.startswith("ami-"):
                 errors.append(f"Invalid AWS AMI ID format: {image_id}")

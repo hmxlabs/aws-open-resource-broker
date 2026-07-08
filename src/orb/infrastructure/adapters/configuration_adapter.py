@@ -41,17 +41,12 @@ class ConfigurationAdapter(ConfigurationPort):
         """Get naming configuration for domain layer."""
         try:
             config = self._config_manager.get_typed(NamingConfig)
+            patterns: dict[str, Any] = {
+                "request_id": config.patterns.get("request_id", r"^(req-|ret-)[a-f0-9\-]{36}$"),
+                "cidr_block": config.patterns.get("cidr_block", r"^(\d{1,3}\.){3}\d{1,3}/\d{1,2}$"),
+            }
             return {
-                "patterns": {
-                    "request_id": config.patterns.get("request_id", r"^(req-|ret-)[a-f0-9\-]{36}$"),
-                    "ec2_instance": config.patterns.get("ec2_instance", r"^i-[a-f0-9]{8,17}$"),
-                    "instance_type": config.patterns.get(
-                        "instance_type", r"^[a-z0-9]+\.[a-z0-9]+$"
-                    ),
-                    "cidr_block": config.patterns.get(
-                        "cidr_block", r"^(\d{1,3}\.){3}\d{1,3}/\d{1,2}$"
-                    ),
-                },
+                "patterns": patterns,
                 "prefixes": {
                     "request": (
                         config.prefixes.request
@@ -70,7 +65,6 @@ class ConfigurationAdapter(ConfigurationPort):
             return {
                 "patterns": {
                     "request_id": r"^(req-|ret-)[a-f0-9\-]{36}$",
-                    "ec2_instance": r"^i-[a-f0-9]{8,17}$",
                     "instance_type": r"^[a-z0-9]+\.[a-z0-9]+$",
                     "cidr_block": r"^(\d{1,3}\.){3}\d{1,3}/\d{1,2}$",
                 },

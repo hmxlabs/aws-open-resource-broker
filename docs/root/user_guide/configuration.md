@@ -201,7 +201,7 @@ orb server start --foreground --config /etc/orb/production.json
       "subnet_ids": ["subnet-12345678", "subnet-87654321"],
       "security_group_ids": ["sg-abcdef12"],
       "key_name": "production-key-pair",
-      "instance_type": "t3.medium"
+      "machine_type": "t3.medium"
     }
   },
   "scheduler": {

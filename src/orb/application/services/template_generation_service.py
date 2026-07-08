@@ -18,7 +18,6 @@ from orb.domain.base.ports.template_example_generator_resolver_port import (
     TemplateExampleGeneratorResolverPort,
 )
 from orb.domain.base.utils import extract_provider_type
-from orb.domain.constants import PROVIDER_TYPE_AWS
 
 
 class TemplateGenerationService:
@@ -264,9 +263,10 @@ class TemplateGenerationService:
             providers = provider_config.get_active_providers()  # type: ignore[union-attr]
             return [{"name": p.name, "type": p.type} for p in providers]
         except Exception as e:
-            self._logger.warning("Failed to get providers from config: %s", str(e))
-            # Fallback to single default provider
-            return [{"name": "aws_default_us-east-1", "type": PROVIDER_TYPE_AWS}]
+            self._logger.warning(
+                "Failed to get providers from config; returning empty list: %s", str(e)
+            )
+            return []
 
     def _get_config_dict(self) -> Dict[str, Any]:
         """Get template configuration for filename generation."""

@@ -188,9 +188,13 @@ class MachineSerializer(BaseEntitySerializer):
             _pd = {**_nested, **_pd}
             data["provider_data"] = _pd
 
-        # provider_type: Machine.provider_type now has Field(default="aws"), so
-        # model_validate will supply the default when the key is absent.
-        # No fixup needed here.
+        # LEGACY DEFAULT: provider_type was absent in records written before
+        # multi-provider support.  Machine.provider_type has no Field default
+        # (making it required) so we must inject "aws" here for those rows so
+        # model_validate does not reject them.  Rows that already carry the
+        # field are untouched.
+        if "provider_type" not in data:
+            data["provider_type"] = "aws"
 
         return data
 

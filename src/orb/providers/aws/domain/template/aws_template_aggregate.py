@@ -213,6 +213,11 @@ class AWSTemplate(Template):
     fleet_role: Optional[str] = None
     user_data: Optional[str] = None
 
+    # AWS EC2 instance type string (distinct from Template.machine_type, which is the
+    # provider-agnostic compute-sizing token).  Set when a specific single EC2 instance
+    # type is configured rather than a weighted machine_types map.
+    aws_instance_type: Optional[AWSInstanceType] = None
+
     # AWS instance configuration
     volume_type: Optional[str] = "gp3"  # gp2, gp3, io1, io2, standard
 
@@ -413,7 +418,7 @@ class AWSTemplate(Template):
             "root_device_volume_size": self.root_device_volume_size,
             "volume_type": self.volume_type,
             "iops": self.iops,
-            "instance_profile": self.instance_profile,
+            "machine_role": self.machine_role,
             "spot_fleet_request_expiry": self.spot_fleet_request_expiry,
             "percent_on_demand": self.percent_on_demand,
             "pools_count": self.pools_count,
@@ -430,13 +435,17 @@ class AWSTemplate(Template):
     @classmethod
     def from_aws_format(cls, data: dict[str, Any]) -> "AWSTemplate":
         """Create AWS template from AWS-specific format."""
+        # Build a raw EC2 instance type string from the input dict (vm_type, instance_type,
+        # or empty).  This becomes ``aws_instance_type`` on AWSTemplate — the EC2-specific
+        # concept — rather than the generic ``machine_type`` base field.
+        raw_instance_type = str(data.get("vm_type", data.get("instance_type", "")))
         # Convert AWS format to core format first
         core_data = {
             "template_id": data.get("template_id"),
             "name": data.get("name", data.get("template_id")),
-            "instance_type": AWSInstanceType(
-                value=str(data.get("vm_type", data.get("instance_type", "")))
-            ),
+            "aws_instance_type": AWSInstanceType(value=raw_instance_type)
+            if raw_instance_type
+            else None,
             "image_id": data.get("image_id"),
             "max_instances": data.get("max_number", data.get("max_instances", 1)),
             "subnet_ids": data.get(
@@ -467,7 +476,7 @@ class AWSTemplate(Template):
             or data.get("rootDeviceVolumeSize"),
             "volume_type": data.get("volume_type") or data.get("volumeType"),
             "iops": data.get("iops"),
-            "instance_profile": data.get("instance_profile"),
+            "machine_role": data.get("machine_role") or data.get("instance_profile"),
             "spot_fleet_request_expiry": data.get("spot_fleet_request_expiry"),
             "percent_on_demand": data.get("percent_on_demand"),
             "pools_count": data.get("pools_count"),

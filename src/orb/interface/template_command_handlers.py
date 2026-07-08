@@ -169,10 +169,6 @@ async def handle_create_template(
         )
 
     image_id = template_config.get("image_id") or template_config.get("imageId")
-    if not image_id:
-        return InterfaceResponse(
-            data={"success": False, "error": "image_id is required in template file"}, exit_code=1
-        )
 
     if getattr(args, "validate_only", False):
         return {
@@ -194,6 +190,8 @@ async def handle_create_template(
                 image_id=image_id,
                 name=template_config.get("name"),
                 description=template_config.get("description"),
+                machine_type=template_config.get("machine_type")
+                or template_config.get("machineType"),
                 instance_type=template_config.get("instance_type")
                 or template_config.get("instanceType"),
                 tags=template_config.get("tags", {}),
@@ -291,6 +289,8 @@ async def handle_update_template(
                 template_id=resolved_template_id,
                 name=template_config.get("name"),
                 description=template_config.get("description"),
+                machine_type=template_config.get("machine_type")
+                or template_config.get("machineType"),
                 instance_type=template_config.get("instance_type"),
                 image_id=template_config.get("image_id"),
                 configuration=template_config,

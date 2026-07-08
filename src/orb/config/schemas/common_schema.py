@@ -6,7 +6,18 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class ResourcePrefixConfig(BaseModel):
-    """Resource prefix configuration."""
+    """Resource prefix configuration.
+
+    The generic keys (default, request, return_prefix, tag) are provider-agnostic.
+    The AWS-specific keys (launch_template, instance, fleet, spot_fleet, asg) are
+    kept here because ``ConfigurationAdapter.get_resource_prefix(key)`` dispatches
+    through ``hasattr(prefixes, key)`` and AWS handler code passes AWS resource-type
+    strings.  Their default values are empty strings and they are absent from the
+    packaged default_config.json.
+    TODO: move launch_template/instance/fleet/spot_fleet/asg to AWSNamingConfig
+    and replace ``get_resource_prefix`` with an AWS-specific accessor so this
+    shared schema is free of AWS vocabulary.
+    """
 
     default: str = Field("", description="Default prefix for all resources")
     request: str = Field("req-", description="Prefix for acquire request IDs")
@@ -34,7 +45,17 @@ class ResourceConfig(BaseModel):
 
 
 class PrefixConfig(BaseModel):
-    """Prefix configuration."""
+    """Naming prefix configuration used by the shared NamingConfig.
+
+    The generic keys (default, request, return_prefix, tag) are provider-agnostic.
+    The AWS-specific keys (launch_template, instance, fleet, asg) are kept for the
+    same reason as ResourcePrefixConfig: the hasattr-based dispatch in
+    ConfigurationAdapter.get_resource_prefix requires them as typed fields.
+    Their default values are empty strings and they are absent from the packaged
+    default_config.json.
+    TODO: remove launch_template/instance/fleet/asg once get_resource_prefix
+    gains an AWS-specific code path.
+    """
 
     default: str = Field("", description="Default prefix for all resources")
     request: str = Field("req-", description="Prefix for acquire request IDs")
@@ -110,36 +131,23 @@ class NamingConfig(BaseModel):
         },
         description="Table names for SQL databases",
     )
-    fleet_types: dict[str, str] = Field(
-        default_factory=lambda: {
-            "instant": "instant",
-            "request": "request",
-            "maintain": "maintain",
-        },
-        description="Fleet types for EC2 Fleet and Spot Fleet",
-    )
-    price_types: dict[str, str] = Field(
-        default_factory=lambda: {
-            "ondemand": "ondemand",
-            "spot": "spot",
-            "heterogeneous": "heterogeneous",
-        },
-        description="Price types for templates",
-    )
     statuses: StatusValuesConfig = Field(default_factory=lambda: StatusValuesConfig())
     patterns: dict[str, str] = Field(
         default_factory=lambda: {
-            "ec2_instance": r"^i-[a-f0-9]+$",
-            "spot_fleet": r"^sfr-[a-f0-9]+$",
-            "ec2_fleet": r"^fleet-[a-f0-9]+$",
-            "asg": r"^[a-zA-Z0-9_-]+$",
-            "instance_type": r"^[a-z][0-9][a-z]?\.[a-z0-9]+$",
-            "region": r"^[a-z]{2}-[a-z]+-\d$",
+            # No shared "region" pattern: region format varies by provider
+            # (AWS: us-east-1, GCP: us-central1, Azure: eastus).
+            # Providers that need region validation contribute their own pattern.
             "request_id": r"^(req|ret)-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
             "tag_key": r"^[\w\s+=.@-]+$",
             "cidr_block": r"^(\d{1,3}\.){3}\d{1,3}/\d{1,2}$",
+            # AWS-specific patterns (spot_fleet, ec2_fleet, asg, ec2_instance,
+            # instance_type) belong on AWSNamingConfig, not here.
         },
-        description="Validation patterns for various resources",
+        description=(
+            "Provider-agnostic validation patterns for shared resource identifiers. "
+            "AWS-specific patterns (spot_fleet, ec2_fleet, asg, ec2_instance, "
+            "instance_type) belong on the AWS provider's AWSNamingConfig, not here."
+        ),
     )
     prefixes: PrefixConfig = Field(default_factory=lambda: PrefixConfig())  # type: ignore[call-arg]
 
