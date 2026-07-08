@@ -256,6 +256,16 @@ class CircuitBreakerStrategy(RetryStrategy):
                 },
             )
 
+    def _get_failure_threshold(self) -> int:
+        """Return the current failure threshold.
+
+        Subclasses may override to source the threshold from a live
+        configuration object (e.g. to honour config reloads without a
+        process restart).  Default returns the value frozen at
+        construction time.
+        """
+        return self.failure_threshold
+
     def record_failure(self, current_time: float) -> None:
         """Record a failure and update circuit state."""
         circuit_state = self._circuit_states[self.service_name]
@@ -263,10 +273,12 @@ class CircuitBreakerStrategy(RetryStrategy):
         circuit_state["failure_count"] += 1
         circuit_state["last_failure_time"] = current_time
 
+        current_threshold = self._get_failure_threshold()
+
         # Check if we should open the circuit
         if (
             circuit_state["state"] == CircuitState.CLOSED
-            and circuit_state["failure_count"] >= self.failure_threshold
+            and circuit_state["failure_count"] >= current_threshold
         ):
             circuit_state["state"] = CircuitState.OPEN
 
@@ -278,7 +290,7 @@ class CircuitBreakerStrategy(RetryStrategy):
                     "service_name": self.service_name,
                     "state": CircuitState.OPEN.value,
                     "failure_count": circuit_state["failure_count"],
-                    "failure_threshold": self.failure_threshold,
+                    "failure_threshold": current_threshold,
                 },
             )
 

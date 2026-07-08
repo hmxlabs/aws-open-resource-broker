@@ -129,7 +129,7 @@ def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any
     return out
 
 
-def apply_pod_spec_override(pod: "V1Pod", override: Optional[dict[str, Any]]) -> "V1Pod":
+def apply_pod_spec_override(pod: V1Pod, override: Optional[dict[str, Any]]) -> V1Pod:
     """Deep-merge ``override`` onto the pod's ``spec`` payload.
 
     The ``restartPolicy: Never`` invariant is mandatory: ORB relies on pods
@@ -139,17 +139,17 @@ def apply_pod_spec_override(pod: "V1Pod", override: Optional[dict[str, Any]]) ->
     """
     if not override:
         return pod
-    from kubernetes.client import V1PodSpec  # noqa: PLC0415
+    from kubernetes.client import V1PodSpec
 
-    from orb.providers.k8s.exceptions.k8s_errors import K8sError  # noqa: PLC0415
+    from orb.providers.k8s.exceptions.k8s_errors import K8sError
 
     if pod.spec is None:  # pragma: no cover — defensive
         return pod
 
     # Early check on both snake_case and camelCase keys before the merge so
     # the error points directly at the override the operator supplied.
-    _RESTART_OVERRIDE_KEYS = ("restart_policy", "restartPolicy")
-    for key in _RESTART_OVERRIDE_KEYS:
+    restart_override_keys = ("restart_policy", "restartPolicy")
+    for key in restart_override_keys:
         if key in override and override[key] != "Never":
             raise K8sError(
                 f"pod_spec_override contains '{key}: {override[key]!r}' which would "
@@ -188,7 +188,7 @@ def build_container_resources(k8s_template: K8sTemplate) -> Optional[Any]:
     limits = k8s_template.resolve_resource_limits_map()
     if not requests and not limits:
         return None
-    from kubernetes.client import V1ResourceRequirements  # noqa: PLC0415
+    from kubernetes.client import V1ResourceRequirements
 
     return V1ResourceRequirements(requests=requests, limits=limits)
 
@@ -198,7 +198,7 @@ def build_container_env(k8s_template: K8sTemplate) -> Optional[list[Any]]:
     api_list = k8s_template.resolve_env_api_list()
     if not api_list:
         return None
-    from kubernetes.client import V1EnvVar  # noqa: PLC0415
+    from kubernetes.client import V1EnvVar
 
     return [V1EnvVar(**entry) for entry in api_list]
 
@@ -209,7 +209,7 @@ def build_pod_tolerations(
     config: Optional[K8sProviderConfig],
 ) -> Optional[list[Any]]:
     """Resolve tolerations from template (preferred) or provider-config defaults."""
-    from kubernetes.client import V1Toleration  # noqa: PLC0415
+    from kubernetes.client import V1Toleration
 
     api_list = k8s_template.resolve_tolerations_api_list()
     if api_list:
@@ -224,7 +224,7 @@ def build_pod_volumes(k8s_template: K8sTemplate) -> Optional[list[Any]]:
     api_list = k8s_template.resolve_volumes_api_list()
     if not api_list:
         return None
-    from kubernetes.client import V1Volume  # noqa: PLC0415
+    from kubernetes.client import V1Volume
 
     out: list[V1Volume] = []
     for entry in api_list:
@@ -243,7 +243,7 @@ def _camel_to_snake(name: str) -> str:
     camelCase.  This helper normalises operator-supplied camelCase dict keys
     into the shape the SDK expects.
     """
-    import re  # noqa: PLC0415
+    import re
 
     # Insert underscores before uppercase letters, then lower-case the result.
     s = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1_\2", name)
@@ -275,7 +275,7 @@ def build_container_volume_mounts(k8s_template: K8sTemplate) -> Optional[list[An
     """
     if not k8s_template.volume_mounts:
         return None
-    from kubernetes.client import V1VolumeMount  # noqa: PLC0415
+    from kubernetes.client import V1VolumeMount
 
     out: list[V1VolumeMount] = []
     for entry in k8s_template.volume_mounts:
@@ -297,7 +297,7 @@ def build_container_volume_mounts(k8s_template: K8sTemplate) -> Optional[list[An
     return out or None
 
 
-def build_container_probe(probe: Optional["K8sProbe"]) -> Optional[Any]:
+def build_container_probe(probe: Optional[K8sProbe]) -> Optional[Any]:
     """Build a ``V1Probe`` from a :class:`K8sProbe` domain object.
 
     The domain model uses camelCase aliases for the JSON surface; the SDK
@@ -308,7 +308,7 @@ def build_container_probe(probe: Optional["K8sProbe"]) -> Optional[Any]:
     """
     if probe is None:
         return None
-    from kubernetes.client import V1Probe  # noqa: PLC0415
+    from kubernetes.client import V1Probe
 
     # model_dump without by_alias gives snake_case field names.
     kwargs = probe.model_dump(exclude_none=True)
@@ -319,7 +319,7 @@ def build_container_probe(probe: Optional["K8sProbe"]) -> Optional[Any]:
 
 
 def build_pod_security_context(
-    security_context: Optional["K8sSecurityContext"],
+    security_context: Optional[K8sSecurityContext],
 ) -> Optional[Any]:
     """Build a ``V1PodSecurityContext`` from a :class:`K8sSecurityContext` domain object.
 
@@ -327,7 +327,7 @@ def build_pod_security_context(
     """
     if security_context is None:
         return None
-    from kubernetes.client import V1PodSecurityContext  # noqa: PLC0415
+    from kubernetes.client import V1PodSecurityContext
 
     kwargs = security_context.model_dump(exclude_none=True)
     return V1PodSecurityContext(**kwargs)
@@ -373,7 +373,7 @@ def build_pod_spec(
     namespace: str,
     provider_api: str = "Pod",
     config: Optional[K8sProviderConfig] = None,
-) -> "V1Pod":
+) -> V1Pod:
     """Build a single ``V1Pod`` for the supplied template and request.
 
     Mandatory invariants:
@@ -385,7 +385,7 @@ def build_pod_spec(
     """
     # Lazy SDK import keeps callers without the ``[kubernetes]`` extra
     # able to import this module.
-    from kubernetes.client import (  # noqa: PLC0415
+    from kubernetes.client import (
         V1Container,
         V1LocalObjectReference,
         V1ObjectMeta,

@@ -80,9 +80,9 @@ def build_deployment_spec(
     replicas: int,
     provider_api: str = "Deployment",
     config: Optional[K8sProviderConfig] = None,
-) -> "V1Deployment":
+) -> V1Deployment:
     """Build a ``V1Deployment`` for ``request`` with the given replica count."""
-    from kubernetes.client import (  # noqa: PLC0415
+    from kubernetes.client import (
         V1Container,
         V1Deployment,
         V1DeploymentSpec,

@@ -87,6 +87,7 @@ class K8sJobHandler(K8sHandlerBase):
         stale_cache_timeout_seconds: Optional[float] = None,
         native_spec_service: Optional[Any] = None,
         node_state_cache: Optional[Any] = None,
+        metrics: Optional[Any] = None,
     ) -> None:
         super().__init__(
             kubernetes_client=kubernetes_client,
@@ -97,6 +98,7 @@ class K8sJobHandler(K8sHandlerBase):
             stale_cache_timeout_seconds=stale_cache_timeout_seconds,
             native_spec_service=native_spec_service,
             node_state_cache=node_state_cache,
+            metrics=metrics,
         )
         self._status_resolver = JobStatusResolver(self)
 
@@ -124,6 +126,7 @@ class K8sJobHandler(K8sHandlerBase):
         parallelism = max(int(request.requested_count), 1)
         job_name = make_job_name(str(request.request_id))
 
+        self._record_acquire(namespace=namespace, spec_kind=self.PROVIDER_API)
         self._logger.info(
             "Kubernetes job acquire: request_id=%s namespace=%s job=%s parallelism=%s",
             request.request_id,
@@ -227,6 +230,7 @@ class K8sJobHandler(K8sHandlerBase):
 
         namespace = self._resolve_namespace_from_provider_data(provider_data)
         job_name = self._resolve_job_name_from_provider_data(provider_data)
+        self._record_release(namespace=namespace, spec_kind=self.PROVIDER_API)
 
         parallelism = int(provider_data.get("parallelism") or 0)
         if parallelism and len(machine_ids) < parallelism:
@@ -318,7 +322,7 @@ class K8sJobHandler(K8sHandlerBase):
             return name
         return make_job_name(str(provider_data.get("request_id", "unknown")))
 
-    def _resolve_job_name(self, request: "Request") -> str:
+    def _resolve_job_name(self, request: Request) -> str:
         """Thin wrapper for status resolvers that hold the full Request aggregate."""
         provider_data = getattr(request, "provider_data", None) or {}
         pd = provider_data if isinstance(provider_data, dict) else {}
@@ -334,7 +338,7 @@ class K8sJobHandler(K8sHandlerBase):
     @classmethod
     def get_example_templates(cls) -> list[Template]:
         """Return one example template that submits as a ``Job``."""
-        from orb.providers.k8s.domain.template.k8s_template import (  # noqa: PLC0415
+        from orb.providers.k8s.domain.template.k8s_template import (
             K8sResourceQuantities,
             K8sTemplate,
         )

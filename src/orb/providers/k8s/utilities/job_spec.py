@@ -76,14 +76,14 @@ def build_job_spec(
     parallelism: int,
     provider_api: str = "Job",
     config: Optional[K8sProviderConfig] = None,
-) -> "V1Job":
+) -> V1Job:
     """Build a ``V1Job`` for ``request`` with the given parallelism.
 
     The Job handler overrides ``parallelism`` / ``completions`` from the
     typed :class:`K8sTemplate` fields when set; otherwise both default
     to the supplied ``parallelism`` (derived from ``request.requested_count``).
     """
-    from kubernetes.client import (  # noqa: PLC0415
+    from kubernetes.client import (
         V1Container,
         V1Job,
         V1JobSpec,

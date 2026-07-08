@@ -26,7 +26,7 @@ if TYPE_CHECKING:  # pragma: no cover — type-checking only
 class PodStatusResolver:
     """Compute the per-request status verdict for a bare Pod set."""
 
-    def __init__(self, handler: "K8sPodHandler") -> None:
+    def __init__(self, handler: K8sPodHandler) -> None:
         self._handler = handler
 
     def check_hosts_status(self, request: Request) -> CheckHostsStatusResult:

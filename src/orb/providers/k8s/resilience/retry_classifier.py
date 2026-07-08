@@ -23,7 +23,7 @@ class K8sRetryClassifier(RetryClassifierPort):
 
     def is_non_retryable(self, exception: Exception) -> bool:
         try:
-            from kubernetes.client.exceptions import ApiException  # noqa: PLC0415
+            from kubernetes.client.exceptions import ApiException
         except ImportError:
             return False
 

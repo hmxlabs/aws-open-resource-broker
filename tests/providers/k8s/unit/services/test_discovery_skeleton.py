@@ -155,15 +155,15 @@ class TestLeafMethodContracts:
             with patch("kubernetes.client.AuthorizationV1Api", return_value=fake_auth):
                 with patch(
                     "kubernetes.client.V1SelfSubjectAccessReview",
-                    side_effect=lambda **kw: SimpleNamespace(**kw),
+                    side_effect=SimpleNamespace,
                 ):
                     with patch(
                         "kubernetes.client.V1SelfSubjectAccessReviewSpec",
-                        side_effect=lambda **kw: SimpleNamespace(**kw),
+                        side_effect=SimpleNamespace,
                     ):
                         with patch(
                             "kubernetes.client.V1ResourceAttributes",
-                            side_effect=lambda **kw: SimpleNamespace(**kw),
+                            side_effect=SimpleNamespace,
                         ):
                             result = svc.probe_rbac(namespace="default")
         assert isinstance(result, RBACProbeResult)

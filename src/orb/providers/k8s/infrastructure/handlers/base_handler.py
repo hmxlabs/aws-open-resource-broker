@@ -44,6 +44,7 @@ from orb.providers.k8s.utilities.pod_state import (
 from orb.providers.k8s.watch.node_state_cache import K8sNodeStateCache
 
 if TYPE_CHECKING:  # pragma: no cover — type-checking only
+    from orb.providers.k8s.infrastructure.services.metrics import K8sMetrics
     from orb.providers.k8s.watch.pod_state_cache import PodState, PodStateCache
 
 T = TypeVar("T")
@@ -81,6 +82,7 @@ class K8sHandlerBase(ABC):
         stale_cache_timeout_seconds: Optional[float] = None,
         native_spec_service: Optional[Any] = None,
         node_state_cache: Optional[K8sNodeStateCache] = None,
+        metrics: Optional[K8sMetrics] = None,
     ) -> None:
         self._kubernetes_client = kubernetes_client
         self._config = config
@@ -119,10 +121,29 @@ class K8sHandlerBase(ABC):
         # ``None`` (the default) the lookup is silently skipped and the
         # provider_data block only contains the fields derived from the pod.
         self._node_state_cache = node_state_cache
+        # Prometheus metrics.  When ``None`` (default) all record_* helpers
+        # are no-ops so handlers stay side-effect-free in test paths that
+        # do not inject a K8sMetrics instance.
+        self._metrics = metrics
 
     # ------------------------------------------------------------------
     # Common helpers — used by every concrete handler
     # ------------------------------------------------------------------
+
+    def _record_acquire(self, *, namespace: str, spec_kind: str) -> None:
+        """Increment ``orb_k8s_acquire_total`` when metrics are wired."""
+        if self._metrics is not None:
+            self._metrics.acquire_total.labels(namespace=namespace, spec_kind=spec_kind).inc()
+
+    def _record_release(self, *, namespace: str, spec_kind: str) -> None:
+        """Increment ``orb_k8s_release_total`` when metrics are wired."""
+        if self._metrics is not None:
+            self._metrics.release_total.labels(namespace=namespace, spec_kind=spec_kind).inc()
+
+    def _record_pod_creation(self, *, namespace: str, status: str) -> None:
+        """Bucket a pod-creation outcome; safe under any input."""
+        if self._metrics is not None:
+            self._metrics.record_pod_creation(namespace=namespace, status=status)
 
     @property
     def client(self) -> K8sClient:
@@ -171,7 +192,7 @@ class K8sHandlerBase(ABC):
         findings = audit_pod_spec(spec_dict, self._logger)
 
         if findings and self._config.reject_high_risk_pod_fields:
-            from orb.providers.k8s.exceptions.k8s_errors import K8sError  # noqa: PLC0415
+            from orb.providers.k8s.exceptions.k8s_errors import K8sError
 
             raise K8sError(
                 "Acquire rejected: pod spec contains high-risk fields — " + "; ".join(findings)
@@ -237,7 +258,7 @@ class K8sHandlerBase(ABC):
         When there is no running event loop (CLI / unit-test context) the
         deletion step is silently skipped.
         """
-        from orb.providers.k8s.reconciliation.timeout_gc import (  # noqa: PLC0415
+        from orb.providers.k8s.reconciliation.timeout_gc import (
             apply_pod_timeout,
         )
 
@@ -264,9 +285,9 @@ class K8sHandlerBase(ABC):
         task per pod.  Requires a running event loop; silently skips when
         none is available (CLI / synchronous test context).
         """
-        import asyncio  # noqa: PLC0415
+        import asyncio
 
-        from orb.providers.k8s.reconciliation.timeout_gc import (  # noqa: PLC0415
+        from orb.providers.k8s.reconciliation.timeout_gc import (
             delete_timed_out_pod_async,
         )
 
@@ -325,7 +346,7 @@ class K8sHandlerBase(ABC):
         """
         # Lazy import so the architecture test doesn't see a top-level kubernetes import.
         try:
-            from kubernetes.client.exceptions import ApiException as _ApiException  # noqa: PLC0415
+            from kubernetes.client.exceptions import ApiException as _ApiException
         except ImportError:  # pragma: no cover — extra not installed
             return False
 

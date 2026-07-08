@@ -62,6 +62,7 @@ Module split
 from __future__ import annotations
 
 import asyncio
+import math
 from typing import Any, Callable, Optional
 
 from orb.domain.base.dependency_injection import injectable
@@ -116,6 +117,7 @@ class K8sDeploymentHandler(K8sHandlerBase):
         stale_cache_timeout_seconds: Optional[float] = None,
         native_spec_service: Optional[Any] = None,
         node_state_cache: Optional[Any] = None,
+        metrics: Optional[Any] = None,
     ) -> None:
         super().__init__(
             kubernetes_client=kubernetes_client,
@@ -126,6 +128,7 @@ class K8sDeploymentHandler(K8sHandlerBase):
             stale_cache_timeout_seconds=stale_cache_timeout_seconds,
             native_spec_service=native_spec_service,
             node_state_cache=node_state_cache,
+            metrics=metrics,
         )
         self._max_concurrent_patches = max_concurrent_patches
         self._status_resolver = DeploymentStatusResolver(self)
@@ -155,6 +158,7 @@ class K8sDeploymentHandler(K8sHandlerBase):
         replicas = max(int(request.requested_count), 1)
         deployment_name = make_deployment_name(str(request.request_id))
 
+        self._record_acquire(namespace=namespace, spec_kind=self.PROVIDER_API)
         self._logger.info(
             "Kubernetes deployment acquire: request_id=%s namespace=%s deployment=%s replicas=%s",
             request.request_id,
@@ -262,6 +266,7 @@ class K8sDeploymentHandler(K8sHandlerBase):
 
         namespace = self._resolve_namespace_from_provider_data(provider_data)
         deployment_name = self._resolve_deployment_name_from_provider_data(provider_data)
+        self._record_release(namespace=namespace, spec_kind=self.PROVIDER_API)
 
         deployment, current_replicas = await asyncio.to_thread(
             self._read_deployment_spec_replicas, namespace, deployment_name
@@ -322,7 +327,9 @@ class K8sDeploymentHandler(K8sHandlerBase):
         )
 
         failed: list[tuple[str, BaseException]] = [
-            (name, exc) for name, exc in zip(pod_names, results) if isinstance(exc, BaseException)
+            (name, exc)
+            for name, exc in zip(pod_names, results, strict=True)
+            if isinstance(exc, BaseException)
         ]
 
         if not failed:
@@ -336,8 +343,16 @@ class K8sDeploymentHandler(K8sHandlerBase):
                 exc,
             )
 
-        failure_rate = len(failed) / len(pod_names)
-        if failure_rate > 0.5:
+        # Nothing was requested — nothing to abort.  An empty ``pod_names``
+        # list with zero failures satisfies ``0 >= math.ceil(0 / 2)`` = 0
+        # which would otherwise wrongly raise.
+        if not pod_names:
+            return
+
+        # Abort when at least half the annotations failed: use ceiling
+        # arithmetic so the 50% boundary always aborts (e.g. 5/10 victims
+        # failed = exactly 50% → abort; 4/10 = 40% → proceed).
+        if len(failed) >= math.ceil(len(pod_names) / 2):
             raise RuntimeError(
                 f"Aborted selective release: {len(failed)}/{len(pod_names)} victim annotations "
                 f"failed in namespace={namespace!r} — the controller would not honour "
@@ -522,7 +537,7 @@ class K8sDeploymentHandler(K8sHandlerBase):
             return name
         return make_deployment_name(str(provider_data.get("request_id", "unknown")))
 
-    def _resolve_deployment_name(self, request: "Request") -> str:
+    def _resolve_deployment_name(self, request: Request) -> str:
         """Thin wrapper for status resolvers that hold the full Request aggregate."""
         provider_data = getattr(request, "provider_data", None) or {}
         pd = provider_data if isinstance(provider_data, dict) else {}
@@ -539,7 +554,7 @@ class K8sDeploymentHandler(K8sHandlerBase):
     @classmethod
     def get_example_templates(cls) -> list[Template]:
         """Return one example template that submits as a ``Deployment``."""
-        from orb.providers.k8s.domain.template.k8s_template import (  # noqa: PLC0415
+        from orb.providers.k8s.domain.template.k8s_template import (
             K8sResourceQuantities,
             K8sTemplate,
         )

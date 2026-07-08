@@ -50,7 +50,7 @@ def resolve_namespace(
         ValueError: When the resolved namespace is not in the configured
             ``namespaces`` allowlist.
     """
-    from orb.providers.k8s.domain.template.k8s_template import (  # noqa: PLC0415
+    from orb.providers.k8s.domain.template.k8s_template import (
         upcast_to_k8s_template,
     )
 
@@ -65,13 +65,13 @@ def resolve_namespace(
     # before constructing any API request.  This guards against requests
     # that carry a malformed or injection-capable namespace string.
     try:
-        from orb.providers.k8s.utilities.labels import (  # noqa: PLC0415
+        from orb.providers.k8s.utilities.labels import (
             validate_namespace as _validate_ns,
         )
 
         _validate_ns(candidate)
     except Exception as _ns_err:
-        from orb.providers.k8s.exceptions.k8s_errors import K8sError  # noqa: PLC0415
+        from orb.providers.k8s.exceptions.k8s_errors import K8sError
 
         raise K8sError(
             f"Resolved namespace {candidate!r} is not a valid Kubernetes namespace: {_ns_err}"

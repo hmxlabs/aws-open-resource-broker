@@ -522,17 +522,17 @@ def test_build_job_spec_lifecycle_absent_when_not_set() -> None:
 
 
 def test_termination_grace_period_negative_rejected() -> None:
-    with pytest.raises(Exception):
+    with pytest.raises(Exception):  # noqa: B017
         _make_template(termination_grace_period_seconds=-1)
 
 
 def test_ttl_seconds_after_finished_negative_rejected() -> None:
-    with pytest.raises(Exception):
+    with pytest.raises(Exception):  # noqa: B017
         _make_template(ttl_seconds_after_finished=-1)
 
 
 def test_active_deadline_seconds_zero_rejected() -> None:
-    with pytest.raises(Exception):
+    with pytest.raises(Exception):  # noqa: B017
         _make_template(active_deadline_seconds=0)
 
 

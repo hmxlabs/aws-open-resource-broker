@@ -497,15 +497,15 @@ class TestProbeRbac:
                 with patch("kubernetes.client.AuthorizationV1Api", return_value=fake_auth):
                     with patch(
                         "kubernetes.client.V1SelfSubjectAccessReview",
-                        side_effect=lambda **kw: SimpleNamespace(**kw),
+                        side_effect=SimpleNamespace,
                     ):
                         with patch(
                             "kubernetes.client.V1SelfSubjectAccessReviewSpec",
-                            side_effect=lambda **kw: SimpleNamespace(**kw),
+                            side_effect=SimpleNamespace,
                         ):
                             with patch(
                                 "kubernetes.client.V1ResourceAttributes",
-                                side_effect=lambda **kw: SimpleNamespace(**kw),
+                                side_effect=SimpleNamespace,
                             ):
                                 result = svc.probe_rbac(namespace="orb-ns")
 
@@ -529,15 +529,15 @@ class TestProbeRbac:
             with patch("kubernetes.client.AuthorizationV1Api", return_value=fake_auth):
                 with patch(
                     "kubernetes.client.V1SelfSubjectAccessReview",
-                    side_effect=lambda **kw: SimpleNamespace(**kw),
+                    side_effect=SimpleNamespace,
                 ):
                     with patch(
                         "kubernetes.client.V1SelfSubjectAccessReviewSpec",
-                        side_effect=lambda **kw: SimpleNamespace(**kw),
+                        side_effect=SimpleNamespace,
                     ):
                         with patch(
                             "kubernetes.client.V1ResourceAttributes",
-                            side_effect=lambda **kw: SimpleNamespace(**kw),
+                            side_effect=SimpleNamespace,
                         ):
                             result = svc.probe_rbac(namespace="orb-ns")
 
@@ -555,15 +555,15 @@ class TestProbeRbac:
             with patch("kubernetes.client.AuthorizationV1Api", return_value=fake_auth):
                 with patch(
                     "kubernetes.client.V1SelfSubjectAccessReview",
-                    side_effect=lambda **kw: SimpleNamespace(**kw),
+                    side_effect=SimpleNamespace,
                 ):
                     with patch(
                         "kubernetes.client.V1SelfSubjectAccessReviewSpec",
-                        side_effect=lambda **kw: SimpleNamespace(**kw),
+                        side_effect=SimpleNamespace,
                     ):
                         with patch(
                             "kubernetes.client.V1ResourceAttributes",
-                            side_effect=lambda **kw: SimpleNamespace(**kw),
+                            side_effect=SimpleNamespace,
                         ):
                             with pytest.raises(K8sDiscoveryError, match="SelfSubjectAccessReview"):
                                 svc.probe_rbac(namespace="orb-ns")

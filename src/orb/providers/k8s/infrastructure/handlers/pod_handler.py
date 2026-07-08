@@ -44,6 +44,27 @@ from orb.providers.k8s.watch.pod_state_cache import PodStateCache
 _MAX_CONCURRENT_CREATES = 50
 
 
+def _classify_pod_create_error(exc: BaseException) -> str:
+    """Map a create_namespaced_pod exception to a bounded metric status.
+
+    Falls back to ``"error"`` for anything the classifier does not
+    recognise; the metrics module further coerces unknown values to
+    ``"unknown"`` so cardinality stays bounded.
+    """
+    status = getattr(exc, "status", None)
+    if status == 409:
+        return "conflict"
+    if status == 403:
+        # 403 with reason=Forbidden covers both RBAC denials and quota
+        # exceeded — quota rejections come back as ``reason=Forbidden``
+        # with the quota message in the body.
+        body = getattr(exc, "body", "") or ""
+        if "exceeded quota" in str(body):
+            return "quota_exceeded"
+        return "forbidden"
+    return "error"
+
+
 @injectable
 class K8sPodHandler(K8sHandlerBase):
     """Handler for the ``Pod`` provider-API key.
@@ -65,6 +86,7 @@ class K8sPodHandler(K8sHandlerBase):
         stale_cache_timeout_seconds: Optional[float] = None,
         native_spec_service: Optional[Any] = None,
         node_state_cache: Optional[Any] = None,
+        metrics: Optional[Any] = None,
     ) -> None:
         super().__init__(
             kubernetes_client=kubernetes_client,
@@ -74,6 +96,7 @@ class K8sPodHandler(K8sHandlerBase):
             cache_alive=cache_alive,
             stale_cache_timeout_seconds=stale_cache_timeout_seconds,
             native_spec_service=native_spec_service,
+            metrics=metrics,
             node_state_cache=node_state_cache,
         )
         self._max_concurrent_creates = max_concurrent_creates
@@ -100,6 +123,7 @@ class K8sPodHandler(K8sHandlerBase):
         """
         namespace = self.resolve_namespace(template)
         count = max(int(request.requested_count), 1)
+        self._record_acquire(namespace=namespace, spec_kind=self.PROVIDER_API)
         self._logger.info(
             "Kubernetes pod acquire: request_id=%s namespace=%s count=%s",
             request.request_id,
@@ -159,9 +183,13 @@ class K8sPodHandler(K8sHandlerBase):
 
         created: list[str] = []
         failures: list[tuple[str, str]] = []
-        for (pod_name, _), result in zip(pods_to_create, results):
+        for (pod_name, _), result in zip(pods_to_create, results, strict=True):
             if isinstance(result, BaseException):
                 failures.append((pod_name, str(result)))
+                self._record_pod_creation(
+                    namespace=namespace,
+                    status=_classify_pod_create_error(result),
+                )
                 self._logger.warning(
                     "Pod create failed: request_id=%s pod=%s error=%s",
                     request.request_id,
@@ -170,6 +198,7 @@ class K8sPodHandler(K8sHandlerBase):
                 )
             else:
                 created.append(pod_name)
+                self._record_pod_creation(namespace=namespace, status="success")
 
         if failures and not created:
             # Hard fail — surface the first error as the outcome so callers
@@ -288,6 +317,7 @@ class K8sPodHandler(K8sHandlerBase):
             return {"deleted": [], "failed_deletes": []}
 
         namespace = self._resolve_namespace_from_provider_data(provider_data)
+        self._record_release(namespace=namespace, spec_kind=self.PROVIDER_API)
         self._logger.info(
             "Kubernetes pod release: request_id=%s namespace=%s pods=%s",
             request_id,
@@ -306,7 +336,7 @@ class K8sPodHandler(K8sHandlerBase):
 
         deleted: list[str] = []
         failed_deletes: list[tuple[str, str]] = []
-        for pod_name, result in zip(machine_ids, results):
+        for pod_name, result in zip(machine_ids, results, strict=True):
             if isinstance(result, BaseException):
                 reason = str(result)
                 failed_deletes.append((pod_name, reason))
@@ -333,49 +363,43 @@ class K8sPodHandler(K8sHandlerBase):
         namespace: str,
         pod_name: str,
     ) -> None:
-        """Delete a single pod by name; swallow 404s.
+        """Delete a single pod by name; swallow 404s silently.
 
-        The first delete attempt runs unwrapped so a 404 from a pod that
-        is already gone is detected immediately without wasting retry
-        budget.  Other failures fall back to retry-with-backoff via
-        :meth:`K8sHandlerBase.with_retry`.
+        Uses a single try/except path.  A thin ``_delete_pod_or_skip``
+        helper wraps the raw API call so that 404 responses are converted
+        to a no-op *before* the retry layer sees them — this prevents
+        consuming retry budget on an already-gone pod while keeping the
+        two-exception-class behaviour (404 → silent success, other errors
+        → WARNING + re-raise) in one place.
         """
+
+        def _delete_pod_or_skip() -> None:
+            """Call delete_namespaced_pod; silently return on 404."""
+            try:
+                self.client.core_v1.delete_namespaced_pod(
+                    name=pod_name,
+                    namespace=namespace,
+                )
+            except Exception as exc:
+                if self.is_not_found(exc):
+                    # Already gone — treat as success so the retry layer
+                    # never sees this and no retry budget is consumed.
+                    return
+                raise
+
         async with sem:
             try:
                 await asyncio.to_thread(
-                    self.client.core_v1.delete_namespaced_pod,
-                    name=pod_name,
-                    namespace=namespace,
-                )
-                return
-            except Exception as exc:
-                if self.is_not_found(exc):
-                    self._logger.debug(
-                        "Pod %s in %s already gone (404) — treating as success",
-                        pod_name,
-                        namespace,
-                    )
-                    return
-                # Fall through to retry-with-backoff for transient errors.
-                self._logger.debug(
-                    "Initial delete failed for pod=%s in %s; retrying with backoff: %s",
-                    pod_name,
-                    namespace,
-                    exc,
-                )
-
-            try:
-                await asyncio.to_thread(
                     self.with_retry,
-                    self.client.core_v1.delete_namespaced_pod,
-                    name=pod_name,
-                    namespace=namespace,
+                    _delete_pod_or_skip,
                     operation_name="delete_namespaced_pod",
                 )
             except Exception as exc:
                 if self.is_not_found(exc):
+                    # Defensive: with_retry may re-raise after max attempts;
+                    # unwrap and swallow if it wraps a 404.
                     self._logger.debug(
-                        "Pod %s in %s already gone (404 after retry) — treating as success",
+                        "Pod %s in %s already gone (404) — treating as success",
                         pod_name,
                         namespace,
                     )
@@ -395,7 +419,7 @@ class K8sPodHandler(K8sHandlerBase):
     @classmethod
     def get_example_templates(cls) -> list[Template]:
         """Return one example template that submits as a ``Pod``."""
-        from orb.providers.k8s.domain.template.k8s_template import (  # noqa: PLC0415
+        from orb.providers.k8s.domain.template.k8s_template import (
             K8sResourceQuantities,
             K8sTemplate,
         )

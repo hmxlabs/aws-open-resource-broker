@@ -72,6 +72,7 @@ class K8sHandlerRegistry:
         handler_overrides: Optional[dict[str, K8sHandlerBase]] = None,
         node_state_cache_provider: Optional[Callable[[], Optional[K8sNodeStateCache]]] = None,
         api_aliases: Optional[dict[str, str]] = None,
+        metrics_provider: Optional[Callable[[], Optional[Any]]] = None,
     ) -> None:
         self._config = config
         self._logger = logger
@@ -87,6 +88,10 @@ class K8sHandlerRegistry:
         # by resolve_provider_api before the handler cache lookup so that
         # lowercase submissions (e.g. "pod") route to the correct handler.
         self._api_aliases: dict[str, str] = dict(api_aliases or {})
+        # Metrics provider — called lazily so handlers get the same
+        # ``K8sMetrics`` instance the strategy holds.  ``None`` when the
+        # strategy did not initialise metrics.
+        self._metrics_provider = metrics_provider
         # Per-instance mutable copy of the handler-class table.  Seeded from
         # the class-level defaults so every registry instance starts with the
         # four built-in kinds but is fully isolated from every other instance.
@@ -104,7 +109,7 @@ class K8sHandlerRegistry:
         """Mutable handler cache — exposed for test fixtures."""
         return self._handlers
 
-    def resolve_provider_api(self, request: "Request") -> str:
+    def resolve_provider_api(self, request: Request) -> str:
         """Pick the provider-API key for ``request``.
 
         Applies alias normalisation (e.g. ``"pod"`` → ``"Pod"``) before
@@ -150,6 +155,7 @@ class K8sHandlerRegistry:
                 cache_alive=alive,
                 native_spec_service=native_spec_service,
                 node_state_cache=node_cache,
+                metrics=self._metrics_provider() if self._metrics_provider is not None else None,
             )
             self._handlers[provider_api] = handler
             return handler
@@ -169,6 +175,7 @@ class K8sHandlerRegistry:
                 cache_alive=alive,
                 native_spec_service=native_spec_service,
                 node_state_cache=node_cache,
+                metrics=self._metrics_provider() if self._metrics_provider is not None else None,
             )
             self._handlers[provider_api] = handler
             return handler
@@ -206,7 +213,7 @@ class K8sHandlerRegistry:
                 continue
             try:
                 examples.extend(getter())
-            except Exception:  # noqa: BLE001 — best-effort enumeration
+            except Exception:
                 continue
         return examples
 
@@ -214,7 +221,7 @@ class K8sHandlerRegistry:
     # Typed provisioning interface
     # ------------------------------------------------------------------
 
-    async def acquire(self, request: "Request") -> OperationOutcome:
+    async def acquire(self, request: Request) -> OperationOutcome:
         """Submit an acquisition request to Kubernetes via the per-API handler."""
         try:
             provider_api = self.resolve_provider_api(request)
@@ -243,7 +250,7 @@ class K8sHandlerRegistry:
             self._logger.error("Kubernetes acquire failed: %s", exc, exc_info=True)
             return Failed(error=str(exc), recoverable=False)
 
-    async def return_machines(self, machine_ids: list[str], request: "Request") -> OperationOutcome:
+    async def return_machines(self, machine_ids: list[str], request: Request) -> OperationOutcome:
         """Delete the named pods via the per-API handler."""
         try:
             provider_api = self.resolve_provider_api(request)
@@ -273,7 +280,7 @@ class K8sHandlerRegistry:
             self._logger.error("Kubernetes return_machines failed: %s", exc, exc_info=True)
             return Failed(error=str(exc), recoverable=False)
 
-    async def get_status(self, resource_ids: list[str], request: "Request") -> OperationOutcome:
+    async def get_status(self, resource_ids: list[str], request: Request) -> OperationOutcome:
         """Poll the per-API handler's ``check_hosts_status`` for a verdict.
 
         Returns ``Completed`` when fulfilment is terminal (``fulfilled``,
@@ -288,7 +295,7 @@ class K8sHandlerRegistry:
         machine row as terminated when it sees ``status='terminated'``.
         """
         try:
-            from orb.domain.request.request_types import (  # noqa: PLC0415
+            from orb.domain.request.request_types import (
                 RequestType,
             )
 
@@ -330,13 +337,13 @@ class K8sHandlerRegistry:
 
             # Derive instance_type from the workload kind so machine rows
             # group and filter correctly by provider_api.
-            _API_TO_INSTANCE_TYPE: dict[str, str] = {
+            api_to_instance_type: dict[str, str] = {
                 "Pod": "k8s/Pod",
                 "Deployment": "k8s/Deployment",
                 "StatefulSet": "k8s/StatefulSet",
                 "Job": "k8s/Job",
             }
-            synthetic_instance_type = _API_TO_INSTANCE_TYPE.get(provider_api, f"k8s/{provider_api}")
+            synthetic_instance_type = api_to_instance_type.get(provider_api, f"k8s/{provider_api}")
 
             live_ids = {i.get("instance_id", "") for i in instances}
             missing_ids = [mid for mid in (resource_ids or []) if mid and mid not in live_ids]
@@ -419,7 +426,7 @@ class K8sHandlerRegistry:
             self._logger.error("Kubernetes get_status failed: %s", exc, exc_info=True)
             return Failed(error=str(exc), recoverable=True)
 
-    def build_template_for_request(self, request: "Request") -> "Template":
+    def build_template_for_request(self, request: Request) -> Template:
         """Resolve the :class:`Template` carried by ``request``.
 
         The kubernetes provider picks up the template payload from
@@ -430,10 +437,10 @@ class K8sHandlerRegistry:
         k8s-specific surface — the fallback path historically built a
         bare ``Template`` and silently dropped any k8s fields.
         """
-        from orb.domain.template.template_aggregate import (  # noqa: PLC0415
+        from orb.domain.template.template_aggregate import (
             Template as _Template,
         )
-        from orb.providers.k8s.domain.template.k8s_template import (  # noqa: PLC0415
+        from orb.providers.k8s.domain.template.k8s_template import (
             K8sTemplate,
             upcast_to_k8s_template,
         )

@@ -41,7 +41,7 @@ def parse_cpu_quantity(quantity: str | None) -> float:
     return float(quantity)
 
 
-def parse_memory_quantity(quantity: str | None) -> int:  # noqa: PLR0911
+def parse_memory_quantity(quantity: str | None) -> int:
     """Parse a Kubernetes memory resource quantity string into bytes.
 
     Supports both binary (``Ki``, ``Mi``, ``Gi``) and decimal (``k``, ``M``,

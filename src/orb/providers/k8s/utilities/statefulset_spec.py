@@ -84,9 +84,9 @@ def build_statefulset_spec(
     replicas: int,
     provider_api: str = "StatefulSet",
     config: Optional[K8sProviderConfig] = None,
-) -> "V1StatefulSet":
+) -> V1StatefulSet:
     """Build a ``V1StatefulSet`` for ``request`` with the given replica count."""
-    from kubernetes.client import (  # noqa: PLC0415
+    from kubernetes.client import (
         V1Container,
         V1LabelSelector,
         V1LocalObjectReference,
@@ -218,14 +218,26 @@ def parse_statefulset_pod_ordinal(pod_name: str, statefulset_name: str) -> Optio
     StatefulSet pods are named ``<statefulset-name>-<ordinal>``.  Returns
     the integer ordinal or ``None`` when ``pod_name`` does not match the
     expected pattern.
+
+    Uses ``rsplit("-", 1)`` rather than a regex to avoid regex compilation
+    overhead on the hot status-check path (called once per pod per poll cycle).
+    The suffix must be a non-negative decimal integer; non-numeric suffixes
+    return ``None`` rather than raising.
     """
     if not pod_name or not statefulset_name:
         return None
-    prefix = f"{statefulset_name}-"
-    if not pod_name.startswith(prefix):
+    parts = pod_name.rsplit("-", 1)
+    if len(parts) != 2:
         return None
-    suffix = pod_name[len(prefix) :]
-    if not suffix.isdigit():
+    prefix, suffix = parts
+    if prefix != statefulset_name:
+        return None
+    # A valid StatefulSet pod ordinal is a non-negative decimal integer
+    # with no leading zeros and no sign character.  Reject anything else
+    # (including "-1", "007", "1a", " 1 ", "1e0") before calling int().
+    if not suffix or not suffix.isdigit():
+        return None
+    if len(suffix) > 1 and suffix[0] == "0":
         return None
     return int(suffix)
 
