@@ -6,6 +6,7 @@ from typing import Any, Optional
 from sqlalchemy import MetaData, Table, column as sa_column, func, select, text
 
 from orb.application.ports.exceptions import RepositoryQueryError
+from orb.domain.base.exceptions import ConcurrencyError
 from orb.infrastructure.logging.logger import get_logger
 from orb.infrastructure.storage.base.strategy import BaseStorageStrategy
 
@@ -268,9 +269,33 @@ class SQLStorageStrategy(BaseStorageStrategy):
         """
         Save entity data to SQL database.
 
+        For entities that carry a ``version`` field (Request, Machine) the
+        UPDATE path uses an optimistic compare-and-swap predicate::
+
+            UPDATE … SET …, version = :version
+            WHERE id = :entity_id AND version = :expected_version
+
+        where ``expected_version = data["version"] - 1`` (the version
+        currently stored in the DB before this mutation).
+
+        If the rowcount comes back as 0 it means another writer changed the
+        row between the caller's read and this save.  A ``ConcurrencyError``
+        is raised so the caller can decide how to handle it.  The INSERT path
+        (new entities) is never affected — CAS only activates on UPDATE.
+
+        Callers are responsible for retry logic.  A blind re-save of the same
+        aggregate would be incorrect (the stale in-memory state would
+        overwrite the concurrent writer's changes); instead, callers must
+        re-read the current state, re-apply their mutation, and call save()
+        again.
+
         Args:
             entity_id: Unique identifier for the entity
             data: Entity data to save
+
+        Raises:
+            ConcurrencyError: If a versioned UPDATE matches 0 rows (concurrent write detected).
+            StorageError: On other storage failures.
         """
         with self.lock_manager.write_lock():
             try:
@@ -278,22 +303,58 @@ class SQLStorageStrategy(BaseStorageStrategy):
                 if self.exists(entity_id):
                     # Update existing entity
                     serialized_data = self.serializer.serialize_for_update(data)
+
+                    # Optimistic concurrency: if the entity carries a version,
+                    # attach a CAS predicate to the UPDATE so that a concurrent
+                    # write to the same row is detected via rowcount == 0.
+                    # ``data["version"]`` is already the NEW (post-mutation) value
+                    # because domain aggregates increment version on every mutation
+                    # before the repository is called; the value currently in the
+                    # DB is therefore version - 1.
+                    raw_version = data.get("version")
+                    expected_version: Optional[int] = None
+                    if isinstance(raw_version, int) and "version" in self.columns:
+                        expected_version = raw_version - 1
+
                     query, params = self.query_builder.build_update(
-                        serialized_data, self._get_id_column(), entity_id
+                        serialized_data,
+                        self._get_id_column(),
+                        entity_id,
+                        expected_version=expected_version,
                     )
+
+                    with self.connection_manager.get_session() as session:
+                        result = session.execute(text(query), params)
+                        session.commit()
+
+                    if expected_version is not None and result.rowcount == 0:
+                        raise ConcurrencyError(
+                            f"Concurrent write detected for entity '{entity_id}': "
+                            f"expected version {expected_version} in DB but row was "
+                            f"not found at that version (another writer updated it first). "
+                            f"Re-read the entity, re-apply your change, and retry.",
+                            details={
+                                "entity_id": entity_id,
+                                "expected_version": expected_version,
+                                "new_version": raw_version,
+                            },
+                        )
                 else:
                     # Insert new entity
                     serialized_data = self.serializer.serialize_for_insert(entity_id, data)
                     query, params = self.query_builder.build_insert(serialized_data)
 
-                with self.connection_manager.get_session() as session:
-                    from sqlalchemy import text
-
-                    session.execute(text(query), params)
-                    session.commit()
+                    with self.connection_manager.get_session() as session:
+                        session.execute(text(query), params)
+                        session.commit()
 
                 self.logger.debug("Saved entity: %s", entity_id)
 
+            except ConcurrencyError:
+                # Re-raise ConcurrencyError directly — it is a domain signal,
+                # not an infrastructure failure.
+                self.logger.warning("Concurrency conflict on save for entity %s", entity_id)
+                raise
             except Exception as e:
                 self.logger.error("Failed to save entity %s: %s", entity_id, e)
                 raise StorageError(f"Failed to save entity {entity_id}: {e}")
