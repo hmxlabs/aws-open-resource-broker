@@ -42,7 +42,21 @@ class TemplateExampleGeneratorRegistry:
 
     @classmethod
     def get(cls, provider_type: str) -> TemplateExampleGeneratorPort | None:
-        """Return the generator for *provider_type*, or ``None`` if not registered."""
+        """Return the generator for *provider_type*, or ``None`` if not registered.
+
+        Returns None on miss to satisfy :class:`TemplateExampleGeneratorResolverPort`
+        — the application layer checks for None and raises with context.  Use
+        ``get_or_none`` when calling code explicitly documents "optional" intent.
+        """
+        return cls._generators.get(provider_type)
+
+    @classmethod
+    def get_or_none(cls, provider_type: str) -> TemplateExampleGeneratorPort | None:
+        """Explicit optional lookup — returns ``None`` when not registered.
+
+        Prefer this over ``get`` when the absence of a generator is a legitimate
+        "not applicable" case rather than a misconfiguration.
+        """
         return cls._generators.get(provider_type)
 
     @classmethod

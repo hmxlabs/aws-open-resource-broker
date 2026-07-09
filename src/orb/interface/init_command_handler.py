@@ -661,7 +661,7 @@ def _get_default_config(args) -> Dict[str, Any]:
     provider_config = (
         strategy_class.get_cli_provider_config(args) if strategy_class is not None else {}
     )
-    spec = CLISpecRegistry.get(provider_type)
+    spec = CLISpecRegistry.get_or_none(provider_type)
     if spec is not None:
         for key, value in spec.extract_config(args).items():
             if provider_config.get(key) in (None, ""):

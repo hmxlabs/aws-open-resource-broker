@@ -26,5 +26,16 @@ class ProviderSettingsRegistry:
         return list(cls._settings_classes.keys())
 
     @classmethod
+    def get_or_none(cls, provider_type: str) -> Type[BaseSettings] | None:
+        """Return the settings class for *provider_type*, or ``None`` if not registered.
+
+        Explicit optional lookup used by the provider-completeness assertion.
+        Callers that want the ``BaseSettings`` fallback should use
+        :meth:`get_settings_class` instead.
+        """
+        return cls._settings_classes.get(provider_type)
+
+    @classmethod
     def get_settings_class(cls, provider_type: str) -> Type[BaseSettings]:
+        """Return the settings class for *provider_type*, falling back to ``BaseSettings``."""
         return cls._settings_classes.get(provider_type, BaseSettings)

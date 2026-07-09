@@ -150,7 +150,7 @@ class HostFactorySchedulerStrategy(BaseSchedulerStrategy):
             FieldMappingRegistry,
         )
 
-        adapter = FieldMappingRegistry.get(provider_type)
+        adapter = FieldMappingRegistry.get_or_none(provider_type)
         if adapter is not None:
             adapter.apply_defaults(mapped)
 
@@ -615,7 +615,7 @@ class HostFactorySchedulerStrategy(BaseSchedulerStrategy):
         )
 
         provider_type = self._get_active_provider_type()
-        adapter = FieldMappingRegistry.get(provider_type)
+        adapter = FieldMappingRegistry.get_or_none(provider_type)
         if adapter is not None:
             result = adapter.derive_attributes(instance_type)
             if result is not None:

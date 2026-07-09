@@ -1,24 +1,18 @@
 """CLI spec registry — maps provider type strings to ProviderCLISpecPort instances."""
 
 from orb.domain.base.ports.provider_cli_spec_port import ProviderCLISpecPort
+from orb.infrastructure.registry.simple_registry import SimpleRegistry
 
 
-class CLISpecRegistry:
-    """Simple registry mapping provider type strings to ProviderCLISpecPort instances."""
+class CLISpecRegistry(SimpleRegistry[ProviderCLISpecPort]):
+    """Registry mapping provider type strings to ProviderCLISpecPort instances.
 
-    _specs: dict[str, ProviderCLISpecPort] = {}
+    Use ``get_or_none`` when absence is acceptable (e.g. iterating all
+    providers to build a display list and gracefully degrading when no spec is
+    found).  Use ``get`` when the spec must exist — it raises
+    ``RegistryLookupError`` naming the missing key and listing every registered
+    key so misconfigurations are caught immediately.
+    """
 
-    @classmethod
-    def register(cls, provider_type: str, spec: ProviderCLISpecPort) -> None:
-        """Register a CLI spec for a provider type."""
-        cls._specs[provider_type] = spec
-
-    @classmethod
-    def get(cls, provider_type: str) -> ProviderCLISpecPort | None:
-        """Return the CLI spec for a provider type, or None if not registered."""
-        return cls._specs.get(provider_type)
-
-    @classmethod
-    def all(cls) -> dict[str, ProviderCLISpecPort]:
-        """Return all registered CLI specs."""
-        return dict(cls._specs)
+    _registry_name = "CLISpecRegistry"
+    _store: dict[str, ProviderCLISpecPort] = {}

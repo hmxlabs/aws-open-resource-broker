@@ -115,7 +115,7 @@ def _show_provider_infrastructure(provider: Dict[str, Any]) -> None:
     config = provider.get("config", {})
     if config:
         provider_type = provider.get("type", "")
-        spec = CLISpecRegistry.get(provider_type)
+        spec = CLISpecRegistry.get_or_none(provider_type)
         if spec is not None:
             for label, value in spec.format_display(config):
                 console.info(f"{label}: {value}")

@@ -47,6 +47,13 @@ _KNOWN_VIOLATIONS: frozenset[tuple[str, str]] = frozenset(
         ("bootstrap/provider_services.py", "orb.providers.registry"),
         ("bootstrap/provider_services.py", "orb.providers.registration"),
         ("bootstrap/services.py", "orb.providers.registration"),
+        # Provider completeness assertion — intentional: must query ProviderRegistry
+        # and all satellite registries to verify every registered provider type is complete.
+        ("bootstrap/provider_completeness.py", "orb.providers.registry"),
+        (
+            "bootstrap/provider_completeness.py",
+            "orb.providers.registry.defaults_loader_registry",
+        ),
         ("interface/health_command_handler.py", "orb.providers.registry"),
         ("interface/system_command_handlers.py", "orb.providers.registry"),
         ("interface/infrastructure_command_handler.py", "orb.providers.registry"),

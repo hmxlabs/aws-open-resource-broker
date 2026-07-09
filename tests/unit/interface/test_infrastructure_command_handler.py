@@ -404,7 +404,7 @@ class TestShowProviderInfrastructure:
         }
 
         with (
-            patch.object(CLISpecRegistry, "get", return_value=mock_spec),
+            patch.object(CLISpecRegistry, "get_or_none", return_value=mock_spec),
             patch(
                 "orb.interface.infrastructure_command_handler.get_container",
                 return_value=mock_container,
@@ -436,7 +436,7 @@ class TestShowProviderInfrastructure:
         }
 
         with (
-            patch.object(CLISpecRegistry, "get", return_value=None),
+            patch.object(CLISpecRegistry, "get_or_none", return_value=None),
             patch(
                 "orb.interface.infrastructure_command_handler.get_container",
                 return_value=mock_container,

@@ -204,7 +204,7 @@ def register_all_provider_cli_specs() -> None:
     # satisfies ``ProviderCLISpecPort``.  Each provider owns its own class
     # name; this loop stays generic.
     for name in _REGISTERED_PROVIDERS:
-        if CLISpecRegistry.get(name) is not None:
+        if CLISpecRegistry.get_or_none(name) is not None:
             continue
         module_path = f"orb.providers.{name}.cli.{name}_cli_spec"
         if importlib.util.find_spec(module_path) is None:
@@ -255,7 +255,7 @@ def register_all_defaults_loaders() -> None:
     from orb.providers.registry.defaults_loader_registry import DefaultsLoaderRegistry
 
     for name in _REGISTERED_PROVIDERS:
-        if DefaultsLoaderRegistry.get(name) is not None:
+        if DefaultsLoaderRegistry.get_or_none(name) is not None:
             continue
         module_path = f"orb.providers.{name}.defaults_loader"
         if importlib.util.find_spec(module_path) is None:

@@ -36,7 +36,7 @@ async def handle_provider_add(args) -> dict[str, Any]:
                 "message": "Provider type is required. Specify --provider-type.",
                 "exit_code": 1,
             }
-        spec = CLISpecRegistry.get(provider_type)
+        spec = CLISpecRegistry.get_or_none(provider_type)
 
         if spec is None:
             return {
@@ -159,7 +159,7 @@ async def handle_provider_update(args) -> dict[str, Any]:
 
         # Infer provider type from stored record
         provider_type = provider.get("type") or ""
-        spec = CLISpecRegistry.get(provider_type)
+        spec = CLISpecRegistry.get_or_none(provider_type)
 
         provider_config = provider.get("config", {})
 
@@ -293,7 +293,7 @@ async def handle_provider_show(args) -> dict[str, Any] | InterfaceResponse:
         providers = config.get("provider", {}).get("providers", [])
 
         def _build_provider_dict(p: dict) -> dict[str, Any]:
-            spec = CLISpecRegistry.get(p.get("type", ""))
+            spec = CLISpecRegistry.get_or_none(p.get("type", ""))
             display_config: dict[str, Any]
             if spec is not None:
                 display_config = dict(spec.format_display(p.get("config", {})))

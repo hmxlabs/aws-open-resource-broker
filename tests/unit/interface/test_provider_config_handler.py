@@ -24,7 +24,7 @@ def register_aws_cli_spec():
     CLISpecRegistry.register("aws", AWSCLISpec())
     yield
     # Clean up after test
-    CLISpecRegistry._specs.clear()
+    CLISpecRegistry.clear()
 
 
 def exit_code(result: dict[str, Any] | InterfaceResponse) -> int:

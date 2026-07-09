@@ -83,6 +83,16 @@ def _register_provider_utility_services(container: DIContainer) -> None:
         try:
             mod = importlib.import_module(mod_path)
 
+            # Call initialize_<name>_provider to populate satellite registries
+            # (CLISpecRegistry, FieldMappingRegistry, DefaultsLoaderRegistry,
+            # ProviderSettingsRegistry, TemplateExtensionRegistry).  We pass
+            # template_factory=None here; the DI services step below wires the
+            # template adapter separately once TemplateFactory is available.
+            init_fn = getattr(mod, f"initialize_{name}_provider", None)
+            if init_fn is not None:
+                init_fn(template_factory=None, logger=None)
+                logger.debug("%s satellite registries populated via initialize", name)
+
             # Register DI utility services (e.g. AWS template adapter, clients)
             di_fn = getattr(mod, f"register_{name}_services_with_di", None)
             if di_fn is not None:
