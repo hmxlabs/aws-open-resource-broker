@@ -122,6 +122,12 @@ def register_port_adapters(container):
 
     container.register_singleton(TemplateDTOFactoryPort, lambda c: TemplateDTOFactory())
 
+    # Register system info port adapter
+    from orb.application.ports.system_info_port import SystemInfoPort
+    from orb.infrastructure.adapters.system_info_adapter import PsutilSystemInfoAdapter
+
+    container.register_singleton(SystemInfoPort, lambda _: PsutilSystemInfoAdapter())
+
     # Register response formatting service
     from orb.application.ports.scheduler_port import SchedulerPort
     from orb.interface.response_formatting_service import ResponseFormattingService
