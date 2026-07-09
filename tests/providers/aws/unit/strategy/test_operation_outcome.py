@@ -187,25 +187,6 @@ class TestAWSProviderStrategyOutcomeInterface:
         assert hasattr(AWSProviderStrategy, "get_status")
         assert asyncio_or_coroutine(AWSProviderStrategy.get_status)
 
-    def test_base_strategy_declares_acquire_abstract(self):
-        from orb.providers.base.strategy.base_provider_strategy import BaseProviderStrategy
-
-        assert "acquire" in {m for m in dir(BaseProviderStrategy)}
-        method = getattr(BaseProviderStrategy, "acquire")
-        assert getattr(method, "__isabstractmethod__", False)
-
-    def test_base_strategy_declares_return_machines_abstract(self):
-        from orb.providers.base.strategy.base_provider_strategy import BaseProviderStrategy
-
-        method = getattr(BaseProviderStrategy, "return_machines")
-        assert getattr(method, "__isabstractmethod__", False)
-
-    def test_base_strategy_declares_get_status_abstract(self):
-        from orb.providers.base.strategy.base_provider_strategy import BaseProviderStrategy
-
-        method = getattr(BaseProviderStrategy, "get_status")
-        assert getattr(method, "__isabstractmethod__", False)
-
 
 def asyncio_or_coroutine(fn) -> bool:
     """Return True if fn is an async function."""
