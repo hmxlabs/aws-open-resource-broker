@@ -14,21 +14,6 @@ if TYPE_CHECKING:
 def register_storage_services(container: "DIContainer") -> None:
     """Register storage services respecting lazy loading configuration."""
 
-    # Register new orchestrator with lazy initialization
-    def create_orchestrator(c):
-        from orb.infrastructure.storage.factories.storage_factory_orchestrator import (
-            StorageFactoryOrchestrator,
-        )
-
-        config = c.get(ConfigurationPort)
-        return StorageFactoryOrchestrator(config_manager=config)
-
-    from orb.infrastructure.storage.factories.storage_factory_orchestrator import (
-        StorageFactoryOrchestrator,
-    )
-
-    container.register_factory(StorageFactoryOrchestrator, create_orchestrator)
-
     # Register storage strategy factory with lazy initialization
     def create_factory(c):
         config = c.get(ConfigurationPort)
