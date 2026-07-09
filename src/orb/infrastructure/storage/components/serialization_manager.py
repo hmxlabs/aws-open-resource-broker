@@ -6,6 +6,10 @@ from enum import Enum
 from typing import Any, Optional, TypeVar
 
 from orb.infrastructure.logging.logger import get_logger
+from orb.infrastructure.utilities.common.serialization import (
+    deserialize_enum as _deserialize_enum,
+    serialize_enum as _serialize_enum,
+)
 
 E = TypeVar("E", bound=Enum)
 
@@ -95,23 +99,12 @@ class JSONSerializer(SerializationManager):
 
     @staticmethod
     def serialize_enum(enum_value: Optional[Enum]) -> Optional[str]:
-        """Serialize enum to string value."""
-        if enum_value is None:
-            return None
-        return enum_value.value if hasattr(enum_value, "value") else str(enum_value)
+        """Serialize enum to string value. Delegates to the shared utility."""
+        return _serialize_enum(enum_value)
 
     @staticmethod
     def deserialize_enum(
         enum_class: type[E], value: Any, default: Optional[E] = None
     ) -> Optional[E]:
-        """Deserialize string to enum value."""
-        if value is None:
-            return default
-        if isinstance(value, enum_class):
-            return value
-        try:
-            if isinstance(value, str):
-                return enum_class(value)
-            return default
-        except (ValueError, TypeError):
-            return default
+        """Deserialize string to enum value. Delegates to the shared utility."""
+        return _deserialize_enum(enum_class, value, default)
