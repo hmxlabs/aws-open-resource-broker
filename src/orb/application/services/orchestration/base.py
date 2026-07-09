@@ -6,6 +6,26 @@ from typing import Generic, TypeVar
 InputT = TypeVar("InputT")
 OutputT = TypeVar("OutputT")
 
+# Shared polling constants used by orchestrators that block-and-poll until a
+# request reaches a terminal state.  Both spellings of "complete/completed" and
+# "cancel/cancelled" are included because the HostFactory scheduler returns
+# "completed" / "canceled" (past-tense) whereas the internal RequestStatus enum
+# uses "complete" / "cancelled".  The defensive set keeps polling correct across
+# both sources without adding a spelling-normalisation step to every caller.
+TERMINAL_STATUSES: frozenset[str] = frozenset(
+    {
+        "complete",
+        "completed",
+        "failed",
+        "error",
+        "cancelled",
+        "canceled",
+        "partial",
+        "timeout",
+    }
+)
+MAX_CONSECUTIVE_POLL_ERRORS: int = 3
+
 
 class OrchestratorBase(ABC, Generic[InputT, OutputT]):
     """Base class for all interface-facing orchestrators.

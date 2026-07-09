@@ -8,22 +8,14 @@ from orb.application.dto.commands import CreateRequestCommand
 from orb.application.dto.queries import SyncAndGetRequestQuery
 from orb.application.ports.command_bus_port import CommandBusPort
 from orb.application.ports.query_bus_port import QueryBusPort
-from orb.application.services.orchestration.base import OrchestratorBase
+from orb.application.services.orchestration.base import (
+    MAX_CONSECUTIVE_POLL_ERRORS as _MAX_CONSECUTIVE_POLL_ERRORS,
+    TERMINAL_STATUSES as _TERMINAL_STATUSES,
+    OrchestratorBase,
+)
 from orb.application.services.orchestration.dtos import AcquireMachinesInput, AcquireMachinesOutput
 from orb.domain.base.exceptions import ApplicationError
 from orb.domain.base.ports.logging_port import LoggingPort
-
-_TERMINAL_STATUSES = {
-    "completed",
-    "complete",
-    "failed",
-    "error",
-    "cancelled",
-    "canceled",
-    "partial",
-    "timeout",
-}
-_MAX_CONSECUTIVE_POLL_ERRORS = 3
 
 
 class AcquireMachinesOrchestrator(OrchestratorBase[AcquireMachinesInput, AcquireMachinesOutput]):

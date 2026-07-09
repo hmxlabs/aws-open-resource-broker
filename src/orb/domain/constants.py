@@ -10,7 +10,6 @@ REQUEST_STATUS_PROVISIONING = "provisioning"
 REQUEST_STATUS_ACTIVE = "active"
 REQUEST_STATUS_FAILED = "failed"
 REQUEST_STATUS_CANCELLED = "cancelled"
-REQUEST_STATUS_COMPLETED = "completed"
 
 # Machine status constants
 MACHINE_STATUS_PENDING = "pending"
