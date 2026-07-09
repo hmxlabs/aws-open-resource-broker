@@ -147,8 +147,6 @@ class GetRequestSummaryQuery(Query, BaseModel):
     request_id: str
 
 
-
-
 class ValidateStorageQuery(Query, BaseModel):
     """Query to validate storage connectivity."""
 
@@ -177,6 +175,3 @@ class ListCleanableResourcesQuery(Query, BaseModel):
     """Query to list resources eligible for cleanup."""
 
     model_config = ConfigDict(frozen=True)
-
-
-

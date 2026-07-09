@@ -89,8 +89,6 @@ class CleanupOldRequestsCommand(BaseCommand):
     request_ids_found: Optional[list[str]] = None
 
 
-
-
 class CleanupAllResourcesCommand(BaseCommand):
     """Command to clean up all resources.
 

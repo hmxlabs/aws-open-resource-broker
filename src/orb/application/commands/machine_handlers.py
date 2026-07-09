@@ -14,6 +14,40 @@ from orb.domain.machine.exceptions import MachineNotFoundError
 from orb.domain.machine.repository import MachineRepository
 from orb.domain.machine.value_objects import MachineStatus
 
+
+@command_handler(UpdateMachineStatusCommand)  # type: ignore[arg-type]
+class UpdateMachineStatusHandler(BaseCommandHandler[UpdateMachineStatusCommand, None]):
+    """Handler for updating machine status."""
+
+    def __init__(
+        self,
+        machine_repository: MachineRepository,
+        event_publisher: EventPublisherPort,
+        logger: LoggingPort,
+        error_handler: ErrorHandlingPort,
+    ) -> None:
+        super().__init__(logger, event_publisher, error_handler)
+        self._machine_repository = machine_repository
+
+    async def validate_command(self, command: UpdateMachineStatusCommand) -> None:
+        await super().validate_command(command)
+        if not command.machine_id:
+            raise ValueError("machine_id is required")
+        if not command.status:
+            raise ValueError("status is required")
+
+    async def execute_command(self, command: UpdateMachineStatusCommand):
+        machine = self._machine_repository.find_by_id(command.machine_id)
+        if not machine:
+            raise MachineNotFoundError(command.machine_id)
+        machine.update_status(
+            MachineStatus.from_str(command.status)
+            if isinstance(command.status, str)
+            else command.status
+        )  # type: ignore[arg-type]
+        self._machine_repository.save(machine)
+
+
 @command_handler(CleanupMachineResourcesCommand)  # type: ignore[arg-type]
 class CleanupMachineResourcesHandler(BaseCommandHandler[CleanupMachineResourcesCommand, None]):
     """Handler for cleaning up machine resources."""

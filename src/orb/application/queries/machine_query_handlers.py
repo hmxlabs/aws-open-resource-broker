@@ -16,6 +16,7 @@ from orb.domain.base.exceptions import EntityNotFoundError
 from orb.domain.base.ports import ContainerPort, ErrorHandlingPort, LoggingPort
 from orb.domain.services.generic_filter_service import GenericFilterService
 
+
 @query_handler(GetMachineQuery)
 class GetMachineHandler(BaseQueryHandler[GetMachineQuery, MachineDTO]):
     """Handler for getting machine details."""

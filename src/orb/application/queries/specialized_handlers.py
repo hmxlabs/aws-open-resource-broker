@@ -27,7 +27,9 @@ _ACTIVE_MACHINE_STATUSES = frozenset(
 class GetActiveMachineCountHandler(BaseQueryHandler[GetActiveMachineCountQuery, int]):
     """Return active machine count using count_by_status GROUP BY aggregation."""
 
-    def __init__(self, uow_factory: UnitOfWorkFactory, logger: LoggingPort, error_handler: ErrorHandlingPort) -> None:
+    def __init__(
+        self, uow_factory: UnitOfWorkFactory, logger: LoggingPort, error_handler: ErrorHandlingPort
+    ) -> None:
         super().__init__(logger, error_handler)
         self.uow_factory = uow_factory
 
@@ -44,7 +46,9 @@ class GetActiveMachineCountHandler(BaseQueryHandler[GetActiveMachineCountQuery, 
 class GetRequestSummaryHandler(BaseQueryHandler[GetRequestSummaryQuery, RequestSummaryDTO]):
     """Return per-request machine breakdown grouped by all observed statuses."""
 
-    def __init__(self, uow_factory: UnitOfWorkFactory, logger: LoggingPort, error_handler: ErrorHandlingPort) -> None:
+    def __init__(
+        self, uow_factory: UnitOfWorkFactory, logger: LoggingPort, error_handler: ErrorHandlingPort
+    ) -> None:
         super().__init__(logger, error_handler)
         self.uow_factory = uow_factory
 
@@ -66,7 +70,11 @@ class GetRequestSummaryHandler(BaseQueryHandler[GetRequestSummaryQuery, RequestS
                 machine_statuses=machine_statuses,
                 created_at=request.created_at,
             )
-        self.logger.info("GetRequestSummaryHandler: request_id=%s total_machines=%d", query.request_id, len(machines))
+        self.logger.info(
+            "GetRequestSummaryHandler: request_id=%s total_machines=%d",
+            query.request_id,
+            len(machines),
+        )
         return summary
 
 
@@ -74,12 +82,19 @@ class GetRequestSummaryHandler(BaseQueryHandler[GetRequestSummaryQuery, RequestS
 class GetRequestMetricsHandler(BaseQueryHandler[GetRequestMetricsQuery, dict[str, Any]]):
     """Return time-windowed request metrics via get_metrics_by_date_range."""
 
-    def __init__(self, uow_factory: UnitOfWorkFactory, logger: LoggingPort, error_handler: ErrorHandlingPort) -> None:
+    def __init__(
+        self, uow_factory: UnitOfWorkFactory, logger: LoggingPort, error_handler: ErrorHandlingPort
+    ) -> None:
         super().__init__(logger, error_handler)
         self.uow_factory = uow_factory
 
     async def execute_query(self, query: GetRequestMetricsQuery) -> dict[str, Any]:
-        self.logger.debug("GetRequestMetricsHandler: start=%s end=%s group_by=%s", query.start_date, query.end_date, query.group_by)
+        self.logger.debug(
+            "GetRequestMetricsHandler: start=%s end=%s group_by=%s",
+            query.start_date,
+            query.end_date,
+            query.group_by,
+        )
         epoch = datetime(1970, 1, 1, tzinfo=timezone.utc)
         now = datetime.now(timezone.utc)
         start_dt: datetime = epoch
@@ -89,13 +104,22 @@ class GetRequestMetricsHandler(BaseQueryHandler[GetRequestMetricsQuery, dict[str
                 parsed = datetime.fromisoformat(query.start_date)
                 start_dt = parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
             except ValueError:
-                self.logger.warning("GetRequestMetricsHandler: invalid start_date %r; using epoch", query.start_date)
+                self.logger.warning(
+                    "GetRequestMetricsHandler: invalid start_date %r; using epoch", query.start_date
+                )
         if query.end_date:
             try:
                 parsed = datetime.fromisoformat(query.end_date)
                 end_dt = parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
             except ValueError:
-                self.logger.warning("GetRequestMetricsHandler: invalid end_date %r; using now", query.end_date)
+                self.logger.warning(
+                    "GetRequestMetricsHandler: invalid end_date %r; using now", query.end_date
+                )
         with self.uow_factory.create_unit_of_work() as uow:
             metrics = uow.requests.get_metrics_by_date_range(start_dt, end_dt)
-        return {"start_date": start_dt.isoformat(), "end_date": end_dt.isoformat(), "group_by": query.group_by, "metrics": metrics}
+        return {
+            "start_date": start_dt.isoformat(),
+            "end_date": end_dt.isoformat(),
+            "group_by": query.group_by,
+            "metrics": metrics,
+        }

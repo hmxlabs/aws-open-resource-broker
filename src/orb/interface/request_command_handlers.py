@@ -485,3 +485,38 @@ async def handle_watch_request_status(
         }
     except KeyboardInterrupt:
         return {"request_id": str(request_id), "status": "cancelled"}
+
+
+@handle_interface_exceptions(context="get_multiple_requests", interface_type="cli")
+async def handle_get_multiple_requests(
+    args: "argparse.Namespace",
+) -> Union[dict[str, Any], "InterfaceResponse"]:
+    """Fetch multiple requests by ID via GetMultipleRequestsQuery through the query bus."""
+    from orb.application.dto.bulk_queries import GetMultipleRequestsQuery
+    from orb.infrastructure.di.buses import QueryBus
+
+    container = get_container()
+    request_ids: list[str] = []
+    if hasattr(args, "request_ids") and args.request_ids:
+        request_ids.extend(args.request_ids)
+    if hasattr(args, "flag_request_ids") and args.flag_request_ids:
+        request_ids.extend(args.flag_request_ids)
+    if hasattr(args, "flag_ids") and args.flag_ids:
+        request_ids.extend(args.flag_ids)
+
+    if not request_ids:
+        return {"error": "No request IDs provided", "message": "At least one request ID required"}
+
+    query = GetMultipleRequestsQuery(
+        request_ids=[str(rid) for rid in request_ids],
+        include_machines=bool(getattr(args, "include_machines", True)),
+    )
+    result = await container.get(QueryBus).execute(query)
+    return {
+        "requests": [
+            r.model_dump() if hasattr(r, "model_dump") else vars(r) for r in result.requests
+        ],
+        "found_count": result.found_count,
+        "not_found_ids": result.not_found_ids,
+        "total_requested": result.total_requested,
+    }

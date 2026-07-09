@@ -21,7 +21,6 @@ class CleanupMachineResourcesCommand(BaseCommand):
     metadata: dict[str, Any] = {}
 
 
-
 class RegisterMachineCommand(BaseCommand):
     """Command to register a new machine."""
 

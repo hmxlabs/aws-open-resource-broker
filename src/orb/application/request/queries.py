@@ -21,7 +21,6 @@ class ListRequestsQuery(BaseQuery):
     sort: Optional[str] = None
 
 
-
 class GetRequestMetricsQuery(BaseQuery):
     """Query to get request metrics and statistics."""
 

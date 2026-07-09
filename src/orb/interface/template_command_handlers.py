@@ -517,3 +517,36 @@ async def handle_refresh_templates(
     result = await orchestrator.execute(RefreshTemplatesInput(provider_name=provider_name))
 
     return formatter.format_template_list(result.templates)
+
+
+@handle_interface_exceptions(context="get_multiple_templates", interface_type="cli")
+async def handle_get_multiple_templates(
+    args: argparse.Namespace,
+) -> dict[str, Any] | InterfaceResponse:
+    """Fetch multiple templates by ID via GetMultipleTemplatesQuery through the query bus."""
+    from orb.application.dto.bulk_queries import GetMultipleTemplatesQuery
+    from orb.infrastructure.di.buses import QueryBus
+
+    container = get_container()
+    template_ids: list[str] = []
+    if hasattr(args, "template_ids") and args.template_ids:
+        template_ids.extend(args.template_ids)
+    if hasattr(args, "flag_template_ids") and args.flag_template_ids:
+        template_ids.extend(args.flag_template_ids)
+    if hasattr(args, "flag_ids") and args.flag_ids:
+        template_ids.extend(args.flag_ids)
+
+    if not template_ids:
+        return {"error": "No template IDs provided", "message": "At least one template ID required"}
+
+    query = GetMultipleTemplatesQuery(
+        template_ids=[str(tid) for tid in template_ids],
+        active_only=bool(getattr(args, "active_only", True)),
+    )
+    result = await container.get(QueryBus).execute(query)
+    return {
+        "templates": result.templates,
+        "found_count": result.found_count,
+        "not_found_ids": result.not_found_ids,
+        "total_requested": result.total_requested,
+    }
