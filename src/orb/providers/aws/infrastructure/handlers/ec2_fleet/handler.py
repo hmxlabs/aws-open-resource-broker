@@ -51,13 +51,13 @@ from orb.providers.aws.infrastructure.adapters.machine_adapter import AWSMachine
 from orb.providers.aws.infrastructure.aws_client import AWSClient
 from orb.providers.aws.infrastructure.handlers.base_handler import AWSHandler
 from orb.providers.aws.infrastructure.handlers.ec2_fleet.config_builder import EC2FleetConfigBuilder
+from orb.providers.aws.infrastructure.handlers.ec2_fleet.example_templates import (
+    EC2_FLEET_EXAMPLE_TEMPLATES,
+)
 from orb.providers.aws.infrastructure.handlers.ec2_fleet.release_manager import (
     EC2FleetReleaseManager,
 )
 from orb.providers.aws.infrastructure.handlers.shared.base_context_mixin import BaseContextMixin
-from orb.providers.aws.infrastructure.handlers.ec2_fleet.example_templates import (
-    EC2_FLEET_EXAMPLE_TEMPLATES,
-)
 from orb.providers.aws.infrastructure.handlers.shared.fleet_fulfilment import (
     compute_ec2fleet_fulfilment,
 )

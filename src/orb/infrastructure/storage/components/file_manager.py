@@ -4,11 +4,33 @@ import hashlib
 import os
 import shutil
 import tempfile
+import warnings
+from collections.abc import Generator
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
 from orb.infrastructure.logging.logger import get_logger
+
+# fcntl is POSIX-only (Linux, macOS). On Windows it is unavailable.
+# If missing, we degrade gracefully to no cross-process file locking and emit
+# a one-time warning so operators know the protection is absent.
+try:
+    import fcntl as _fcntl
+
+    _FCNTL_AVAILABLE = True
+except ImportError:  # pragma: no cover — Windows-only path
+    _fcntl = None  # type: ignore[assignment]
+    _FCNTL_AVAILABLE = False
+    warnings.warn(
+        "fcntl is not available on this platform; JSON storage cross-process "
+        "write serialization is disabled. Concurrent CLI invocations targeting "
+        "the same JSON file may race. Use PostgreSQL storage for multi-process "
+        "deployments.",
+        RuntimeWarning,
+        stacklevel=2,
+    )
 
 
 class FileManager:
@@ -48,6 +70,47 @@ class FileManager:
 
         if backup_enabled and create_dirs:
             self.backup_dir.mkdir(parents=True, exist_ok=True)
+
+    @contextmanager
+    def exclusive_write_lock(self) -> Generator[None, None, None]:
+        """Acquire an exclusive cross-process file lock for the duration of a
+        read-modify-write cycle.
+
+        Uses ``fcntl.flock(LOCK_EX)`` on a sibling ``.lock`` file so that the
+        lock descriptor is independent of the data file (the data file is
+        replaced atomically by ``_atomic_write`` and a lock on the replaced fd
+        would be lost).
+
+        The sequence callers MUST follow inside this context manager:
+          1. Read the current file contents (re-read, not a cached snapshot).
+          2. Merge the new record into the fresh contents.
+          3. Write atomically via ``write_file`` / ``_atomic_write``.
+
+        Skipping step 1 inside this lock leaves the stale-snapshot race intact.
+
+        LIMITATION: ``flock`` is unreliable on NFS and other network filesystems.
+        For multi-host deployments use PostgreSQL storage instead.
+
+        On non-POSIX platforms (Windows) where ``fcntl`` is unavailable this
+        context manager is a no-op; concurrent CLI invocations will race.
+        """
+        if not _FCNTL_AVAILABLE:
+            yield
+            return
+
+        assert _fcntl is not None  # narrowed: _FCNTL_AVAILABLE implies _fcntl was imported
+
+        lock_path = self.file_path.parent / f".{self.file_path.name}.lock"
+        # Open (or create) the lock file; O_CREAT handles the not-yet-exists case.
+        lock_fd = os.open(str(lock_path), os.O_CREAT | os.O_WRONLY, 0o600)
+        try:
+            _fcntl.flock(lock_fd, _fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                _fcntl.flock(lock_fd, _fcntl.LOCK_UN)
+        finally:
+            os.close(lock_fd)
 
     def read_file(self) -> str:
         """
