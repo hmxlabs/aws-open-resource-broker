@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import asyncio
 import datetime
+import threading
 import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Callable, Iterable, Optional
@@ -44,6 +45,10 @@ if TYPE_CHECKING:  # pragma: no cover — type-checking only
 # Hard upper bound on the list call.  Matches the startup reconciler so
 # the two paths agree on what "stalled apiserver" means.
 _LIST_TIMEOUT_SECONDS = 60
+
+# Maximum number of concurrent delete calls issued in a single sweep.
+# Avoids flooding the apiserver when a large batch of orphans is found.
+_DELETE_CONCURRENCY = 50
 
 
 @dataclass
@@ -97,6 +102,7 @@ class OrphanGarbageCollector:
         self._task: Optional[asyncio.Task[None]] = None
         self._stop_event = asyncio.Event()
         self.stats = OrphanGCStats()
+        self._stats_lock = threading.Lock()
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -192,10 +198,10 @@ class OrphanGarbageCollector:
         self.stats.last_orphans_found = len(orphans)
         self.stats.total_orphans_found += len(orphans)
 
-        for orphan in orphans:
-            if self._config.auto_cleanup_orphans:
-                self._delete_orphan(orphan)
-            else:
+        if self._config.auto_cleanup_orphans:
+            await self._delete_orphans_concurrently(orphans)
+        else:
+            for orphan in orphans:
                 self._logger.warning(
                     "Orphan pod detected (auto_cleanup_orphans=False): "
                     "pod=%s namespace=%s request_id=%s created=%s",
@@ -314,6 +320,30 @@ class OrphanGarbageCollector:
             ),
         )
 
+    async def _delete_orphans_concurrently(self, orphans: list[OrphanPod]) -> None:
+        """Delete *orphans* concurrently using :func:`asyncio.gather`.
+
+        Each delete runs inside :func:`asyncio.to_thread` (the k8s client is
+        synchronous) under a shared :class:`asyncio.Semaphore` capped at
+        ``_DELETE_CONCURRENCY`` so the apiserver is not flooded.
+
+        Per-orphan failures are logged at WARNING and do not abort the
+        remaining deletes (``return_exceptions=True``).  Stats
+        (``total_orphans_deleted``, ``delete_failures``) are updated inside
+        the existing :meth:`_delete_orphan` helper, which is GIL-safe for
+        simple integer increments.
+        """
+        sem = asyncio.Semaphore(_DELETE_CONCURRENCY)
+
+        async def _bounded_delete(orphan: OrphanPod) -> None:
+            async with sem:
+                await asyncio.to_thread(self._delete_orphan, orphan)
+
+        await asyncio.gather(
+            *(_bounded_delete(orphan) for orphan in orphans),
+            return_exceptions=True,
+        )
+
     def _delete_orphan(self, orphan: OrphanPod) -> None:
         """Best-effort delete; swallow 404 (already gone).
 
@@ -336,7 +366,8 @@ class OrphanGarbageCollector:
                 name=orphan.pod_name,
                 namespace=orphan.namespace,
             )
-            self.stats.total_orphans_deleted += 1
+            with self._stats_lock:
+                self.stats.total_orphans_deleted += 1
             self._logger.info(
                 "Orphan pod deleted: pod=%s namespace=%s request_id=%s",
                 orphan.pod_name,
@@ -346,10 +377,12 @@ class OrphanGarbageCollector:
         except Exception as exc:
             if _is_not_found(exc):
                 # Already gone — treat as success for accounting.
-                self.stats.total_orphans_deleted += 1
+                with self._stats_lock:
+                    self.stats.total_orphans_deleted += 1
                 self._logger.debug("Orphan pod %s already gone (404)", orphan.pod_name)
                 return
-            self.stats.delete_failures += 1
+            with self._stats_lock:
+                self.stats.delete_failures += 1
             self.stats.last_error = f"delete pod {orphan.pod_name}: {exc}"
             self._logger.warning(
                 "Orphan pod delete failed: pod=%s namespace=%s error=%s",

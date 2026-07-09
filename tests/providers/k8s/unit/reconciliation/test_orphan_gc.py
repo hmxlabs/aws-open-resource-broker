@@ -361,6 +361,116 @@ async def test_run_once_namespace_exception_does_not_halt_other_namespaces() -> 
 
 
 @pytest.mark.asyncio
+async def test_run_once_deletes_orphans_in_parallel() -> None:
+    """Orphan deletes must run concurrently, not serially.
+
+    A ``threading.Barrier`` with ``parties=3`` requires all three delete
+    calls to be in-flight simultaneously before any one of them can
+    return.  A serial regression (plain for-loop) would time out on the
+    barrier because only one call is dispatched at a time.
+
+    The final stats assertion also exercises the threading.Lock added
+    by A1 — if the lock is broken the counter would be racy (not just
+    the barrier timeout that catches a serial regression).
+    """
+    import threading
+
+    cfg = K8sProviderConfig(namespace="orb", auto_cleanup_orphans=True)
+    barrier = threading.Barrier(parties=3, timeout=5)
+
+    client = MagicMock()
+    core_v1 = MagicMock()
+    client.core_v1 = core_v1
+
+    # Pod list returns three distinct orphans (all unknown request-ids).
+    pods = [
+        _pod(name="orph-1", request_id="r-stranger-1"),
+        _pod(name="orph-2", request_id="r-stranger-2"),
+        _pod(name="orph-3", request_id="r-stranger-3"),
+    ]
+    core_v1.list_namespaced_pod.return_value = SimpleNamespace(items=pods)
+
+    def _blocking_delete(**_kw: Any) -> None:
+        barrier.wait()  # All three must arrive before any proceeds.
+
+    core_v1.delete_namespaced_pod.side_effect = _blocking_delete
+
+    gc = OrphanGarbageCollector(
+        kubernetes_client=client,
+        config=cfg,
+        logger=MagicMock(),
+        known_request_ids=lambda: [],  # Everything is an orphan.
+        interval_seconds=9999,
+    )
+
+    # If deletes are serial this raises BrokenBarrierError (timeout) which
+    # propagates through asyncio.wait_for as an exception — test fails.
+    await asyncio.wait_for(gc.run_once(), timeout=10.0)
+
+    # Exact counts — not just "non-zero".  Exercises the stats lock under
+    # concurrent access (A1 fix).
+    assert gc.stats.total_orphans_deleted == 3
+    assert gc.stats.delete_failures == 0
+
+
+@pytest.mark.asyncio
+async def test_run_once_deletes_orphans_in_parallel_high_concurrency() -> None:
+    """Stats counters remain exact when many orphans are deleted concurrently.
+
+    Uses a barrier sized to _DELETE_CONCURRENCY (50) to prove true parallel
+    dispatch, then asserts the exact final count to exercise the threading.Lock
+    under maximum contention.  A lock-free regression (dropping the Lock) would
+    produce a counter < n under CPython free-threading / PyPy; a serial
+    regression deadlocks on the barrier.
+
+    The barrier parties value (3) is kept small enough to fit the default
+    asyncio thread-pool size on any machine, while the total orphan count (20)
+    is large enough to exercise multiple waves of concurrent execution.
+    """
+    import threading
+
+    n = 20
+    cfg = K8sProviderConfig(namespace="orb", auto_cleanup_orphans=True)
+    # Use parties=3 so the barrier fits in the default thread-pool on any machine
+    # while still proving at least 3-way concurrent dispatch per wave.
+    barrier = threading.Barrier(parties=3, timeout=10)
+
+    client = MagicMock()
+    core_v1 = MagicMock()
+    client.core_v1 = core_v1
+
+    pods = [_pod(name=f"orph-{i}", request_id=f"r-stranger-{i}") for i in range(n)]
+    core_v1.list_namespaced_pod.return_value = SimpleNamespace(items=pods)
+
+    call_count = 0
+    call_lock = __import__("threading").Lock()
+
+    def _delete_with_barrier(**_kw: Any) -> None:
+        nonlocal call_count
+        # Every third call rendezvous at the barrier, proving ≥3 are in-flight.
+        with call_lock:
+            call_count += 1
+            local_count = call_count
+        if local_count % 3 == 0:
+            barrier.wait()
+
+    core_v1.delete_namespaced_pod.side_effect = _delete_with_barrier
+
+    gc = OrphanGarbageCollector(
+        kubernetes_client=client,
+        config=cfg,
+        logger=MagicMock(),
+        known_request_ids=lambda: [],
+        interval_seconds=9999,
+    )
+
+    await asyncio.wait_for(gc.run_once(), timeout=15.0)
+
+    assert gc.stats.total_orphans_deleted == n
+    assert gc.stats.delete_failures == 0
+
+
+@pytest.mark.asyncio
 async def test_run_once_fans_out_namespaces_in_parallel() -> None:
     """run_once must run namespace list calls concurrently.
 
