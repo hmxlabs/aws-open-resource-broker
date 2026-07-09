@@ -1,0 +1,112 @@
+[importlinter]
+root_package = orb
+include_external_packages = True
+source_paths = src
+
+# ---------------------------------------------------------------------------
+# Contract 1: domain-is-clean
+#
+# The domain layer must not import from any outer layer or from CLI/UI
+# frameworks (argparse, etc.).  This is the strictest contract — any new
+# violation here is a clean-architecture regression.
+#
+# Baseline violations (TODO: shrink these via future tickets):
+#
+#   D1 — orb.domain.base.ports.provider_cli_spec_port imports argparse
+#        Fixed by: E2 (this file is being moved out of domain in the same
+#        branch — this ignore entry is removed by that commit).
+#
+# NOTE: allow_indirect_imports = True is required because import-linter
+# resolves the root `orb` package as an intermediate node when any domain
+# module does `from orb.domain...`.  The root orb/__init__.py re-exports
+# SDK/bootstrap symbols which transitively touch outer layers, creating
+# false positives on every domain file.  Direct-only enforcement is the
+# correct policy here.
+# ---------------------------------------------------------------------------
+[importlinter:contract:domain-is-clean]
+name = Domain layer is clean (no outer-layer imports)
+type = forbidden
+source_modules = orb.domain
+forbidden_modules =
+    orb.application
+    orb.infrastructure
+    orb.interface
+    orb.providers
+    orb.monitoring
+    orb.cli
+    argparse
+allow_indirect_imports = True
+# Suppress "unmatched ignore" noise for edges removed by E2 after rebase
+unmatched_ignore_imports_alerting = warn
+# TODO(E2/same-branch): remove this entry after provider_cli_spec_port is moved
+# out of domain — that commit deletes the ignore entry and enforces the rule.
+ignore_imports =
+    orb.domain.base.ports.provider_cli_spec_port -> argparse
+
+
+# ---------------------------------------------------------------------------
+# Contract 2: application-no-infra-concretes
+#
+# The application layer must not import from infrastructure concretes,
+# provider implementations, or monitoring adapters.  It may only depend on
+# domain (pure) and its own cross-cutting application interfaces.
+#
+# Baseline violations (TODO: shrink via ticket #1358):
+#
+#   A1 — orb.application.commands.template_handlers imports
+#        orb.infrastructure.template.dtos (TemplateDTO should move to domain
+#        or application DTOs)  — remove when ticket #1358 is done.
+#
+#   A2 — orb.application.queries.template_query_handlers imports
+#        orb.infrastructure.template.dtos — same fix as A1.
+#
+#   A3 — orb.application.events.handlers.metrics_event_handler imports
+#        orb.monitoring.metrics (MetricsCollector should be injected via a
+#        port/protocol, not imported directly) — remove when ticket #1358
+#        is done.
+# ---------------------------------------------------------------------------
+[importlinter:contract:application-no-infra-concretes]
+name = Application layer does not import infrastructure concretes
+type = forbidden
+source_modules = orb.application
+forbidden_modules =
+    orb.infrastructure
+    orb.providers
+    orb.monitoring
+allow_indirect_imports = True
+unmatched_ignore_imports_alerting = warn
+# TODO(#1358): remove A1 once TemplateDTO is moved to application/domain layer
+ignore_imports =
+    orb.application.commands.template_handlers -> orb.infrastructure.template.dtos
+# TODO(#1358): remove A2 once TemplateDTO is moved to application/domain layer
+    orb.application.queries.template_query_handlers -> orb.infrastructure.template.dtos
+# TODO(#1358): remove A3 once MetricsCollector is injected via a port
+    orb.application.events.handlers.metrics_event_handler -> orb.monitoring.metrics
+
+
+# ---------------------------------------------------------------------------
+# Contract 3: infrastructure-no-upward
+#
+# The infrastructure layer must not import from the interface/CLI layers.
+# It adapts domain ports to external systems; it must not depend on the
+# presentation/CLI tier.
+#
+# Baseline violations (TODO: shrink via ticket #1358):
+#
+#   I1 — orb.infrastructure.adapters.console_adapter imports orb.cli.console
+#        (console_adapter uses lazy local imports to call CLI print helpers;
+#        this should be inverted so the CLI layer calls the adapter, not the
+#        other way around) — remove when ticket #1358 is done.
+# ---------------------------------------------------------------------------
+[importlinter:contract:infrastructure-no-upward]
+name = Infrastructure layer does not import upward layers
+type = forbidden
+source_modules = orb.infrastructure
+forbidden_modules =
+    orb.interface
+    orb.cli
+allow_indirect_imports = True
+unmatched_ignore_imports_alerting = warn
+# TODO(#1358): remove I1 once console_adapter no longer calls orb.cli.console
+ignore_imports =
+    orb.infrastructure.adapters.console_adapter -> orb.cli.console
