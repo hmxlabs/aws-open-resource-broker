@@ -244,6 +244,21 @@ def _reset_otel_globals() -> None:
     try:
         import opentelemetry.metrics._internal as _otel_metrics_int
 
+        # Shut the live provider down BEFORE dropping the reference.  A leaked
+        # MeterProvider owns a PeriodicExportingMetricReader background thread
+        # that keeps collecting on an interval; a collection deep-copies the
+        # instrument attribute containers.  If that thread fires while a later
+        # test has patched ``copy.deepcopy`` (the read-only spec-builder T05
+        # suite), the assertion trips non-deterministically.  Nulling the
+        # global alone leaves the thread running — it must be stopped.
+        _live_mp = _otel_metrics_int._METER_PROVIDER
+        _mp_shutdown = getattr(_live_mp, "shutdown", None)
+        if callable(_mp_shutdown):
+            try:
+                _mp_shutdown()
+            except Exception:  # pragma: no cover — best-effort teardown
+                pass
+
         _otel_metrics_int._METER_PROVIDER = None
         _otel_metrics_int._METER_PROVIDER_SET_ONCE._done = False
     except Exception:  # pragma: no cover — guard against missing / changed internals
@@ -252,6 +267,14 @@ def _reset_otel_globals() -> None:
     # --- Tracer provider ---
     try:
         import opentelemetry.trace as _otel_trace
+
+        _live_tp = getattr(_otel_trace, "_TRACER_PROVIDER", None)
+        _tp_shutdown = getattr(_live_tp, "shutdown", None)
+        if callable(_tp_shutdown):
+            try:
+                _tp_shutdown()
+            except Exception:  # pragma: no cover — best-effort teardown
+                pass
 
         if hasattr(_otel_trace, "_TRACER_PROVIDER"):
             _otel_trace._TRACER_PROVIDER = None
