@@ -5,6 +5,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from orb.infrastructure.services.provider_selection_service import ProviderSelectionService
 from orb.providers.registry.provider_registry import ProviderRegistry
 
 
@@ -35,6 +36,7 @@ def _make_registry(provider, strategy=None) -> ProviderRegistry:
     registry._strategy_cache = {}
     registry._health_states = {}
     registry._fallback_strategy = None
+    registry._selection_service = None  # will be lazily constructed on first use
 
     provider_config = MagicMock()
     provider_config.providers = [provider]
@@ -59,7 +61,8 @@ class TestProviderSupportsApiNoHardcode:
         """The source of _provider_supports_api must not contain the hardcoded AWS API list."""
         import inspect
 
-        source = inspect.getsource(ProviderRegistry._provider_supports_api)
+        # The selection policy now lives in ProviderSelectionService; verify there too.
+        source = inspect.getsource(ProviderSelectionService._provider_supports_api)
         assert "EC2Fleet" not in source, "Hardcoded 'EC2Fleet' found in _provider_supports_api"
         assert "SpotFleet" not in source, "Hardcoded 'SpotFleet' found in _provider_supports_api"
         assert "RunInstances" not in source, (
@@ -71,7 +74,8 @@ class TestProviderSupportsApiNoHardcode:
         """The source must not contain 'provider.type == \"aws\"'."""
         import inspect
 
-        source = inspect.getsource(ProviderRegistry._provider_supports_api)
+        # The selection policy now lives in ProviderSelectionService; verify there too.
+        source = inspect.getsource(ProviderSelectionService._provider_supports_api)
         assert 'provider.type == "aws"' not in source
         assert "provider.type == 'aws'" not in source
 
@@ -186,6 +190,7 @@ class TestProviderTypeAllowlist:
         registry._strategy_cache = {}
         registry._health_states = {}
         registry._fallback_strategy = None
+        registry._selection_service = None  # will be lazily constructed on first use
         registry._config_port = None
         registry._logger = MagicMock()
         return registry
@@ -296,6 +301,7 @@ def _make_registry_multi(providers) -> ProviderRegistry:
     registry._strategy_cache = {}
     registry._health_states = {}
     registry._fallback_strategy = None
+    registry._selection_service = None  # will be lazily constructed on first use
 
     provider_config = MagicMock()
     provider_config.providers = providers

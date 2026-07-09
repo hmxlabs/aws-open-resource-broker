@@ -28,9 +28,16 @@ def _register_application_services(container: DIContainer) -> None:
 
     def _create_provider_registry(c):
         from orb.domain.base.ports.configuration_port import ConfigurationPort
+        from orb.infrastructure.services.provider_selection_service import ProviderSelectionService
 
         registry = get_provider_registry()
-        registry._config_port = c.get(ConfigurationPort)
+        config_port = c.get(ConfigurationPort)
+        registry._config_port = config_port
+        # Wire the selection service so the registry delegates to it rather than
+        # constructing a bare instance lazily (ensures the same config_port is used).
+        registry._selection_service = ProviderSelectionService(
+            registry=registry, config_port=config_port
+        )
         return registry
 
     container.register_singleton(ProviderRegistryPort, _create_provider_registry)

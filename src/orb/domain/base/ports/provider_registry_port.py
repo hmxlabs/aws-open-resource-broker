@@ -106,3 +106,16 @@ class ProviderRegistryPort(ABC):
     def list_all_provider_apis(self) -> list[str]:
         """Return a deduplicated sorted list of all provider API names from registered strategies."""
         pass  # type: ignore[return]
+
+    @abstractmethod
+    def get_strategy(self, provider_identifier: str) -> Optional[Any]:
+        """Return the cached strategy instance for the given identifier, or None if not cached.
+
+        Unlike get_or_create_strategy, this does not trigger strategy creation.
+        """
+        pass  # type: ignore[return]
+
+    @abstractmethod
+    def get_fallback_strategy(self) -> Optional[Any]:
+        """Return the registered fallback strategy, or None if not set."""
+        pass  # type: ignore[return]
