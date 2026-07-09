@@ -373,7 +373,15 @@ def reset_container() -> None:
         if _container_instance:
             _container_instance.clear()
         _container_instance = None
-        _container_ready.clear()  # add this line
+        _container_ready.clear()
+        # Reset OTel idempotency flag so the next bootstrap call can
+        # re-initialise the SDK (matches _container_ready.clear() intent).
+        try:
+            from orb.bootstrap.telemetry import _reset_telemetry_state
+
+            _reset_telemetry_state()
+        except ImportError:
+            pass
 
 
 __all__: list[str] = [

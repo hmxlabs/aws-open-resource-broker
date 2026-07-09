@@ -14,6 +14,7 @@ from .common_schema import (
 from .logging_schema import LoggingConfig
 from .metrics_schema import MetricsConfig
 from .native_spec_schema import NativeSpecConfig
+from .observability_schema import OtelConfig
 from .performance_schema import CircuitBreakerConfig, PerformanceConfig
 from .provider_strategy_schema import ProviderConfig
 from .scheduler_schema import SchedulerConfig
@@ -32,6 +33,7 @@ class AppConfig(BaseModel):
     naming: NamingConfig = Field(default_factory=lambda: NamingConfig())  # type: ignore[call-arg]
     logging: LoggingConfig = Field(default_factory=lambda: LoggingConfig())  # type: ignore[call-arg]
     metrics: MetricsConfig = Field(default_factory=lambda: MetricsConfig())  # type: ignore[call-arg]
+    observability: OtelConfig = Field(default_factory=lambda: OtelConfig())  # type: ignore[call-arg]
     template: Optional[TemplateConfig] = None
     events: EventsConfig = Field(default_factory=lambda: EventsConfig())  # type: ignore[call-arg]
     storage: StorageConfig = Field(default_factory=lambda: StorageConfig())  # type: ignore[call-arg]
