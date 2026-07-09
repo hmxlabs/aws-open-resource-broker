@@ -350,6 +350,19 @@ ci = [
     "prometheus-client>=0.17.0",
     "alembic>=1.13",
 
+    # OpenTelemetry stack — installed in CI so pyright resolves the guarded
+    # optional imports in bootstrap/telemetry.py and the observability tests
+    # exercise the real SDK path (the [monitoring] extra is not synced by
+    # --all-groups, which only pulls dependency-groups, not extras).
+    "opentelemetry-sdk>=1.20.0",
+    "opentelemetry-exporter-prometheus>=0.64b0,<1.0",
+    "opentelemetry-instrumentation-fastapi>=0.41b0,<1.0",
+    "opentelemetry-instrumentation-sqlalchemy>=0.41b0,<1.0",
+    "opentelemetry-instrumentation-botocore>=0.64b0,<1.0",
+    "opentelemetry-instrumentation-click>=0.64b0,<1.0",
+    "opentelemetry-instrumentation-system-metrics>=0.64b0,<1.0",
+    "opentelemetry-instrumentation-logging>=0.64b0,<1.0",
+
     # k8s HTTP-level mock server (test-only, not shipped with the package)
     "kmock>=0.7",
 

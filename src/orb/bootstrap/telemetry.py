@@ -168,9 +168,9 @@ def configure_telemetry(container: "DIContainer") -> None:  # noqa: C901
     # --- guard: SDK may not be installed ---
     try:
         from opentelemetry import metrics, trace  # noqa: F401 (availability probe)
-        from opentelemetry.sdk.metrics import MeterProvider  # type: ignore[import]
-        from opentelemetry.sdk.resources import SERVICE_NAME, Resource  # type: ignore[import]
-        from opentelemetry.sdk.trace import TracerProvider  # type: ignore[import]
+        from opentelemetry.sdk.metrics import MeterProvider
+        from opentelemetry.sdk.resources import SERVICE_NAME, Resource
+        from opentelemetry.sdk.trace import TracerProvider
     except ImportError:
         # opentelemetry-sdk not installed; silently skip (no-op default).
         return
@@ -220,9 +220,7 @@ def configure_telemetry(container: "DIContainer") -> None:  # noqa: C901
                 from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import (  # type: ignore[import-not-found]
                     OTLPMetricExporter,
                 )
-                from opentelemetry.sdk.metrics.export import (
-                    PeriodicExportingMetricReader,  # type: ignore[import]
-                )
+                from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
 
                 kwargs: dict = {}
                 if otel_config.otlp_endpoint:
@@ -232,9 +230,7 @@ def configure_telemetry(container: "DIContainer") -> None:  # noqa: C901
                 pass  # OTLP exporter not installed; skip.
 
         elif exporter_name == "file":
-            from opentelemetry.sdk.metrics.export import (
-                PeriodicExportingMetricReader,  # type: ignore[import]
-            )
+            from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
 
             metrics_path = _get_file_dir() / "metrics.jsonl"
             try:
@@ -260,9 +256,7 @@ def configure_telemetry(container: "DIContainer") -> None:  # noqa: C901
                 # data is durably written before shutdown_telemetry() returns.
                 # Format: one JSON object per line (JSONL) — readable by any
                 # standard JSON Lines tooling.
-                from opentelemetry.sdk.metrics.export import (
-                    ConsoleMetricExporter,  # type: ignore[import]
-                )
+                from opentelemetry.sdk.metrics.export import ConsoleMetricExporter
 
                 _metrics_fh = open(  # noqa: SIM115,WPS515
                     metrics_path, "a", encoding="utf-8"
@@ -283,7 +277,7 @@ def configure_telemetry(container: "DIContainer") -> None:  # noqa: C901
     # --- TracerProvider ---
     tracer_provider = None
     try:
-        from opentelemetry.sdk.trace.sampling import TraceIdRatioBased  # type: ignore[import]
+        from opentelemetry.sdk.trace.sampling import TraceIdRatioBased
 
         sampler = TraceIdRatioBased(otel_config.traces_sample_rate)
         tracer_provider = TracerProvider(resource=resource, sampler=sampler)
@@ -293,9 +287,7 @@ def configure_telemetry(container: "DIContainer") -> None:  # noqa: C901
                 from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import (  # type: ignore[import-not-found]
                     OTLPSpanExporter,
                 )
-                from opentelemetry.sdk.trace.export import (
-                    BatchSpanProcessor,  # type: ignore[import]
-                )
+                from opentelemetry.sdk.trace.export import BatchSpanProcessor
 
                 exporter_kwargs: dict = {}
                 if otel_config.otlp_endpoint:
@@ -307,7 +299,7 @@ def configure_telemetry(container: "DIContainer") -> None:  # noqa: C901
                 pass  # OTLP span exporter not installed; skip.
 
         elif otel_config.traces_exporter == "file":
-            from opentelemetry.sdk.trace.export import BatchSpanProcessor  # type: ignore[import]
+            from opentelemetry.sdk.trace.export import BatchSpanProcessor
 
             traces_path = _get_file_dir() / "traces.jsonl"
             try:
@@ -323,9 +315,7 @@ def configure_telemetry(container: "DIContainer") -> None:  # noqa: C901
                 # SDK-native fallback: ConsoleSpanExporter redirected to a
                 # file handle with a compact (single-line) JSON formatter.
                 # Each span is exported as one JSON object on its own line.
-                from opentelemetry.sdk.trace.export import (
-                    ConsoleSpanExporter,  # type: ignore[import]
-                )
+                from opentelemetry.sdk.trace.export import ConsoleSpanExporter
 
                 _traces_fh = open(  # noqa: SIM115,WPS515
                     traces_path, "a", encoding="utf-8"
