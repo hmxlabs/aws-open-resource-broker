@@ -3004,6 +3004,21 @@ wheels = [
 ]
 
 [[package]]
+name = "opentelemetry-instrumentation-click"
+version = "0.64b0"
+source = { registry = "https://pkgs.safetycli.com/repository/fgo-inc/pypi/simple/" }
+dependencies = [
+    { name = "opentelemetry-api" },
+    { name = "opentelemetry-instrumentation" },
+    { name = "opentelemetry-semantic-conventions" },
+    { name = "wrapt" },
+]
+sdist = { url = "https://pkgs.safetycli.com/package/fgo-inc/pypi/packages/d5/18/70c7caaf71eca3148bd87058c58e3371f594de2d64dd4903901b5d5ce71a/opentelemetry_instrumentation_click-0.64b0.tar.gz", hash = "sha256:e819f7caa98c79177a4977a7ad30cdcbc86b62475e285aadf47fef08dd88ac1f", size = 3969, upload-time = "2026-06-24T15:19:22.875Z" }
+wheels = [
+    { url = "https://pkgs.safetycli.com/package/fgo-inc/pypi/packages/b5/b5/9cb4f79645a4368f67d757519393ae5662d208b073b06a0fc397b9459f48/opentelemetry_instrumentation_click-0.64b0-py3-none-any.whl", hash = "sha256:88a2e1d3827070a5079ac82751cb60e222d9320656c521fa9186729921454a66", size = 4181, upload-time = "2026-06-24T15:18:31.66Z" },
+]
+
+[[package]]
 name = "opentelemetry-instrumentation-fastapi"
 version = "0.64b0"
 source = { registry = "https://pkgs.safetycli.com/repository/fgo-inc/pypi/simple/" }
@@ -3020,6 +3035,20 @@ wheels = [
 ]
 
 [[package]]
+name = "opentelemetry-instrumentation-logging"
+version = "0.64b0"
+source = { registry = "https://pkgs.safetycli.com/repository/fgo-inc/pypi/simple/" }
+dependencies = [
+    { name = "opentelemetry-api" },
+    { name = "opentelemetry-instrumentation" },
+    { name = "opentelemetry-semantic-conventions" },
+]
+sdist = { url = "https://pkgs.safetycli.com/package/fgo-inc/pypi/packages/88/8e/3b7191ba5817f139867612e960fbe06a69fe0d522d3b2c5e9c8e89b3ef8c/opentelemetry_instrumentation_logging-0.64b0.tar.gz", hash = "sha256:6435b4d215bf8183e15f7e3416a10ebe1c411810d3411fbfc62667daae3abacb", size = 20000, upload-time = "2026-06-24T15:19:30.946Z" }
+wheels = [
+    { url = "https://pkgs.safetycli.com/package/fgo-inc/pypi/packages/8d/07/9f97b0ccbb38363d12c7a2bfe44912ae7440c97aae250e2eedb32739f662/opentelemetry_instrumentation_logging-0.64b0-py3-none-any.whl", hash = "sha256:9b56f19648798ddb331c206b74d36c5f2a71e5c6b771e96298f167b2b590e40d", size = 16062, upload-time = "2026-06-24T15:18:44.019Z" },
+]
+
+[[package]]
 name = "opentelemetry-instrumentation-sqlalchemy"
 version = "0.64b0"
 source = { registry = "https://pkgs.safetycli.com/repository/fgo-inc/pypi/simple/" }
@@ -3033,6 +3062,21 @@ dependencies = [
 sdist = { url = "https://pkgs.safetycli.com/package/fgo-inc/pypi/packages/46/d7/86e333dede47a67a0f989f383da5d0840162ee21e0b252ca56cf61351c59/opentelemetry_instrumentation_sqlalchemy-0.64b0.tar.gz", hash = "sha256:dd737e0b0a72500961aa0dbb6fb2a10525f8dbb5299f9315ddf82d415cc64719", size = 18006, upload-time = "2026-06-24T15:19:40.225Z" }
 wheels = [
     { url = "https://pkgs.safetycli.com/package/fgo-inc/pypi/packages/49/90/5424365cb111d2383747b36ca3dbc558e86ef5ec6694efb53bfcb771f046/opentelemetry_instrumentation_sqlalchemy-0.64b0-py3-none-any.whl", hash = "sha256:687ee4c453020c7db009a7f3e390bb2b28eab4e61517e6d267e6e448c3eedcfb", size = 14410, upload-time = "2026-06-24T15:18:57.287Z" },
+]
+
+[[package]]
+name = "opentelemetry-instrumentation-system-metrics"
+version = "0.64b0"
+source = { registry = "https://pkgs.safetycli.com/repository/fgo-inc/pypi/simple/" }
+dependencies = [
+    { name = "opentelemetry-api" },
+    { name = "opentelemetry-instrumentation" },
+    { name = "opentelemetry-semantic-conventions" },
+    { name = "psutil" },
+]
+sdist = { url = "https://pkgs.safetycli.com/package/fgo-inc/pypi/packages/6c/55/ffa2d8f9a11356fde23fa48eb450a896b4935f6af05cae035f79e65dfa54/opentelemetry_instrumentation_system_metrics-0.64b0.tar.gz", hash = "sha256:ec8280693cdf6ea9020384c3fe884eea64a43ae78f1e2f6edc20951c871aac7e", size = 17412, upload-time = "2026-06-24T15:19:42.512Z" }
+wheels = [
+    { url = "https://pkgs.safetycli.com/package/fgo-inc/pypi/packages/df/08/b6037ef930e84a49905f09660f1e6cd928fb8f8ff4af1bccb1c689f0f463/opentelemetry_instrumentation_system_metrics-0.64b0-py3-none-any.whl", hash = "sha256:38bc9c4ed4fccea2a68b1a43d57764649d1c3096927dc7244c5e7f173899044b", size = 14007, upload-time = "2026-06-24T15:18:59.896Z" },
 ]
 
 [[package]]
@@ -3093,6 +3137,10 @@ dependencies = [
     { name = "cryptography" },
     { name = "filelock" },
     { name = "jsonschema" },
+    { name = "opentelemetry-instrumentation-botocore" },
+    { name = "opentelemetry-instrumentation-click" },
+    { name = "opentelemetry-instrumentation-logging" },
+    { name = "opentelemetry-instrumentation-system-metrics" },
     { name = "psutil" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
@@ -3113,8 +3161,11 @@ all = [
     { name = "kubernetes" },
     { name = "opentelemetry-api" },
     { name = "opentelemetry-exporter-prometheus" },
+    { name = "opentelemetry-instrumentation-click" },
     { name = "opentelemetry-instrumentation-fastapi" },
+    { name = "opentelemetry-instrumentation-logging" },
     { name = "opentelemetry-instrumentation-sqlalchemy" },
+    { name = "opentelemetry-instrumentation-system-metrics" },
     { name = "opentelemetry-sdk" },
     { name = "prometheus-client" },
     { name = "psutil" },
@@ -3289,8 +3340,11 @@ k8s-legacy = [
 monitoring = [
     { name = "opentelemetry-api" },
     { name = "opentelemetry-exporter-prometheus" },
+    { name = "opentelemetry-instrumentation-click" },
     { name = "opentelemetry-instrumentation-fastapi" },
+    { name = "opentelemetry-instrumentation-logging" },
     { name = "opentelemetry-instrumentation-sqlalchemy" },
+    { name = "opentelemetry-instrumentation-system-metrics" },
     { name = "opentelemetry-sdk" },
     { name = "prometheus-client" },
     { name = "psutil" },
@@ -3301,8 +3355,11 @@ monitoring-aws = [
     { name = "opentelemetry-api" },
     { name = "opentelemetry-exporter-prometheus" },
     { name = "opentelemetry-instrumentation-botocore" },
+    { name = "opentelemetry-instrumentation-click" },
     { name = "opentelemetry-instrumentation-fastapi" },
+    { name = "opentelemetry-instrumentation-logging" },
     { name = "opentelemetry-instrumentation-sqlalchemy" },
+    { name = "opentelemetry-instrumentation-system-metrics" },
     { name = "opentelemetry-sdk" },
     { name = "prometheus-client" },
     { name = "psutil" },
@@ -3507,9 +3564,16 @@ requires-dist = [
     { name = "nltk", marker = "extra == 'ci'", specifier = ">=3.9.3" },
     { name = "opentelemetry-api", marker = "extra == 'otel'", specifier = ">=1.20.0" },
     { name = "opentelemetry-exporter-prometheus", marker = "extra == 'monitoring'", specifier = ">=0.64b0,<1.0" },
+    { name = "opentelemetry-instrumentation-botocore", specifier = ">=0.64b0,<1.0" },
     { name = "opentelemetry-instrumentation-botocore", marker = "extra == 'monitoring-aws'", specifier = ">=0.64b0,<1.0" },
+    { name = "opentelemetry-instrumentation-click", specifier = ">=0.64b0,<1.0" },
+    { name = "opentelemetry-instrumentation-click", marker = "extra == 'monitoring'", specifier = ">=0.64b0,<1.0" },
     { name = "opentelemetry-instrumentation-fastapi", marker = "extra == 'monitoring'", specifier = ">=0.41b0,<1.0" },
+    { name = "opentelemetry-instrumentation-logging", specifier = ">=0.64b0,<1.0" },
+    { name = "opentelemetry-instrumentation-logging", marker = "extra == 'monitoring'", specifier = ">=0.64b0,<1.0" },
     { name = "opentelemetry-instrumentation-sqlalchemy", marker = "extra == 'monitoring'", specifier = ">=0.41b0,<1.0" },
+    { name = "opentelemetry-instrumentation-system-metrics", specifier = ">=0.64b0,<1.0" },
+    { name = "opentelemetry-instrumentation-system-metrics", marker = "extra == 'monitoring'", specifier = ">=0.64b0,<1.0" },
     { name = "opentelemetry-sdk", marker = "extra == 'monitoring'", specifier = ">=1.20.0" },
     { name = "orb-py", extras = ["aws"], marker = "extra == 'all-providers'" },
     { name = "orb-py", extras = ["aws"], marker = "extra == 'test-aws'" },

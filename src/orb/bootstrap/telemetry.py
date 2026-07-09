@@ -230,24 +230,45 @@ def configure_telemetry(container: "DIContainer") -> None:  # noqa: C901
                 pass  # OTLP exporter not installed; skip.
 
         elif exporter_name == "file":
+            from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
+
+            metrics_path = _get_file_dir() / "metrics.jsonl"
             try:
+                # Preferred: dedicated OTLP-JSON file exporter.
+                # IMPORTANT: opentelemetry-exporter-otlp-json-file==0.64b0
+                # transitively requires opentelemetry-proto-json==0.64b0, which
+                # is NOT published on PyPI (verified July 2026).  The
+                # ImportError guard below activates the SDK-native fallback
+                # until that package ships.  To upgrade: add
+                # "opentelemetry-exporter-otlp-json-file>=0.64b0,<1.0" to the
+                # [monitoring] extra in pyproject.toml once proto-json is on
+                # PyPI, and this guard will transparently prefer it.
                 from opentelemetry.exporter.otlp.json.file import (  # type: ignore[import-not-found]
                     FileMetricExporter,
                 )
-                from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
 
-                metrics_path = _get_file_dir() / "metrics.jsonl"
-                metric_readers.append(
-                    PeriodicExportingMetricReader(FileMetricExporter(path=metrics_path))
-                )
+                _metric_file_exporter: object = FileMetricExporter(path=metrics_path)
             except ImportError:
-                # opentelemetry-exporter-otlp-json-file not installed; skip.
-                # NOTE: this package (opentelemetry-exporter-otlp-json-file 0.64b0)
-                # has a transitive dependency on opentelemetry-proto-json==0.64b0
-                # which is not yet published to PyPI (July 2026).  The guard here
-                # ensures ORB continues to function without it.  Add the dep to
-                # [monitoring] once proto-json is available on PyPI.
-                pass
+                # SDK-native fallback: ConsoleMetricExporter redirected to a
+                # file handle with a compact (single-line) JSON formatter.
+                # ConsoleMetricExporter is part of opentelemetry-sdk (already a
+                # required dep) and calls out.flush() on every export(), so
+                # data is durably written before shutdown_telemetry() returns.
+                # Format: one JSON object per line (JSONL) — readable by any
+                # standard JSON Lines tooling.
+                from opentelemetry.sdk.metrics.export import ConsoleMetricExporter
+
+                _metrics_fh = open(  # noqa: SIM115,WPS515
+                    metrics_path, "a", encoding="utf-8"
+                )
+                _metric_file_exporter = ConsoleMetricExporter(
+                    out=_metrics_fh,
+                    formatter=lambda md: md.to_json(indent=None) + "\n",
+                )
+
+            metric_readers.append(
+                PeriodicExportingMetricReader(_metric_file_exporter)  # type: ignore[arg-type]
+            )
 
     meter_provider = MeterProvider(resource=resource, metric_readers=metric_readers)  # type: ignore[arg-type]
     metrics.set_meter_provider(meter_provider)
@@ -278,20 +299,35 @@ def configure_telemetry(container: "DIContainer") -> None:  # noqa: C901
                 pass  # OTLP span exporter not installed; skip.
 
         elif otel_config.traces_exporter == "file":
+            from opentelemetry.sdk.trace.export import BatchSpanProcessor
+
+            traces_path = _get_file_dir() / "traces.jsonl"
             try:
+                # Preferred: dedicated OTLP-JSON file exporter.
+                # See the metrics "file" branch above for the note on why
+                # opentelemetry-exporter-otlp-json-file is guarded here.
                 from opentelemetry.exporter.otlp.json.file import (  # type: ignore[import-not-found]
                     FileSpanExporter,
                 )
-                from opentelemetry.sdk.trace.export import BatchSpanProcessor
 
-                traces_path = _get_file_dir() / "traces.jsonl"
-                tracer_provider.add_span_processor(
-                    BatchSpanProcessor(FileSpanExporter(path=traces_path))
-                )
+                _span_file_exporter: object = FileSpanExporter(path=traces_path)
             except ImportError:
-                # opentelemetry-exporter-otlp-json-file not yet pip-installable
-                # (transitive dep on opentelemetry-proto-json==0.64b0 not on PyPI).
-                pass
+                # SDK-native fallback: ConsoleSpanExporter redirected to a
+                # file handle with a compact (single-line) JSON formatter.
+                # Each span is exported as one JSON object on its own line.
+                from opentelemetry.sdk.trace.export import ConsoleSpanExporter
+
+                _traces_fh = open(  # noqa: SIM115,WPS515
+                    traces_path, "a", encoding="utf-8"
+                )
+                _span_file_exporter = ConsoleSpanExporter(
+                    out=_traces_fh,
+                    formatter=lambda span: span.to_json(indent=None) + "\n",
+                )
+
+            tracer_provider.add_span_processor(
+                BatchSpanProcessor(_span_file_exporter)  # type: ignore[arg-type]
+            )
 
         trace.set_tracer_provider(tracer_provider)
         _tracer_provider = tracer_provider

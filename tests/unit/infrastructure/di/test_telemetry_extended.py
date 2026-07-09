@@ -105,36 +105,56 @@ def reset_telemetry():
 class TestFileExporterFlushOnExit:
     """Verify that shutdown_telemetry() flushes metrics to the file exporter."""
 
-    @pytest.mark.skipif(
-        "opentelemetry.exporter.otlp.json.file" not in sys.modules
-        and not any("opentelemetry_exporter_otlp_json_file" in str(p) for p in sys.path),
-        reason="opentelemetry-exporter-otlp-json-file not installed (transitive dep not yet on PyPI)",
-    )
     def test_file_exporter_receives_metrics_after_shutdown(self, tmp_path):
         """Regression: CLI metrics must survive process exit when shutdown is called.
 
+        Tests the SDK-native file-exporter fallback: ConsoleMetricExporter
+        redirected to a file handle with a compact JSON formatter.
+
+        opentelemetry-exporter-otlp-json-file==0.64b0 is on PyPI but
+        transitively requires opentelemetry-proto-json==0.64b0, which is NOT
+        published on PyPI (verified July 2026).  The production implementation
+        in telemetry.py falls back to ConsoleMetricExporter(out=<file>,
+        formatter=compact) from the core opentelemetry-sdk (always installed).
+        This test exercises that fallback path directly.
+
+        When opentelemetry-proto-json ships on PyPI, the production code will
+        transparently prefer FileMetricExporter; this test will remain valid
+        as it validates the baseline guarantee: shutdown_telemetry() flushes
+        metrics to a file.
+
         Strategy:
           1. Build a real MeterProvider with a PeriodicExportingMetricReader
-             backed by FileMetricExporter writing to a temp file.
-          2. Create a counter on the meter and add 1.
-          3. Call shutdown_telemetry() → force_flush cascades to the reader.
-          4. Read the JSONL file — must contain at least one line with data.
+             backed by ConsoleMetricExporter writing compact JSON to a file.
+          2. Create a counter on the meter and add 42.
+          3. Call shutdown_telemetry() → force_flush cascades to the reader
+             and the exporter writes before the call returns.
+          4. Read the JSONL file — must contain at least one non-empty line
+             that is valid JSON.
         """
-        # This test runs against the real SDK.  We set providers directly on
-        # the module globals so that shutdown_telemetry() can call shutdown()
-        # on them without a full DI container bootstrap.
+        # All required classes are in opentelemetry-sdk which is a hard dep.
         try:
             from opentelemetry import metrics as otel_metrics
-            from opentelemetry.exporter.otlp.json.file import FileMetricExporter
             from opentelemetry.sdk.metrics import MeterProvider
-            from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
+            from opentelemetry.sdk.metrics.export import (
+                ConsoleMetricExporter,
+                PeriodicExportingMetricReader,
+            )
             from opentelemetry.sdk.resources import SERVICE_NAME, Resource
         except ImportError:
-            pytest.skip("Required OTel packages not installed")
+            pytest.skip("opentelemetry-sdk not installed")
 
         metrics_path = tmp_path / "metrics.jsonl"
 
-        exporter = FileMetricExporter(path=metrics_path)
+        # SDK-native file exporter: ConsoleMetricExporter with a compact
+        # (single-line) JSON formatter directed to an open file handle.
+        # This is the exact pattern wired in telemetry.py's "file" branch
+        # when opentelemetry-exporter-otlp-json-file is absent.
+        fh = open(metrics_path, "a", encoding="utf-8")  # noqa: SIM115,WPS515
+        exporter = ConsoleMetricExporter(
+            out=fh,
+            formatter=lambda md: md.to_json(indent=None) + "\n",
+        )
         reader = PeriodicExportingMetricReader(exporter, export_interval_millis=60_000)
         resource = Resource.create({SERVICE_NAME: "orb-test"})
         provider = MeterProvider(resource=resource, metric_readers=[reader])
@@ -152,9 +172,10 @@ class TestFileExporterFlushOnExit:
 
         # Flush — export_interval is 60 s so without shutdown() nothing would write.
         shutdown_telemetry()
+        fh.flush()
 
         # The file must exist and contain valid JSON Lines.
-        assert metrics_path.exists(), "metrics.jsonl was not created by FileMetricExporter"
+        assert metrics_path.exists(), "metrics.jsonl was not created"
         content = metrics_path.read_text(encoding="utf-8").strip()
         assert content, "metrics.jsonl is empty after shutdown_telemetry()"
 

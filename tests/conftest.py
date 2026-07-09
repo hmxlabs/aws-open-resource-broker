@@ -220,12 +220,65 @@ def setup_test_environment():
     )
 
 
+def _reset_otel_globals() -> None:
+    """Forcibly reset the OpenTelemetry global meter/tracer provider state.
+
+    The OTel API enforces a "set once" policy: after the first
+    ``opentelemetry.metrics.set_meter_provider()`` call, every subsequent call
+    is silently ignored.  Tests that install a real SDK ``MeterProvider`` (e.g.
+    :mod:`tests.providers.k8s.unit.services.test_metrics_otel_integration` and
+    :mod:`tests.unit.infrastructure.di.test_telemetry_extended`) leave the global
+    pointing at that provider for the rest of the process.
+
+    A live ``MeterProvider`` may call ``copy.deepcopy`` on its attribute
+    containers during metric collection, breaking tests that patch
+    ``copy.deepcopy`` and assert it is never called (T05 suite in
+    ``test_spec_no_deepcopy_on_read_only.py``).
+
+    We bypass the "set once" gate by directly nulling the module-level globals
+    and clearing the ``Once._done`` flag.  Both ``opentelemetry-api`` and
+    ``opentelemetry.sdk`` are optional extras; every import is guarded so this
+    function is always safe to call even when neither package is installed.
+    """
+    # --- Meter provider ---
+    try:
+        import opentelemetry.metrics._internal as _otel_metrics_int
+
+        _otel_metrics_int._METER_PROVIDER = None
+        _otel_metrics_int._METER_PROVIDER_SET_ONCE._done = False
+    except Exception:  # pragma: no cover — guard against missing / changed internals
+        pass
+
+    # --- Tracer provider ---
+    try:
+        import opentelemetry.trace as _otel_trace
+
+        if hasattr(_otel_trace, "_TRACER_PROVIDER"):
+            _otel_trace._TRACER_PROVIDER = None
+        if hasattr(_otel_trace, "_TRACER_PROVIDER_SET_ONCE"):
+            _otel_trace._TRACER_PROVIDER_SET_ONCE._done = False
+    except Exception:  # pragma: no cover — guard against missing / changed internals
+        pass
+
+
 @pytest.fixture(autouse=True)
 def reset_singletons():
     """Reset all singletons before each test."""
     reset_all_singletons()
     yield
     reset_all_singletons()
+
+
+@pytest.fixture(autouse=True)
+def _reset_otel_state():
+    """Reset OpenTelemetry global provider state before and after every test.
+
+    Prevents tests that install a real ``MeterProvider`` from leaking it into
+    subsequent tests.  See ``_reset_otel_globals`` for the full rationale.
+    """
+    _reset_otel_globals()
+    yield
+    _reset_otel_globals()
 
 
 @pytest.fixture
