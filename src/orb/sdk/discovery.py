@@ -153,7 +153,7 @@ class SDKMethodDiscovery:
 
         Examples:
         - ListTemplatesQuery -> list_templates
-        - GetRequestQuery -> get_request
+        - SyncAndGetRequestQuery -> sync_and_get_request
         """
         name = query_type.__name__
         if name.endswith("Query"):

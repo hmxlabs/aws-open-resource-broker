@@ -7,7 +7,7 @@ handler and encodes the next cursor from the handler's reported
 
 from __future__ import annotations
 
-from orb.application.dto.queries import ListActiveRequestsQuery
+from orb.application.dto.queries import SyncAndListActiveRequestsQuery
 from orb.application.ports.command_bus_port import CommandBusPort
 from orb.application.ports.query_bus_port import QueryBusPort
 from orb.application.request.queries import ListRequestsQuery
@@ -50,10 +50,10 @@ class ListRequestsOrchestrator(OrchestratorBase[ListRequestsInput, ListRequestsO
         sort = input.sort if input.sort else _DEFAULT_SORT
 
         if input.sync:
-            # ListActiveRequestsQuery doesn't support q/sort (handler slices
+            # SyncAndListActiveRequestsQuery doesn't support q/sort (handler slices
             # before sync for perf — see handler docstring). Pagination
             # metadata still flows through Paginated.
-            query = ListActiveRequestsQuery(
+            query = SyncAndListActiveRequestsQuery(
                 limit=input.limit,
                 offset=offset,
                 all_resources=True,

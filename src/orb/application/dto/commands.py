@@ -15,7 +15,7 @@ class CreateRequestCommand(BaseCommand):
     """Command to create a new request.
 
     CQRS: Commands should not return data. After executing this command,
-    use GetRequestQuery with the request_id to retrieve the created request.
+    use SyncAndGetRequestQuery with the request_id to retrieve the created request.
     """
 
     request_id: Optional[str] = None

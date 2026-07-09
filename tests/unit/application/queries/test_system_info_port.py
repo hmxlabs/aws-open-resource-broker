@@ -24,7 +24,6 @@ from orb.application.queries.system_handlers import (
     GetSystemStatusHandler,
 )
 
-
 # ---------------------------------------------------------------------------
 # Fake SystemInfoPort — returns deterministic canned values
 # ---------------------------------------------------------------------------

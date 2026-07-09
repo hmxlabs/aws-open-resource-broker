@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from orb.application.dto.queries import GetRequestQuery, GetTemplateQuery
+from orb.application.dto.queries import GetTemplateQuery, SyncAndGetRequestQuery
 from orb.application.ports.query_bus_port import QueryBusPort
 from orb.application.services.orchestration.base import OrchestratorBase
 from orb.application.services.orchestration.dtos import (
@@ -47,7 +47,9 @@ class WatchRequestStatusOrchestrator(
             return {}, False
 
     async def execute(self, input: WatchRequestStatusInput) -> WatchRequestStatusOutput:  # type: ignore[return]
-        query = GetRequestQuery(request_id=input.request_id, lightweight=False, skip_cache=True)
+        query = SyncAndGetRequestQuery(
+            request_id=input.request_id, lightweight=False, skip_cache=True
+        )
         result = await self._query_bus.execute(query)
 
         template_id = getattr(result, "template_id", None)

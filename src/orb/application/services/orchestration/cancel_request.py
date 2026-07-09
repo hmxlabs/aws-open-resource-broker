@@ -15,7 +15,7 @@ every provider handler. Tracked separately.
 from __future__ import annotations
 
 from orb.application.dto.commands import CancelRequestCommand
-from orb.application.dto.queries import GetRequestQuery
+from orb.application.dto.queries import SyncAndGetRequestQuery
 from orb.application.ports.command_bus_port import CommandBusPort
 from orb.application.ports.query_bus_port import QueryBusPort
 from orb.application.services.orchestration.base import OrchestratorBase
@@ -111,7 +111,7 @@ class CancelRequestOrchestrator(OrchestratorBase[CancelRequestInput, CancelReque
         to the DB-only cancel path in that case.
         """
         try:
-            query = GetRequestQuery(request_id=request_id, verbose=False)
+            query = SyncAndGetRequestQuery(request_id=request_id, verbose=False)
             request = await self._query_bus.execute(query)
         except Exception as exc:
             self._logger.warning(

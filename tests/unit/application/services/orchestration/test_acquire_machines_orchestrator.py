@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from orb.application.dto.commands import CreateRequestCommand
-from orb.application.dto.queries import GetRequestQuery
+from orb.application.dto.queries import SyncAndGetRequestQuery
 from orb.application.services.orchestration.acquire_machines import AcquireMachinesOrchestrator
 from orb.application.services.orchestration.dtos import AcquireMachinesInput, AcquireMachinesOutput
 from orb.domain.base.exceptions import ApplicationError
@@ -93,7 +93,7 @@ class TestAcquireMachinesOrchestrator:
 
         mock_query_bus.execute.assert_called()
         query = mock_query_bus.execute.call_args[0][0]
-        assert isinstance(query, GetRequestQuery)
+        assert isinstance(query, SyncAndGetRequestQuery)
         assert query.request_id == "req-123"
         assert result.status == "completed"
 

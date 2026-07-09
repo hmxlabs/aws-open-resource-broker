@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 from orb.application.dto.queries import (
-    ListActiveRequestsQuery,
     ListMachinesQuery,
-    ListReturnRequestsQuery,
     ListTemplatesQuery,
+    SyncAndListActiveRequestsQuery,
+    SyncAndListReturnRequestsQuery,
 )
 from orb.application.request.queries import ListRequestsQuery
 
@@ -22,12 +22,12 @@ class TestListQueryPaginationDefaults:
         assert q.offset == 0
 
     def test_list_active_requests_query_defaults(self):
-        q = ListActiveRequestsQuery()
+        q = SyncAndListActiveRequestsQuery()
         assert q.limit == 50
         assert q.offset == 0
 
     def test_list_return_requests_query_defaults(self):
-        q = ListReturnRequestsQuery()
+        q = SyncAndListReturnRequestsQuery()
         assert q.limit == 50
         assert q.offset == 0
 
@@ -54,12 +54,12 @@ class TestListQueryPaginationCustomValues:
         assert q.offset == 20
 
     def test_list_active_requests_custom(self):
-        q = ListActiveRequestsQuery(limit=100, offset=50)
+        q = SyncAndListActiveRequestsQuery(limit=100, offset=50)
         assert q.limit == 100
         assert q.offset == 50
 
     def test_list_return_requests_custom(self):
-        q = ListReturnRequestsQuery(limit=25, offset=75)
+        q = SyncAndListReturnRequestsQuery(limit=25, offset=75)
         assert q.limit == 25
         assert q.offset == 75
 

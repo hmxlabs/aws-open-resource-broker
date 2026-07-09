@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from orb.application.dto.queries import GetRequestQuery, ListActiveRequestsQuery
+from orb.application.dto.queries import SyncAndGetRequestQuery, SyncAndListActiveRequestsQuery
 from orb.application.services.orchestration.dtos import (
     GetRequestStatusInput,
     GetRequestStatusOutput,
@@ -54,7 +54,7 @@ class TestGetRequestStatusOrchestrator:
         await orchestrator.execute(input)
         mock_query_bus.execute.assert_called_once()
         query = mock_query_bus.execute.call_args[0][0]
-        assert isinstance(query, ListActiveRequestsQuery)
+        assert isinstance(query, SyncAndListActiveRequestsQuery)
 
     @pytest.mark.asyncio
     async def test_execute_all_requests_returns_list(self, orchestrator, mock_query_bus):
@@ -77,7 +77,7 @@ class TestGetRequestStatusOrchestrator:
         await orchestrator.execute(input)
         mock_query_bus.execute.assert_called_once()
         query = mock_query_bus.execute.call_args[0][0]
-        assert isinstance(query, GetRequestQuery)
+        assert isinstance(query, SyncAndGetRequestQuery)
         assert query.request_id == "req-1"
 
     @pytest.mark.asyncio
