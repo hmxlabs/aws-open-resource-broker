@@ -8,9 +8,9 @@ from typing import Any
 from orb.application.base.handlers import BaseQueryHandler
 from orb.application.decorators import query_handler
 from orb.application.dto.queries import (
-    GetRequestQuery,
-    ListActiveRequestsQuery,
-    ListReturnRequestsQuery,
+    SyncAndGetRequestQuery,
+    SyncAndListActiveRequestsQuery,
+    SyncAndListReturnRequestsQuery,
 )
 from orb.application.dto.responses import RequestDTO
 from orb.application.factories.request_dto_factory import RequestDTOFactory
@@ -27,9 +27,13 @@ from orb.domain.base.ports.configuration_port import ConfigurationPort
 from orb.domain.services.generic_filter_service import GenericFilterService
 
 
-@query_handler(GetRequestQuery)
-class GetRequestHandler(BaseQueryHandler[GetRequestQuery, RequestDTO]):
-    """Handler for getting request details."""
+@query_handler(SyncAndGetRequestQuery)
+class SyncAndGetRequestHandler(BaseQueryHandler[SyncAndGetRequestQuery, RequestDTO]):
+    """Handler for getting request details with live provider sync.
+
+    For non-terminal requests this handler refreshes machine state from the
+    provider and persists any changes before returning. See ADR-0001.
+    """
 
     def __init__(
         self,
@@ -53,8 +57,8 @@ class GetRequestHandler(BaseQueryHandler[GetRequestQuery, RequestDTO]):
         self._status_service = RequestStatusService(uow_factory, logger)
         self._dto_factory = RequestDTOFactory()
 
-    async def execute_query(self, query: GetRequestQuery) -> RequestDTO:
-        """Execute get request query."""
+    async def execute_query(self, query: SyncAndGetRequestQuery) -> RequestDTO:
+        """Execute sync-and-get request query."""
         self.logger.info("Getting request details for: %s", query.request_id)
 
         try:
@@ -319,9 +323,16 @@ class ListRequestsHandler(BaseQueryHandler[ListRequestsQuery, Paginated[RequestD
             raise
 
 
-@query_handler(ListReturnRequestsQuery)
-class ListReturnRequestsHandler(BaseQueryHandler[ListReturnRequestsQuery, Paginated[RequestDTO]]):
-    """Handler for listing return requests."""
+@query_handler(SyncAndListReturnRequestsQuery)
+class SyncAndListReturnRequestsHandler(
+    BaseQueryHandler[SyncAndListReturnRequestsQuery, Paginated[RequestDTO]]
+):
+    """Handler for listing return requests with live provider sync.
+
+    Each non-terminal return request is refreshed from the provider and any
+    state changes (including status transitions) are persisted before the
+    response is assembled. See ADR-0001.
+    """
 
     def __init__(
         self,
@@ -339,8 +350,8 @@ class ListReturnRequestsHandler(BaseQueryHandler[ListReturnRequestsQuery, Pagina
         self._query_service = RequestQueryService(uow_factory, logger)
         self._dto_factory = RequestDTOFactory()
 
-    async def execute_query(self, query: ListReturnRequestsQuery) -> Paginated[RequestDTO]:
-        """Execute list return requests query."""
+    async def execute_query(self, query: SyncAndListReturnRequestsQuery) -> Paginated[RequestDTO]:
+        """Execute sync-and-list return requests query."""
         self.logger.info("Listing return requests")
 
         try:
@@ -479,7 +490,7 @@ class ListReturnRequestsHandler(BaseQueryHandler[ListReturnRequestsQuery, Pagina
                     limit = min(query.limit, 1000)
                     if query.limit > 1000:
                         self.logger.warning(
-                            "ListReturnRequestsQuery.limit=%d clamped to 1000; "
+                            "SyncAndListReturnRequestsQuery.limit=%d clamped to 1000; "
                             "total_count=%d. Consumers needing full counts "
                             "should rely on total_count, not len(requests).",
                             query.limit,
@@ -503,9 +514,16 @@ class ListReturnRequestsHandler(BaseQueryHandler[ListReturnRequestsQuery, Pagina
             raise
 
 
-@query_handler(ListActiveRequestsQuery)
-class ListActiveRequestsHandler(BaseQueryHandler[ListActiveRequestsQuery, Paginated[RequestDTO]]):
-    """Handler for listing active requests."""
+@query_handler(SyncAndListActiveRequestsQuery)
+class SyncAndListActiveRequestsHandler(
+    BaseQueryHandler[SyncAndListActiveRequestsQuery, Paginated[RequestDTO]]
+):
+    """Handler for listing active requests with live provider sync per request.
+
+    Each non-terminal request on the returned page is refreshed from the provider
+    in parallel and any state changes are persisted before the response is
+    assembled. See ADR-0001.
+    """
 
     _DEFAULT_SYNC_TIMEOUT: float = 30.0
 
@@ -541,8 +559,8 @@ class ListActiveRequestsHandler(BaseQueryHandler[ListActiveRequestsQuery, Pagina
             return self._DEFAULT_SYNC_TIMEOUT
         return self._DEFAULT_SYNC_TIMEOUT
 
-    async def execute_query(self, query: ListActiveRequestsQuery) -> Paginated[RequestDTO]:
-        """Execute list active requests query.
+    async def execute_query(self, query: SyncAndListActiveRequestsQuery) -> Paginated[RequestDTO]:
+        """Execute sync-and-list active requests query.
 
         Pagination is applied before the per-row read-through sync to
         bound the AWS API call cost to one round per page rather than
@@ -572,7 +590,7 @@ class ListActiveRequestsHandler(BaseQueryHandler[ListActiveRequestsQuery, Pagina
                 requests = requests[offset : offset + limit]
 
             # Read-through sync: refresh each request's read model from live AWS state.
-            # See GetRequestHandler for rationale — do NOT remove in the name of CQRS purity.
+            # See SyncAndGetRequestHandler for rationale — do NOT remove in the name of CQRS purity.
             # Run in parallel bounded by a semaphore so a 50-request page
             # stops costing 50× the AWS round-trip latency. The cap (8)
             # comes from typical EC2 DescribeInstances rate-limit

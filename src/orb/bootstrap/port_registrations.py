@@ -100,7 +100,7 @@ def register_port_adapters(container):
     container.register_singleton(PathResolutionPort, lambda c: PathResolutionAdapter())
 
     # Register in-memory cache service as CacheServicePort implementation.
-    # The handler (GetRequestHandler) calls only the sync convenience methods
+    # The handler (SyncAndGetRequestHandler) calls only the sync convenience methods
     # (get_cached_request / cache_request / is_caching_enabled).
     # TODO: replace with a config-driven implementation (Redis etc.) when needed.
     from orb.application.ports.cache_service_port import CacheServicePort
@@ -113,6 +113,20 @@ def register_port_adapters(container):
     from orb.infrastructure.adapters.console_adapter import RichConsoleAdapter
 
     container.register_singleton(ConsolePort, lambda c: RichConsoleAdapter())
+
+    # Register TemplateDTOFactory as the TemplateDTOFactoryPort implementation.
+    # GetTemplateHandler (application layer) injects TemplateDTOFactoryPort to convert
+    # domain templates to TemplateDTOs without importing infrastructure directly.
+    from orb.application.ports.template_dto_factory_port import TemplateDTOFactoryPort
+    from orb.infrastructure.template.factories import TemplateDTOFactory
+
+    container.register_singleton(TemplateDTOFactoryPort, lambda c: TemplateDTOFactory())
+
+    # Register system info port adapter
+    from orb.application.ports.system_info_port import SystemInfoPort
+    from orb.infrastructure.adapters.system_info_adapter import PsutilSystemInfoAdapter
+
+    container.register_singleton(SystemInfoPort, lambda _: PsutilSystemInfoAdapter())
 
     # Register response formatting service
     from orb.application.ports.scheduler_port import SchedulerPort

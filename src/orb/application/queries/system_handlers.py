@@ -23,6 +23,7 @@ from orb.application.dto.system import (
     SystemStatusDTO,
     ValidationResultDTO,
 )
+from orb.application.ports.system_info_port import SystemInfoPort
 from orb.application.queries.system import (
     GetConfigurationSectionQuery,
     GetProviderConfigQuery,
@@ -89,6 +90,7 @@ class GetProviderConfigHandler(BaseQueryHandler[GetProviderConfigQuery, Provider
         container: ContainerPort,
         error_handler: ErrorHandlingPort,
         timestamp_service: TimestampService,
+        system_info: SystemInfoPort,
     ) -> None:
         """
         Initialize get provider config handler.
@@ -98,10 +100,12 @@ class GetProviderConfigHandler(BaseQueryHandler[GetProviderConfigQuery, Provider
             container: Container port for dependency access
             error_handler: Error handling port for exception management
             timestamp_service: Service for timestamp formatting
+            system_info: Port for system-level I/O (filesystem, env, metrics)
         """
         super().__init__(logger, error_handler)
         self.container = container
         self.timestamp_service = timestamp_service
+        self._system_info = system_info
 
     async def execute_query(self, query: GetProviderConfigQuery) -> ProviderConfigDTO:
         """Execute provider configuration query."""
@@ -130,10 +134,8 @@ class GetProviderConfigHandler(BaseQueryHandler[GetProviderConfigQuery, Provider
             # Get last updated time from config file
             last_updated = None
             if config_sources.get("config_file"):
-                import os
-
                 try:
-                    mtime = os.path.getmtime(config_sources["config_file"])
+                    mtime = self._system_info.get_file_mtime(config_sources["config_file"])
                     last_updated = self.timestamp_service.format_for_display(mtime)
                 except (OSError, ValueError) as exc:
                     # Failure to read or format the config file's modification time is non-fatal;
@@ -254,6 +256,7 @@ class GetSystemStatusHandler(BaseQueryHandler[GetSystemStatusQuery, SystemStatus
         container: ContainerPort,
         error_handler: ErrorHandlingPort,
         timestamp_service: TimestampService,
+        system_info: SystemInfoPort,
     ) -> None:
         """
         Initialize get system status handler.
@@ -263,34 +266,31 @@ class GetSystemStatusHandler(BaseQueryHandler[GetSystemStatusQuery, SystemStatus
             container: Container port for dependency access
             error_handler: Error handling port for exception management
             timestamp_service: Service for timestamp formatting
+            system_info: Port for system-level I/O (filesystem, env, metrics)
         """
         super().__init__(logger, error_handler)
         self.container = container
         self.timestamp_service = timestamp_service
+        self._system_info = system_info
 
     async def execute_query(self, query: GetSystemStatusQuery) -> SystemStatusDTO:  # type: ignore[override]
         """Execute system status query."""
         self.logger.info("Getting system status")
 
         try:
-            import importlib.metadata
-            import os
-            import time
+            # Real metrics via injected port — no direct os/psutil in application layer
+            uptime_seconds = self._system_info.get_uptime_seconds()
+            memory_usage_mb = self._system_info.get_memory_usage_mb()
+            cpu_usage_percent = self._system_info.get_cpu_usage_percent()
+            disk_usage_percent = self._system_info.get_disk_usage_percent("/")
 
-            import psutil
+            version = self._system_info.get_package_version("orb")
 
-            # Real metrics
-            uptime_seconds = time.time() - psutil.boot_time()
-            memory_usage_mb = psutil.Process().memory_info().rss / 1024 / 1024
-            cpu_usage_percent = psutil.cpu_percent(interval=None)
-            disk_usage_percent = psutil.disk_usage("/").percent
-
-            try:
-                version = importlib.metadata.version("orb")
-            except importlib.metadata.PackageNotFoundError:
-                version = "unknown"
-
-            environment = os.environ.get("ORB_ENVIRONMENT", os.environ.get("ENV", "production"))
+            environment: str = (
+                self._system_info.get_env("ORB_ENVIRONMENT")
+                or self._system_info.get_env("ENV")
+                or "production"
+            )
 
             system_status: dict[str, Any] = {
                 "status": "operational",
@@ -461,9 +461,11 @@ class GetSystemConfigHandler(BaseQueryHandler[GetSystemConfigQuery, SystemConfig
         logger: LoggingPort,
         container: ContainerPort,
         error_handler: ErrorHandlingPort,
+        system_info: SystemInfoPort,
     ) -> None:
         super().__init__(logger, error_handler)
         self.container = container
+        self._system_info = system_info
 
     async def execute_query(self, query: GetSystemConfigQuery) -> SystemConfigDTO:
         """Execute system config query."""
@@ -475,15 +477,13 @@ class GetSystemConfigHandler(BaseQueryHandler[GetSystemConfigQuery, SystemConfig
         loaded_templates_file: str | None = None
         template_search_paths: list[str] | None = None
         try:
-            import os
-
             from orb.application.ports.scheduler_port import SchedulerPort
 
             scheduler = self.container.get(SchedulerPort)
             all_paths = scheduler.get_template_paths() or []
 
             for path in all_paths:
-                if os.path.exists(path):
+                if self._system_info.path_exists(path):
                     loaded_templates_file = path
                     break
 

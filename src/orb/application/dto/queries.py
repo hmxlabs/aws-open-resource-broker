@@ -9,8 +9,16 @@ from pydantic import BaseModel, ConfigDict
 from orb.application.interfaces.command_query import Query
 
 
-class GetRequestQuery(Query, BaseModel):
-    """Query to get request details."""
+class SyncAndGetRequestQuery(Query, BaseModel):
+    """Query to get request details with live provider sync.
+
+    This is a sync-on-read query: for non-terminal requests it refreshes machine
+    state from the provider and persists any changes before returning the result.
+    See ADR-0001 for rationale and naming convention.
+
+    When ``lightweight=True`` the provider sync is skipped and only persisted
+    data is returned — making that code path a pure read.
+    """
 
     model_config = ConfigDict(frozen=True)
 
@@ -21,8 +29,14 @@ class GetRequestQuery(Query, BaseModel):
     skip_cache: bool = False
 
 
-class ListActiveRequestsQuery(Query, BaseModel):
-    """Query to list active requests."""
+class SyncAndListActiveRequestsQuery(Query, BaseModel):
+    """Query to list active requests with live provider sync per request.
+
+    This is a sync-on-read query: each non-terminal request on the returned
+    page is refreshed from the provider and any state changes are persisted
+    before the response is assembled. See ADR-0001 for rationale and naming
+    convention.
+    """
 
     model_config = ConfigDict(frozen=True)
 
@@ -40,8 +54,15 @@ class ListActiveRequestsQuery(Query, BaseModel):
     sort: Optional[str] = None  # "+field" / "-field"; prefix optional, "-" = desc
 
 
-class ListReturnRequestsQuery(Query, BaseModel):
-    """Query to list return requests."""
+class SyncAndListReturnRequestsQuery(Query, BaseModel):
+    """Query to list return requests with live provider sync per request.
+
+    This is a sync-on-read query: each non-terminal return request is refreshed
+    from the provider and any state changes (including status transitions) are
+    persisted before the response is assembled. This prevents stale IN_PROGRESS
+    states from triggering duplicate return attempts. See ADR-0001 for rationale
+    and naming convention.
+    """
 
     model_config = ConfigDict(frozen=True)
 
@@ -147,14 +168,6 @@ class GetRequestSummaryQuery(Query, BaseModel):
     request_id: str
 
 
-class GetMachineHealthQuery(Query, BaseModel):
-    """Query to get machine health status."""
-
-    model_config = ConfigDict(frozen=True)
-
-    machine_id: str
-
-
 class ValidateStorageQuery(Query, BaseModel):
     """Query to validate storage connectivity."""
 
@@ -181,36 +194,5 @@ class ListCleanableRequestsQuery(Query, BaseModel):
 
 class ListCleanableResourcesQuery(Query, BaseModel):
     """Query to list resources eligible for cleanup."""
-
-    model_config = ConfigDict(frozen=True)
-
-
-# Template Result Queries
-class GetTemplateValidationResultQuery(Query, BaseModel):
-    """Query to get template validation results."""
-
-    model_config = ConfigDict(frozen=True)
-
-    template_id: str
-
-
-# Dashboard aggregate count queries — return {value: count} dicts via a single
-# storage-layer GROUP BY instead of listing all rows into Python.
-
-
-class CountMachinesByStatusQuery(Query, BaseModel):
-    """Query to count machines grouped by status."""
-
-    model_config = ConfigDict(frozen=True)
-
-
-class CountRequestsByStatusQuery(Query, BaseModel):
-    """Query to count requests grouped by status."""
-
-    model_config = ConfigDict(frozen=True)
-
-
-class CountTemplatesByProviderApiQuery(Query, BaseModel):
-    """Query to count templates grouped by provider_api."""
 
     model_config = ConfigDict(frozen=True)

@@ -38,6 +38,8 @@ _KNOWN_VIOLATIONS: frozenset[tuple[str, str]] = frozenset(
         ("bootstrap/infrastructure_services.py", "orb.providers.registration"),
         ("bootstrap/infrastructure_services.py", "orb.providers.k8s"),
         ("bootstrap/infrastructure_services.py", "orb.providers.k8s.registration"),
+        # DI wiring — intentional: AMI resolver registration must wire AWS provider
+        ("bootstrap/infrastructure_services.py", "orb.providers.aws.domain.services.ami_resolver"),
         (
             "application/services/orchestration/dashboard_summary.py",
             "orb.providers.registry",
@@ -45,6 +47,13 @@ _KNOWN_VIOLATIONS: frozenset[tuple[str, str]] = frozenset(
         ("bootstrap/provider_services.py", "orb.providers.registry"),
         ("bootstrap/provider_services.py", "orb.providers.registration"),
         ("bootstrap/services.py", "orb.providers.registration"),
+        # Provider completeness assertion — intentional: must query ProviderRegistry
+        # and all satellite registries to verify every registered provider type is complete.
+        ("bootstrap/provider_completeness.py", "orb.providers.registry"),
+        (
+            "bootstrap/provider_completeness.py",
+            "orb.providers.registry.defaults_loader_registry",
+        ),
         ("interface/health_command_handler.py", "orb.providers.registry"),
         ("interface/system_command_handlers.py", "orb.providers.registry"),
         ("interface/infrastructure_command_handler.py", "orb.providers.registry"),
@@ -59,6 +68,11 @@ _KNOWN_VIOLATIONS: frozenset[tuple[str, str]] = frozenset(
         ("infrastructure/template/configuration_manager.py", "orb.providers.base.strategy"),
         ("infrastructure/template/configuration_manager.py", "orb.providers.registry"),
         ("infrastructure/adapters/provider_discovery_adapter.py", "orb.providers.registry"),
+        # ProviderCLISpecPort moved out of domain (E2) — registry uses the protocol type
+        (
+            "infrastructure/registry/cli_spec_registry.py",
+            "orb.providers.base.provider_cli_spec_port",
+        ),
         # DI wiring — intentional: storage registration must wire AWS provider
         ("infrastructure/storage/registration.py", "orb.providers.aws.storage.registration"),
         # The cpu/ram lookup (derive_cpu_ram_from_instance_type) has been moved

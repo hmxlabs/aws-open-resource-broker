@@ -1,4 +1,4 @@
-"""Tests for ListActiveRequestsHandler — per-task sync timeout behaviour."""
+"""Tests for SyncAndListActiveRequestsHandler — per-task sync timeout behaviour."""
 
 from __future__ import annotations
 
@@ -8,8 +8,8 @@ from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
 
-from orb.application.dto.queries import ListActiveRequestsQuery
-from orb.application.queries.request_query_handlers import ListActiveRequestsHandler
+from orb.application.dto.queries import SyncAndListActiveRequestsQuery
+from orb.application.queries.request_query_handlers import SyncAndListActiveRequestsHandler
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -21,7 +21,7 @@ _REQ_ID_C = "req-00000000-0000-0000-0000-000000000003"
 
 
 def _make_fake_request(request_id: str = _REQ_ID_A, machine_ids: list[str] | None = None):
-    """Return a minimal request-like namespace accepted by ListActiveRequestsHandler."""
+    """Return a minimal request-like namespace accepted by SyncAndListActiveRequestsHandler."""
     from orb.domain.request.value_objects import RequestStatus
 
     return SimpleNamespace(
@@ -38,8 +38,8 @@ def _build_handler(
     requests: list,
     machine_sync_side_effect=None,
     sync_timeout: float = 1.0,
-) -> tuple[ListActiveRequestsHandler, MagicMock]:
-    """Build a ListActiveRequestsHandler with all collaborators mocked.
+) -> tuple[SyncAndListActiveRequestsHandler, MagicMock]:
+    """Build a SyncAndListActiveRequestsHandler with all collaborators mocked.
 
     Returns (handler, mock_logger).
 
@@ -72,7 +72,7 @@ def _build_handler(
             request_id=str(req.request_id.value),
         )
 
-        handler = ListActiveRequestsHandler(
+        handler = SyncAndListActiveRequestsHandler(
             uow_factory=mock_uow_factory,
             logger=mock_logger,
             error_handler=mock_error_handler,
@@ -128,7 +128,7 @@ async def test_sync_timeout_logs_warning_and_returns_stored_state():
         sync_timeout=0.05,  # 50 ms so the test is fast
     )
 
-    query = ListActiveRequestsQuery(all_resources=True)
+    query = SyncAndListActiveRequestsQuery(all_resources=True)
     result = await handler.execute_query(query)
 
     # Must succeed (no exception propagated)
@@ -157,7 +157,7 @@ async def test_sync_timeout_does_not_propagate_exception():
     )
 
     # Must not raise
-    query = ListActiveRequestsQuery(all_resources=True)
+    query = SyncAndListActiveRequestsQuery(all_resources=True)
     result = await handler.execute_query(query)
     assert result is not None
 
@@ -187,7 +187,7 @@ async def test_other_tasks_complete_when_one_times_out():
         sync_timeout=0.05,
     )
 
-    query = ListActiveRequestsQuery(all_resources=True)
+    query = SyncAndListActiveRequestsQuery(all_resources=True)
     result = await handler.execute_query(query)
 
     # All three requests are returned (stored state for A, synced state for B/C)
@@ -216,7 +216,7 @@ def test_resolve_sync_timeout_uses_config_when_provided():
     mock_config.app_config = mock_app_cfg
 
     with patch("orb.application.queries.request_query_handlers.RequestDTOFactory"):
-        handler = ListActiveRequestsHandler(
+        handler = SyncAndListActiveRequestsHandler(
             uow_factory=MagicMock(),
             logger=Mock(),
             error_handler=Mock(),
@@ -231,7 +231,7 @@ def test_resolve_sync_timeout_uses_config_when_provided():
 def test_resolve_sync_timeout_falls_back_to_default_when_config_is_none():
     """When config=None is passed, the default 30 s timeout is used."""
     with patch("orb.application.queries.request_query_handlers.RequestDTOFactory"):
-        handler = ListActiveRequestsHandler(
+        handler = SyncAndListActiveRequestsHandler(
             uow_factory=MagicMock(),
             logger=Mock(),
             error_handler=Mock(),
@@ -249,7 +249,7 @@ def test_resolve_sync_timeout_falls_back_to_default_when_config_raises():
     mock_config.app_config = property(lambda _: (_ for _ in ()).throw(RuntimeError("boom")))
 
     with patch("orb.application.queries.request_query_handlers.RequestDTOFactory"):
-        handler = ListActiveRequestsHandler(
+        handler = SyncAndListActiveRequestsHandler(
             uow_factory=MagicMock(),
             logger=Mock(),
             error_handler=Mock(),

@@ -6,6 +6,10 @@ from enum import Enum
 from typing import Any, Optional, TypeVar
 
 from orb.infrastructure.logging.logger import get_logger
+from orb.infrastructure.utilities.common.serialization import (
+    deserialize_enum as _deserialize_enum,
+    serialize_enum as _serialize_enum,
+)
 
 E = TypeVar("E", bound=Enum)
 
@@ -95,62 +99,12 @@ class JSONSerializer(SerializationManager):
 
     @staticmethod
     def serialize_enum(enum_value: Optional[Enum]) -> Optional[str]:
-        """Serialize enum to string value."""
-        if enum_value is None:
-            return None
-        return enum_value.value if hasattr(enum_value, "value") else str(enum_value)
+        """Serialize enum to string value. Delegates to the shared utility."""
+        return _serialize_enum(enum_value)
 
     @staticmethod
     def deserialize_enum(
         enum_class: type[E], value: Any, default: Optional[E] = None
     ) -> Optional[E]:
-        """Deserialize string to enum value."""
-        if value is None:
-            return default
-        if isinstance(value, enum_class):
-            return value
-        try:
-            if isinstance(value, str):
-                return enum_class(value)
-            return default
-        except (ValueError, TypeError):
-            return default
-
-
-class BinarySerializer(SerializationManager):
-    """Binary serialization manager using pickle."""
-
-    def __init__(self) -> None:
-        """Initialize binary serializer."""
-        self.logger = get_logger(__name__)
-
-    def serialize(self, data: dict[str, Any]) -> bytes:
-        """Serialize data to binary format."""
-        import json
-
-        try:
-            return json.dumps(data, default=self._json_serializer).encode("utf-8")
-        except Exception as e:
-            self.logger.error("Binary serialization failed: %s", e)
-            raise
-
-    def deserialize(self, data: bytes) -> dict[str, Any]:
-        """Deserialize binary data to dictionary."""
-        import json
-
-        try:
-            if not data:
-                return {}
-            return json.loads(data.decode("utf-8"))
-        except Exception as e:
-            self.logger.error("Binary deserialization failed: %s", e)
-            raise
-
-    def _json_serializer(self, obj):
-        """Serialize objects not serializable by default json code."""
-        if hasattr(obj, "__dict__"):
-            return obj.__dict__
-        elif hasattr(obj, "isoformat"):
-            return obj.isoformat()
-        else:
-            return str(obj)
+        """Deserialize string to enum value. Delegates to the shared utility."""
+        return _deserialize_enum(enum_class, value, default)

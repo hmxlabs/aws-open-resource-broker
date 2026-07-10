@@ -1,4 +1,4 @@
-"""Tests for GetRequestHandler — sync fallback behaviour."""
+"""Tests for SyncAndGetRequestHandler — sync fallback behaviour."""
 
 from __future__ import annotations
 
@@ -6,9 +6,9 @@ from unittest.mock import AsyncMock, MagicMock, Mock
 
 import pytest
 
-from orb.application.dto.queries import GetRequestQuery
+from orb.application.dto.queries import SyncAndGetRequestQuery
 from orb.application.dto.responses import RequestDTO
-from orb.application.queries.request_query_handlers import GetRequestHandler
+from orb.application.queries.request_query_handlers import SyncAndGetRequestHandler
 from orb.domain.base.exceptions import EntityNotFoundError
 from orb.domain.base.ports.container_port import ContainerPort
 from orb.domain.base.ports.error_handling_port import ErrorHandlingPort
@@ -61,8 +61,8 @@ class _FakeContainer(ContainerPort):
 def _make_handler(
     request: Request,
     sync_side_effect=None,
-) -> tuple[GetRequestHandler, MagicMock, MagicMock]:
-    """Build a GetRequestHandler with all collaborators mocked.
+) -> tuple[SyncAndGetRequestHandler, MagicMock, MagicMock]:
+    """Build a SyncAndGetRequestHandler with all collaborators mocked.
 
     Returns (handler, mock_query_service, mock_cache_service).
     """
@@ -88,7 +88,7 @@ def _make_handler(
     machine_sync_service.fetch_provider_machines = AsyncMock(return_value=([], {}))
     machine_sync_service.sync_machines_with_provider = AsyncMock(return_value=([], []))
 
-    handler = GetRequestHandler(
+    handler = SyncAndGetRequestHandler(
         uow_factory=uow_factory,
         logger=logger,
         error_handler=error_handler,
@@ -133,7 +133,7 @@ async def test_get_request_falls_back_to_stored_state_on_sync_error():
         request, sync_side_effect=sync_error
     )
 
-    query = GetRequestQuery(request_id=_ID_FALLBACK)
+    query = SyncAndGetRequestQuery(request_id=_ID_FALLBACK)
     result = await handler.execute_query(query)
 
     # Must return a valid DTO, not raise
@@ -170,7 +170,7 @@ async def test_get_request_returns_synced_dto_on_success():
         side_effect=[in_progress_request, in_progress_request, completed_request]
     )
 
-    query = GetRequestQuery(request_id=_ID_SUCCESS)
+    query = SyncAndGetRequestQuery(request_id=_ID_SUCCESS)
     result = await handler.execute_query(query)
 
     assert isinstance(result, RequestDTO)
@@ -195,7 +195,7 @@ async def test_get_request_does_not_cache_non_terminal():
 
     mock_query_service.get_request = AsyncMock(return_value=pending_request)
 
-    query = GetRequestQuery(request_id=_ID_SUCCESS)
+    query = SyncAndGetRequestQuery(request_id=_ID_SUCCESS)
     result = await handler.execute_query(query)
 
     assert isinstance(result, RequestDTO)
@@ -211,6 +211,6 @@ async def test_get_request_raises_entity_not_found_when_missing():
     handler, mock_query_service, _ = _make_handler(request, sync_side_effect=None)
     mock_query_service.get_request = AsyncMock(side_effect=RequestNotFoundError(_ID_MISSING))
 
-    query = GetRequestQuery(request_id=_ID_MISSING)
+    query = SyncAndGetRequestQuery(request_id=_ID_MISSING)
     with pytest.raises(EntityNotFoundError):
         await handler.execute_query(query)

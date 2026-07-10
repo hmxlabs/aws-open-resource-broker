@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from orb.application.dto.queries import GetRequestQuery, ListActiveRequestsQuery
+from orb.application.dto.queries import SyncAndGetRequestQuery, SyncAndListActiveRequestsQuery
 from orb.application.ports.command_bus_port import CommandBusPort
 from orb.application.ports.query_bus_port import QueryBusPort
 from orb.application.services.orchestration.base import OrchestratorBase
@@ -27,7 +27,7 @@ class GetRequestStatusOrchestrator(OrchestratorBase[GetRequestStatusInput, GetRe
         self._logger.info("GetRequestStatusOrchestrator: all=%s", input.all_requests)
 
         if input.all_requests:
-            query = ListActiveRequestsQuery(all_resources=True, limit=None)
+            query = SyncAndListActiveRequestsQuery(all_resources=True, limit=None)
             results = await self._query_bus.execute(query)
             return GetRequestStatusOutput(requests=[self._to_dict(r) for r in (results or [])])
 
@@ -42,7 +42,7 @@ class GetRequestStatusOrchestrator(OrchestratorBase[GetRequestStatusInput, GetRe
                 # stuck on stale IN_PROGRESS even after a successful sync.
                 # Non-verbose callers (lightweight list rows, etc.) can
                 # still hit the cache for speed.
-                query = GetRequestQuery(  # type: ignore[assignment]
+                query = SyncAndGetRequestQuery(  # type: ignore[assignment]
                     request_id=request_id,
                     verbose=input.verbose,
                     skip_cache=bool(input.verbose),

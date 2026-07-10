@@ -4,7 +4,7 @@ Exercises the complete path:
   HostFactoryStrategy.parse_request_data()
     -> CreateRequestCommand -> CommandBus -> CreateMachineRequestHandler
       -> AWSHandlerFactory.create_handler(provider_api) -> handler.acquire_hosts()
-  -> GetRequestQuery -> QueryBus -> GetRequestHandler
+  -> SyncAndGetRequestQuery -> QueryBus -> SyncAndGetRequestHandler
       -> handler.check_hosts_status()
   -> HostFactoryStrategy.format_request_status_response()
 
@@ -407,15 +407,15 @@ async def _create_request(command_bus, template_id: str, count: int = 2) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Helper: dispatch GetRequestQuery and return RequestDTO
+# Helper: dispatch SyncAndGetRequestQuery and return RequestDTO
 # ---------------------------------------------------------------------------
 
 
 async def _get_request(query_bus, request_id: str):
-    """Dispatch GetRequestQuery and return the RequestDTO."""
-    from orb.application.dto.queries import GetRequestQuery
+    """Dispatch SyncAndGetRequestQuery and return the RequestDTO."""
+    from orb.application.dto.queries import SyncAndGetRequestQuery
 
-    query = GetRequestQuery(request_id=request_id)
+    query = SyncAndGetRequestQuery(request_id=request_id)
     return await query_bus.execute(query)
 
 
@@ -446,7 +446,7 @@ class TestCQRSControlLoopEC2Fleet:
 
     @pytest.mark.asyncio
     async def test_get_request_status_after_create(self, cqrs_buses, hf_strategy):
-        """GetRequestQuery returns a queryable RequestDTO after EC2Fleet creation."""
+        """SyncAndGetRequestQuery returns a queryable RequestDTO after EC2Fleet creation."""
         command_bus, query_bus = cqrs_buses
 
         request_id = await _create_request(command_bus, "EC2Fleet-Instant-OnDemand", count=1)
@@ -489,7 +489,7 @@ class TestCQRSControlLoopASG:
 
     @pytest.mark.asyncio
     async def test_get_request_status_after_create(self, cqrs_buses, hf_strategy):
-        """GetRequestQuery returns a queryable RequestDTO after ASG creation."""
+        """SyncAndGetRequestQuery returns a queryable RequestDTO after ASG creation."""
         command_bus, query_bus = cqrs_buses
 
         request_id = await _create_request(command_bus, "ASG-OnDemand", count=1)
@@ -537,7 +537,7 @@ class TestCQRSControlLoopSpotFleet:
 
     @pytest.mark.asyncio
     async def test_get_request_status_after_create(self, cqrs_buses, hf_strategy):
-        """GetRequestQuery returns a queryable RequestDTO after SpotFleet creation."""
+        """SyncAndGetRequestQuery returns a queryable RequestDTO after SpotFleet creation."""
         command_bus, query_bus = cqrs_buses
 
         _patch_spot_fleet_via_container()
@@ -602,7 +602,7 @@ class TestCQRSControlLoopRunInstances:
 
     @pytest.mark.asyncio
     async def test_get_request_status_returns_machine_data(self, cqrs_buses, hf_strategy):
-        """GetRequestQuery returns machine data for RunInstances after creation."""
+        """SyncAndGetRequestQuery returns machine data for RunInstances after creation."""
         command_bus, query_bus = cqrs_buses
 
         # Use count=1 so the provisioning loop completes in a single attempt.

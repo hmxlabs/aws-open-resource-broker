@@ -30,13 +30,13 @@ from typing import Any, Optional
 
 from botocore.exceptions import ClientError
 
-from orb.domain.base.dependency_injection import injectable
 from orb.domain.base.ports import LoggingPort
 from orb.domain.base.ports.configuration_port import ConfigurationPort
 from orb.domain.base.provider_fulfilment import CheckHostsStatusResult, ProviderFulfilment
 from orb.domain.request.aggregate import Request
 from orb.domain.template.template_aggregate import Template
 from orb.infrastructure.adapters.ports.request_adapter_port import RequestAdapterPort
+from orb.infrastructure.di.injectable import injectable
 from orb.infrastructure.error.decorators import handle_infrastructure_exceptions
 from orb.infrastructure.resilience import CircuitBreakerOpenError
 from orb.providers.aws.aws_fleet_capacity import FleetCapacityFulfilment
@@ -51,19 +51,21 @@ from orb.providers.aws.infrastructure.adapters.machine_adapter import AWSMachine
 from orb.providers.aws.infrastructure.aws_client import AWSClient
 from orb.providers.aws.infrastructure.handlers.base_handler import AWSHandler
 from orb.providers.aws.infrastructure.handlers.ec2_fleet.config_builder import EC2FleetConfigBuilder
+from orb.providers.aws.infrastructure.handlers.ec2_fleet.example_templates import (
+    EC2_FLEET_EXAMPLE_TEMPLATES,
+)
 from orb.providers.aws.infrastructure.handlers.ec2_fleet.release_manager import (
     EC2FleetReleaseManager,
 )
 from orb.providers.aws.infrastructure.handlers.shared.base_context_mixin import BaseContextMixin
 from orb.providers.aws.infrastructure.handlers.shared.fleet_fulfilment import (
-    compute_capacity_based_fulfilment,
+    compute_ec2fleet_fulfilment,
 )
 from orb.providers.aws.infrastructure.handlers.shared.fleet_grouping_mixin import FleetGroupingMixin
 from orb.providers.aws.infrastructure.launch_template.manager import (
     AWSLaunchTemplateManager,
 )
 from orb.providers.aws.utilities.aws_operations import AWSOperations
-from orb.providers.aws.value_objects import AWSAllocationStrategy
 
 
 @injectable
@@ -647,78 +649,16 @@ class EC2FleetHandler(AWSHandler, BaseContextMixin, FleetGroupingMixin):
     ) -> ProviderFulfilment:
         """Compute ProviderFulfilment for an EC2 Fleet request.
 
-        Instant fleets: running_count >= requested_count — same as RunInstances.
-        Maintain/Request fleets: FulfilledCapacity >= TargetCapacity AND
-        pending_count == 0 AND failed_count == 0.
+        Delegates to the module-level :func:`compute_ec2fleet_fulfilment` helper
+        in ``shared/fleet_fulfilment.py``.
         """
-        running_count = sum(1 for i in instances if i.get("status") == "running")
-        pending_count = sum(1 for i in instances if i.get("status") in ("pending", "starting"))
-        failed_count = sum(1 for i in instances if i.get("status") in ("failed", "error"))
-        target_units = target_capacity if target_capacity is not None else requested_count
-
-        if fleet_type == AWSFleetType.INSTANT:
-            # Instant fleet: synchronous result, count-based (same as RunInstances)
-            if running_count >= requested_count and failed_count == 0:
-                return ProviderFulfilment(
-                    state="fulfilled",
-                    message=f"Instant fleet: {running_count} instance(s) running",
-                    target_units=target_units,
-                    fulfilled_units=running_count,
-                    running_count=running_count,
-                    pending_count=pending_count,
-                    failed_count=failed_count,
-                )
-            elif pending_count > 0:
-                return ProviderFulfilment(
-                    state="in_progress",
-                    message=f"Instant fleet: {running_count}/{requested_count} running, {pending_count} pending",
-                    target_units=target_units,
-                    fulfilled_units=running_count,
-                    running_count=running_count,
-                    pending_count=pending_count,
-                    failed_count=failed_count,
-                )
-            # requires_async_polling=True for instant — pending state must be observed
-            elif running_count > 0:
-                return ProviderFulfilment(
-                    state="partial",
-                    message=f"Instant fleet: {running_count}/{requested_count} instance(s) running",
-                    target_units=target_units,
-                    fulfilled_units=running_count,
-                    running_count=running_count,
-                    pending_count=pending_count,
-                    failed_count=failed_count,
-                )
-            elif not instances:
-                return ProviderFulfilment(
-                    state="in_progress",
-                    message="Instant fleet: waiting for instances",
-                    target_units=target_units,
-                    fulfilled_units=0,
-                    running_count=0,
-                    pending_count=0,
-                    failed_count=0,
-                )
-            else:
-                return ProviderFulfilment(
-                    state="failed",
-                    message="Instant fleet: all instances failed",
-                    target_units=target_units,
-                    fulfilled_units=0,
-                    running_count=running_count,
-                    pending_count=pending_count,
-                    failed_count=failed_count,
-                )
-        else:
-            # Maintain / Request fleet: capacity-unit based fulfilment
-            return compute_capacity_based_fulfilment(
-                target_capacity=target_capacity,
-                fulfilled_capacity=fulfilled_capacity,
-                running_count=running_count,
-                pending_count=pending_count,
-                failed_count=failed_count,
-                provider_label="Fleet",
-            )
+        return compute_ec2fleet_fulfilment(
+            fleet_type=fleet_type,
+            instances=instances,
+            target_capacity=target_capacity,
+            fulfilled_capacity=fulfilled_capacity,
+            requested_count=requested_count,
+        )
 
     def release_hosts(
         self,
@@ -943,141 +883,4 @@ class EC2FleetHandler(AWSHandler, BaseContextMixin, FleetGroupingMixin):
     @classmethod
     def get_example_templates(cls) -> list[Template]:
         """Get example templates for EC2Fleet handler covering all fleet type x price type combinations."""
-        return [
-            # Instant fleet types
-            AWSTemplate(
-                template_id="EC2Fleet-Instant-OnDemand",
-                name="EC2 Fleet Instant On-Demand",
-                description="EC2 Fleet with instant fulfillment using on-demand instances",
-                provider_api="EC2Fleet",
-                machine_types={"t3.medium": 2, "t3.xlarge": 4},
-                max_instances=100,
-                price_type="ondemand",
-                subnet_ids=[],
-                security_group_ids=[],
-                tags={"Environment": "dev"},
-                metadata={"fleet_type": "instant"},
-            ),
-            AWSTemplate(
-                template_id="EC2Fleet-Instant-Spot",
-                name="EC2 Fleet Instant Spot",
-                description="EC2 Fleet with instant fulfillment using spot instances",
-                provider_api="EC2Fleet",
-                machine_types={"t3.medium": 2, "t3.xlarge": 4},
-                max_instances=100,
-                price_type="spot",
-                max_price=0.10,
-                subnet_ids=[],
-                security_group_ids=[],
-                tags={"Environment": "dev"},
-                metadata={"fleet_type": "instant"},
-            ),
-            AWSTemplate(
-                template_id="EC2Fleet-Instant-Mixed",
-                name="EC2 Fleet Instant Mixed",
-                description="EC2 Fleet with instant fulfillment using mixed pricing",
-                provider_api="EC2Fleet",
-                machine_types={"t3.medium": 2, "t3.xlarge": 4},
-                max_instances=100,
-                price_type="heterogeneous",
-                percent_on_demand=30,
-                allocation_strategy="diversified",
-                max_price=0.10,
-                subnet_ids=[],
-                security_group_ids=[],
-                tags={"Environment": "dev"},
-                metadata={"fleet_type": "instant", "percent_on_demand": 30},
-            ),
-            # Request fleet types
-            AWSTemplate(
-                template_id="EC2Fleet-Request-OnDemand",
-                name="EC2 Fleet Request On-Demand",
-                description="EC2 Fleet with request fulfillment using on-demand instances",
-                provider_api="EC2Fleet",
-                machine_types={"t3.medium": 2, "t3.xlarge": 4},
-                max_instances=100,
-                price_type="ondemand",
-                subnet_ids=[],
-                security_group_ids=[],
-                tags={"Environment": "test"},
-                metadata={"fleet_type": "request"},
-            ),
-            AWSTemplate(
-                template_id="EC2Fleet-Request-Spot",
-                name="EC2 Fleet Request Spot",
-                description="EC2 Fleet with request fulfillment using spot instances",
-                provider_api="EC2Fleet",
-                machine_types={"t3.medium": 2, "t3.xlarge": 4},
-                max_instances=100,
-                price_type="spot",
-                allocation_strategy="capacityOptimized",
-                max_price=0.10,
-                subnet_ids=[],
-                security_group_ids=[],
-                tags={"Environment": "test"},
-                metadata={"fleet_type": "request"},
-            ),
-            AWSTemplate(
-                template_id="EC2Fleet-Request-Mixed",
-                name="EC2 Fleet Request Mixed",
-                description="EC2 Fleet with request fulfillment using mixed pricing",
-                provider_api="EC2Fleet",
-                machine_types={"t3.medium": 2, "t3.large": 2, "t3.xlarge": 4},
-                max_instances=100,
-                price_type="heterogeneous",
-                percent_on_demand=40,
-                allocation_strategy="diversified",
-                allocation_strategy_on_demand=AWSAllocationStrategy.from_string("lowestPrice"),
-                max_price=0.10,
-                subnet_ids=[],
-                security_group_ids=[],
-                tags={"Environment": "test"},
-                metadata={"fleet_type": "request", "percent_on_demand": 40},
-            ),
-            # Maintain fleet types
-            AWSTemplate(
-                template_id="EC2Fleet-Maintain-OnDemand",
-                name="EC2 Fleet Maintain On-Demand",
-                description="EC2 Fleet with maintain capacity using on-demand instances",
-                provider_api="EC2Fleet",
-                machine_types={"t3.medium": 2, "t3.xlarge": 4},
-                max_instances=100,
-                price_type="ondemand",
-                subnet_ids=[],
-                security_group_ids=[],
-                tags={"Environment": "prod"},
-                metadata={"fleet_type": "maintain"},
-            ),
-            AWSTemplate(
-                template_id="EC2Fleet-Maintain-Spot",
-                name="EC2 Fleet Maintain Spot",
-                description="EC2 Fleet with maintain capacity using spot instances",
-                provider_api="EC2Fleet",
-                machine_types={"t3.medium": 2, "t3.xlarge": 4},
-                max_instances=100,
-                price_type="spot",
-                allocation_strategy="priceCapacityOptimized",
-                max_price=0.10,
-                subnet_ids=[],
-                security_group_ids=[],
-                tags={"Environment": "prod"},
-                metadata={"fleet_type": "maintain"},
-            ),
-            AWSTemplate(
-                template_id="EC2Fleet-Maintain-Mixed",
-                name="EC2 Fleet Maintain Mixed",
-                description="EC2 Fleet with maintain capacity using mixed pricing",
-                provider_api="EC2Fleet",
-                machine_types={"t3.medium": 2, "t3.large": 2, "t3.xlarge": 4},
-                max_instances=100,
-                price_type="heterogeneous",
-                percent_on_demand=50,
-                allocation_strategy="capacityOptimized",
-                allocation_strategy_on_demand=AWSAllocationStrategy.from_string("prioritized"),
-                max_price=0.10,
-                subnet_ids=[],
-                security_group_ids=[],
-                tags={"Environment": "prod"},
-                metadata={"fleet_type": "maintain", "percent_on_demand": 50},
-            ),
-        ]
+        return list(EC2_FLEET_EXAMPLE_TEMPLATES)

@@ -8,7 +8,6 @@ import sys
 from typing import TYPE_CHECKING, Any
 
 from orb.application.dto.interface_response import InterfaceResponse
-from orb.infrastructure.di.container import get_container
 from orb.infrastructure.error.decorators import handle_interface_exceptions
 from orb.interface.response_formatting_service import ResponseFormattingService
 
@@ -26,7 +25,7 @@ async def handle_list_storage_strategies(
         ListStorageStrategiesOrchestrator,
     )
 
-    container = get_container()
+    container = args._container
     orchestrator = container.get(ListStorageStrategiesOrchestrator)
     formatter = container.get(ResponseFormattingService)
 
@@ -46,7 +45,7 @@ async def handle_show_storage_config(
         GetStorageConfigOrchestrator,
     )
 
-    container = get_container()
+    container = args._container
     orchestrator = container.get(GetStorageConfigOrchestrator)
     formatter = container.get(ResponseFormattingService)
 
@@ -58,10 +57,10 @@ async def handle_show_storage_config(
 
 @handle_interface_exceptions(context="validate_storage_config", interface_type="cli")
 async def handle_validate_storage_config(  # type: ignore[return]
-    _args: argparse.Namespace,
+    args: argparse.Namespace,
 ) -> dict[str, Any] | InterfaceResponse:
     """Handle validate storage configuration operations."""
-    container = get_container()
+    container = args._container
     formatter = container.get(ResponseFormattingService)
     try:
         from orb.infrastructure.di.buses import QueryBus
@@ -87,7 +86,7 @@ async def handle_test_storage(
     """Handle test storage operations."""
     from orb.infrastructure.di.buses import QueryBus
 
-    container = get_container()
+    container = args._container
     query_bus = container.get(QueryBus)
     formatter = container.get(ResponseFormattingService)
 
@@ -108,7 +107,7 @@ async def handle_storage_health(
     args: argparse.Namespace,
 ) -> dict[str, Any] | InterfaceResponse:
     """Handle storage health operations."""
-    container = get_container()
+    container = args._container
     formatter = container.get(ResponseFormattingService)
     try:
         from orb.infrastructure.di.buses import QueryBus
@@ -145,7 +144,7 @@ async def handle_storage_migrate(
     The database URL is read from the ORB configuration so it respects
     whatever connection string the operator has configured.
     """
-    container = get_container()
+    container = args._container
     formatter = container.get(ResponseFormattingService)
 
     subcommand = getattr(args, "migrate_subcommand", "up")
@@ -190,17 +189,12 @@ async def handle_storage_migrate(
         try:
             from orb.config.manager import ConfigurationManager
             from orb.config.schemas.storage_schema import StorageConfig
+            from orb.infrastructure.storage.sql.registration import _build_connection_string
 
             cfg = container.get(ConfigurationManager)
             storage_cfg = cfg.get_typed(StorageConfig)
             sql_cfg = storage_cfg.sql_strategy
-            if sql_cfg.type == "sqlite":
-                db_url = f"sqlite:///{sql_cfg.name}"
-            elif sql_cfg.type == "postgresql":
-                db_url = (
-                    f"postgresql://{sql_cfg.username}:{sql_cfg.password}"
-                    f"@{sql_cfg.host}:{sql_cfg.port}/{sql_cfg.name}"
-                )
+            db_url = _build_connection_string(sql_cfg)
         except Exception:
             pass  # Fall back to alembic.ini default
 
@@ -263,10 +257,10 @@ async def handle_storage_migrate(
 
 @handle_interface_exceptions(context="storage_metrics", interface_type="cli")
 async def handle_storage_metrics(
-    _args: argparse.Namespace,
+    args: argparse.Namespace,
 ) -> dict[str, Any] | InterfaceResponse:
     """Handle storage metrics operations."""
-    container = get_container()
+    container = args._container
     formatter = container.get(ResponseFormattingService)
     try:
         from orb.infrastructure.di.buses import QueryBus

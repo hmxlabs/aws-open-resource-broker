@@ -66,6 +66,7 @@ class SQLQueryBuilder(QueryManager):
                 query_spec.get("data", {}),
                 query_spec.get("id_column", "id"),
                 query_spec.get("entity_id", ""),
+                query_spec.get("expected_version"),
             )
             return sql
         if query_type == "DELETE":
@@ -137,7 +138,7 @@ class SQLQueryBuilder(QueryManager):
         self, data: dict[str, Any], entity_id: str, id_column: str = "id", **kwargs
     ) -> tuple[str, dict[str, Any]]:
         """Build UPDATE query (implements QueryManager interface)."""
-        return self.build_update(data, id_column, entity_id)
+        return self.build_update(data, id_column, entity_id, kwargs.get("expected_version"))
 
     def build_delete_query(
         self, entity_id: str, id_column: str = "id", **kwargs
@@ -228,15 +229,37 @@ class SQLQueryBuilder(QueryManager):
         return query
 
     def build_update(
-        self, data: dict[str, Any], id_column: str, entity_id: str
+        self,
+        data: dict[str, Any],
+        id_column: str,
+        entity_id: str,
+        expected_version: Optional[int] = None,
     ) -> tuple[str, dict[str, Any]]:
         """
         Build UPDATE query with parameters.
+
+        When *expected_version* is provided the generated SQL includes an
+        optimistic-concurrency predicate::
+
+            ... WHERE {id_column} = :entity_id AND version = :expected_version
+
+        The version column is also bumped in the SET clause to the value
+        already present in *data* (``data["version"]``).  A caller that
+        receives ``rowcount == 0`` from this query knows the row was
+        concurrently modified and should raise ``ConcurrencyError``.
+
+        Non-versioned tables (i.e. tables whose column dict does not
+        contain ``"version"``) pass ``expected_version=None`` and receive
+        the original unconditional WHERE clause — no behaviour change.
 
         Args:
             data: Data to update
             id_column: Name of the ID column
             entity_id: ID of entity to update
+            expected_version: The version value currently stored in the DB
+                row.  When supplied, adds ``AND version = :expected_version``
+                to the WHERE clause (compare-and-swap).  Pass ``None`` to
+                keep the legacy unconditional update behaviour.
 
         Returns:
             Tuple of (query, parameters)
@@ -255,13 +278,22 @@ class SQLQueryBuilder(QueryManager):
             self._validate_identifier(column)
 
         set_clauses = [f"{col} = :{col}" for col in filtered_data.keys()]
-        query = (
-            f"UPDATE {self.table_name} SET {', '.join(set_clauses)} WHERE {id_column} = :entity_id"  # nosec B608 - table_name, id_column and set columns validated via _validate_identifier; values are parameterized
-        )
 
-        # Add entity_id to parameters
+        if expected_version is not None:
+            # CAS path: add version predicate so only the row with the expected
+            # version is touched.  A zero rowcount signals a concurrent write won.
+            query = (
+                f"UPDATE {self.table_name} SET {', '.join(set_clauses)} "  # nosec B608 - table_name, id_column and set columns validated via _validate_identifier; values are parameterized
+                f"WHERE {id_column} = :entity_id AND version = :expected_version"
+            )
+        else:
+            query = f"UPDATE {self.table_name} SET {', '.join(set_clauses)} WHERE {id_column} = :entity_id"  # nosec B608 - table_name, id_column and set columns validated via _validate_identifier; values are parameterized
+
+        # Add entity_id (and optional version predicate) to parameters
         parameters = filtered_data.copy()
         parameters["entity_id"] = entity_id
+        if expected_version is not None:
+            parameters["expected_version"] = expected_version
 
         self.logger.debug("Built UPDATE query for %s", self.table_name)
         return query, parameters

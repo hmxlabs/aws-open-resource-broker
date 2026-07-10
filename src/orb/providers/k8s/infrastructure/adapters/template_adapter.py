@@ -53,41 +53,47 @@ _QUANTITY = re.compile(
 )
 
 
+def _compute_supported_fields() -> list[str]:
+    """Derive the set of operator-facing k8s-specific template fields from the domain model.
+
+    Computed once at import time by diffing ``K8sTemplate.model_fields``
+    against ``Template.model_fields`` and removing internal-only or
+    intentionally-excluded fields.  This keeps the adapter in sync with the
+    domain model automatically — adding a field to ``K8sTemplate`` makes it
+    visible here without a separate hand-edit.
+
+    Excluded fields (documented exceptions):
+    - ``provider_config``  — internal round-trip carrier, not an operator surface.
+    - ``namespaces``       — multi-namespace scheduling list; excluded to preserve
+                             backward-compat behaviour of ``get_supported_fields()``.
+    - ``native_spec``      — full-replacement escape hatch; excluded because it is
+                             not a "normal" typed operator field (it bypasses the
+                             spec builders entirely).
+    """
+    from orb.domain.template.template_aggregate import Template
+    from orb.providers.k8s.domain.template.k8s_template import K8sTemplate
+
+    _INTERNAL_ONLY = {"provider_config"}
+    # Fields intentionally excluded from the operator-facing surface:
+    # - ``namespaces``: multi-namespace scheduling list (no HF key; handled
+    #   separately by the scheduler layer).
+    # - ``native_spec``: full-replacement escape hatch that bypasses spec
+    #   builders; not a "normal" operator field.
+    _EXCLUDED = {"namespaces", "native_spec"}
+
+    parent_fields = set(Template.model_fields.keys())
+    k8s_specific = set(K8sTemplate.model_fields.keys()) - parent_fields - _INTERNAL_ONLY - _EXCLUDED
+    return sorted(k8s_specific)
+
+
+# Computed once at import time; module-level constant to avoid repeating the
+# introspection call.  ``cached_property`` cannot live on a plain class that
+# inherits from a non-descriptor base, so a module-level constant is used.
+_SUPPORTED_FIELDS: list[str] = _compute_supported_fields()
+
+
 class K8sTemplateAdapter(TemplateAdapterPort):
     """Kubernetes implementation of :class:`TemplateAdapterPort`."""
-
-    # Fields the adapter recognises on :class:`K8sTemplate` (typed
-    # kubernetes-specific extensions).  Generic fields like ``image_id``
-    # and ``tags`` come from the parent :class:`Template` and are not
-    # listed here.  Used by :meth:`get_supported_fields` so the CLI /
-    # docs can introspect the surface without reaching into the DTO
-    # config class.
-    _SUPPORTED_FIELDS: list[str] = [
-        "namespace",
-        "runtime_class",
-        "node_selector",
-        "tolerations",
-        "service_account",
-        "resource_requests",
-        "resource_limits",
-        "completions",
-        "parallelism",
-        "annotations",
-        "env",
-        "volume_mounts",
-        "volumes",
-        "command",
-        "args",
-        "image_pull_secret",
-        "pod_spec_override",
-        "priority_class_name",
-        "termination_grace_period_seconds",
-        "readiness_probe",
-        "liveness_probe",
-        "security_context",
-        "ttl_seconds_after_finished",
-        "active_deadline_seconds",
-    ]
 
     def __init__(
         self,
@@ -137,7 +143,7 @@ class K8sTemplateAdapter(TemplateAdapterPort):
 
     def get_supported_fields(self) -> list[str]:
         """Return the list of kubernetes-specific template fields."""
-        return self._SUPPORTED_FIELDS.copy()
+        return _SUPPORTED_FIELDS.copy()
 
     def validate_field_values(self, template: Template) -> dict[str, str]:
         """Validate kubernetes-specific field values on *template*.
@@ -240,7 +246,7 @@ class K8sTemplateAdapter(TemplateAdapterPort):
             "adapter_name": "K8sTemplateAdapter",
             "provider_type": "k8s",
             "supported_apis": self.get_supported_provider_apis(),
-            "supported_fields": self._SUPPORTED_FIELDS,
+            "supported_fields": _SUPPORTED_FIELDS,
             "features": [
                 "field_validation",
                 "resource_quantity_validation",

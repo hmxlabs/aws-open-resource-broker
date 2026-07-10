@@ -28,9 +28,16 @@ def _register_application_services(container: DIContainer) -> None:
 
     def _create_provider_registry(c):
         from orb.domain.base.ports.configuration_port import ConfigurationPort
+        from orb.infrastructure.services.provider_selection_service import ProviderSelectionService
 
         registry = get_provider_registry()
-        registry._config_port = c.get(ConfigurationPort)
+        config_port = c.get(ConfigurationPort)
+        registry._config_port = config_port
+        # Wire the selection service so the registry delegates to it rather than
+        # constructing a bare instance lazily (ensures the same config_port is used).
+        registry._selection_service = ProviderSelectionService(
+            registry=registry, config_port=config_port
+        )
         return registry
 
     container.register_singleton(ProviderRegistryPort, _create_provider_registry)
@@ -82,6 +89,16 @@ def _register_provider_utility_services(container: DIContainer) -> None:
             continue
         try:
             mod = importlib.import_module(mod_path)
+
+            # Call initialize_<name>_provider to populate satellite registries
+            # (CLISpecRegistry, FieldMappingRegistry, DefaultsLoaderRegistry,
+            # ProviderSettingsRegistry, TemplateExtensionRegistry).  We pass
+            # template_factory=None here; the DI services step below wires the
+            # template adapter separately once TemplateFactory is available.
+            init_fn = getattr(mod, f"initialize_{name}_provider", None)
+            if init_fn is not None:
+                init_fn(template_factory=None, logger=None)
+                logger.debug("%s satellite registries populated via initialize", name)
 
             # Register DI utility services (e.g. AWS template adapter, clients)
             di_fn = getattr(mod, f"register_{name}_services_with_di", None)

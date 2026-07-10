@@ -10,6 +10,7 @@ import pytest
 
 from orb.domain.base.exceptions import (
     BusinessRuleViolationError,
+    ConcurrencyError,
     ConfigurationError,
     EntityNotFoundError,
     InfrastructureError,
@@ -27,7 +28,7 @@ from orb.domain.template.exceptions import (
     TemplateNotFoundError,
     TemplateValidationError,
 )
-from orb.infrastructure.error.exception_handler import ErrorCategory, ErrorCode
+from orb.infrastructure.error.categories import ErrorCategory, ErrorCode
 from orb.infrastructure.error.http_response_handler import HTTPErrorResponseHandler
 
 
@@ -182,6 +183,25 @@ class TestHTTPErrorResponseHandler:
         assert response.category == ErrorCategory.INTERNAL
         assert response.details == {"error_type": "RuntimeError"}
         assert response.http_status == HTTPStatus.INTERNAL_SERVER_ERROR
+
+    def test_concurrency_error_http(self, handler):
+        """Test ConcurrencyError maps to HTTP 409 CONFLICT."""
+        exception = ConcurrencyError(
+            "Concurrent write detected for entity 'req-123'",
+            details={"entity_id": "req-123", "expected_version": 2, "new_version": 3},
+        )
+
+        response = handler.handle_error_for_http(exception)
+
+        assert response.error_code == "CONCURRENCY_ERROR"
+        assert response.message == "The resource was modified concurrently; please retry."
+        assert response.category == ErrorCategory.BUSINESS_RULE
+        assert response.http_status == HTTPStatus.CONFLICT
+        assert response.details == {
+            "entity_id": "req-123",
+            "expected_version": 2,
+            "new_version": 3,
+        }
 
     def test_inheritance_handling(self, handler):
         """Test that inheritance hierarchy is handled correctly."""

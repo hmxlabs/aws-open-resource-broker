@@ -15,7 +15,7 @@ class CreateRequestCommand(BaseCommand):
     """Command to create a new request.
 
     CQRS: Commands should not return data. After executing this command,
-    use GetRequestQuery with the request_id to retrieve the created request.
+    use SyncAndGetRequestQuery with the request_id to retrieve the created request.
     """
 
     request_id: Optional[str] = None
@@ -87,14 +87,6 @@ class CleanupOldRequestsCommand(BaseCommand):
     # Store results for caller to access after command execution
     requests_cleaned: Optional[int] = None
     request_ids_found: Optional[list[str]] = None
-
-
-class CleanupTerminatedMachinesCommand(Command, BaseModel):
-    """Command to clean up terminated machines."""
-
-    model_config = ConfigDict(frozen=True)
-
-    age_hours: int = 24
 
 
 class CleanupAllResourcesCommand(BaseCommand):
