@@ -323,11 +323,16 @@ class SQLStorageStrategy(BaseStorageStrategy):
                         expected_version=expected_version,
                     )
 
+                    affected_rows: int = -1
                     with self.connection_manager.get_session() as session:
                         result = session.execute(text(query), params)
+                        # Capture rowcount INSIDE the session block: SQLAlchemy 2.0
+                        # does not guarantee cursor.rowcount survives a commit on
+                        # all backends (e.g. asyncpg, psycopg3 in autocommit mode).
+                        affected_rows = result.rowcount
                         session.commit()
 
-                    if expected_version is not None and result.rowcount == 0:
+                    if expected_version is not None and affected_rows == 0:
                         raise ConcurrencyError(
                             f"Concurrent write detected for entity '{entity_id}': "
                             f"expected version {expected_version} in DB but row was "
