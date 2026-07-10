@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 
-from orb.application.dto.queries import GetRequestQuery, ListActiveRequestsQuery
+from orb.application.dto.queries import SyncAndGetRequestQuery, SyncAndListActiveRequestsQuery
 from orb.application.services.orchestration.get_request_status import GetRequestStatusOrchestrator
 
 # Check if FastAPI is available
@@ -136,7 +136,7 @@ class TestRequestStatusOrchestratorBehaviour:
         )
 
         query_bus.execute.assert_awaited_once()
-        assert isinstance(query_bus.execute.call_args.args[0], GetRequestQuery)
+        assert isinstance(query_bus.execute.call_args.args[0], SyncAndGetRequestQuery)
         assert len(result.requests) == 1
 
     @pytest.mark.asyncio
@@ -154,7 +154,7 @@ class TestRequestStatusOrchestratorBehaviour:
         )
 
         query_bus.execute.assert_awaited_once()
-        assert isinstance(query_bus.execute.call_args.args[0], ListActiveRequestsQuery)
+        assert isinstance(query_bus.execute.call_args.args[0], SyncAndListActiveRequestsQuery)
         assert len(result.requests) == 1
 
     @pytest.mark.asyncio
@@ -170,7 +170,7 @@ class TestRequestStatusOrchestratorBehaviour:
         )
 
         executed_query = query_bus.execute.call_args.args[0]
-        assert isinstance(executed_query, GetRequestQuery)
+        assert isinstance(executed_query, SyncAndGetRequestQuery)
         assert executed_query.verbose is True
 
 

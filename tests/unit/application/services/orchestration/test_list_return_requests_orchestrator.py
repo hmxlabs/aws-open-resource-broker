@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from orb.application.dto.queries import ListReturnRequestsQuery
+from orb.application.dto.queries import SyncAndListReturnRequestsQuery
 from orb.application.services.orchestration.dtos import (
     ListReturnRequestsInput,
     ListReturnRequestsOutput,
@@ -56,7 +56,7 @@ class TestListReturnRequestsOrchestrator:
         await orchestrator.execute(ListReturnRequestsInput())
         mock_query_bus.execute.assert_called_once()
         query = mock_query_bus.execute.call_args[0][0]
-        assert isinstance(query, ListReturnRequestsQuery)
+        assert isinstance(query, SyncAndListReturnRequestsQuery)
 
     @pytest.mark.asyncio
     async def test_execute_passes_status_filter(self, orchestrator, mock_query_bus):

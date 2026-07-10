@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from orb.application.dto.queries import ListActiveRequestsQuery
+from orb.application.dto.queries import SyncAndListActiveRequestsQuery
 from orb.application.request.queries import ListRequestsQuery
 from orb.application.services.orchestration.dtos import (
     ListRequestsInput,
@@ -65,7 +65,7 @@ class TestListRequestsOrchestrator:
         input = ListRequestsInput(sync=True)
         await orchestrator.execute(input)
         query = mock_query_bus.execute.call_args[0][0]
-        assert isinstance(query, ListActiveRequestsQuery)
+        assert isinstance(query, SyncAndListActiveRequestsQuery)
 
     @pytest.mark.asyncio
     async def test_execute_sync_true_passes_limit_and_all_resources(
@@ -126,7 +126,7 @@ class TestListRequestsOrchestrator:
         input = ListRequestsInput(sync=True, status="pending")
         await orchestrator.execute(input)
         query = mock_query_bus.execute.call_args[0][0]
-        assert isinstance(query, ListActiveRequestsQuery)
+        assert isinstance(query, SyncAndListActiveRequestsQuery)
         assert query.status == "pending"
 
     @pytest.mark.asyncio
@@ -135,7 +135,7 @@ class TestListRequestsOrchestrator:
         input = ListRequestsInput(sync=True, status=None)
         await orchestrator.execute(input)
         query = mock_query_bus.execute.call_args[0][0]
-        assert isinstance(query, ListActiveRequestsQuery)
+        assert isinstance(query, SyncAndListActiveRequestsQuery)
         assert query.status is None
 
     @pytest.mark.asyncio

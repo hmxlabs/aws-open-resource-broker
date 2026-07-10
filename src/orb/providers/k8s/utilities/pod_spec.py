@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Any, Optional
 
 from orb.domain.request.aggregate import Request
 from orb.domain.template.template_aggregate import Template
+from orb.infrastructure.utilities.common.deep_merge import deep_merge
 from orb.providers.k8s.configuration.config import K8sProviderConfig
 from orb.providers.k8s.domain.template.k8s_template import (
     K8sProbe,
@@ -114,21 +115,6 @@ def request_id_label_selector(
 # ---------------------------------------------------------------------------
 
 
-def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
-    """Deep-merge ``override`` onto ``base`` (override wins on leaves).
-
-    Nested dicts merge recursively; lists / scalars replace wholesale.
-    ``base`` is not mutated.
-    """
-    out: dict[str, Any] = dict(base)
-    for key, value in override.items():
-        if key in out and isinstance(out[key], dict) and isinstance(value, dict):
-            out[key] = _deep_merge(out[key], value)
-        else:
-            out[key] = value
-    return out
-
-
 def apply_pod_spec_override(pod: V1Pod, override: Optional[dict[str, Any]]) -> V1Pod:
     """Deep-merge ``override`` onto the pod's ``spec`` payload.
 
@@ -167,7 +153,7 @@ def apply_pod_spec_override(pod: V1Pod, override: Optional[dict[str, Any]]) -> V
 
     raw_spec: Any = pod.spec.to_dict() if hasattr(pod.spec, "to_dict") else pod.spec
     spec_dict: dict[str, Any] = dict(raw_spec) if raw_spec else {}
-    merged = _deep_merge(spec_dict, normalised_override)
+    merged = deep_merge(spec_dict, normalised_override)
     pod.spec = V1PodSpec(**merged)
 
     # Post-merge assertion: the deep-merge must not have silently clobbered

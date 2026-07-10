@@ -4,7 +4,6 @@ import asyncio
 from typing import TYPE_CHECKING, Any
 
 from orb.application.dto.interface_response import InterfaceResponse
-from orb.infrastructure.di.container import get_container
 from orb.infrastructure.error.decorators import handle_interface_exceptions
 from orb.interface.response_formatting_service import ResponseFormattingService
 
@@ -29,7 +28,7 @@ async def handle_get_machine_status(
     from orb.application.services.orchestration.get_machine import GetMachineOrchestrator
     from orb.application.services.orchestration.list_machines import ListMachinesOrchestrator
 
-    container = get_container()
+    container = args._container
     formatter = container.get(ResponseFormattingService)
 
     has_all = getattr(args, "all", False)
@@ -107,7 +106,7 @@ async def handle_list_machines(
     from orb.application.services.orchestration.dtos import ListMachinesInput
     from orb.application.services.orchestration.list_machines import ListMachinesOrchestrator
 
-    container = get_container()
+    container = args._container
     orchestrator = container.get(ListMachinesOrchestrator)
     formatter = container.get(ResponseFormattingService)
 
@@ -186,7 +185,7 @@ async def handle_stop_machines(
     from orb.application.services.orchestration.dtos import StopMachinesInput
     from orb.application.services.orchestration.stop_machines import StopMachinesOrchestrator
 
-    container = get_container()
+    container = args._container
     orchestrator = container.get(StopMachinesOrchestrator)
     formatter = container.get(ResponseFormattingService)
     result = await orchestrator.execute(
@@ -249,7 +248,7 @@ async def handle_start_machines(
     from orb.application.services.orchestration.dtos import StartMachinesInput
     from orb.application.services.orchestration.start_machines import StartMachinesOrchestrator
 
-    container = get_container()
+    container = args._container
     orchestrator = container.get(StartMachinesOrchestrator)
     formatter = container.get(ResponseFormattingService)
     result = await orchestrator.execute(
@@ -278,7 +277,7 @@ async def handle_get_machine(
     from orb.application.services.orchestration.dtos import GetMachineInput
     from orb.application.services.orchestration.get_machine import GetMachineOrchestrator
 
-    container = get_container()
+    container = args._container
     orchestrator = container.get(GetMachineOrchestrator)
     formatter = container.get(ResponseFormattingService)
 
@@ -295,3 +294,38 @@ async def handle_get_machine(
         else vars(result.machine)
     )
     return formatter.format_machine_operation(raw)
+
+
+@handle_interface_exceptions(context="get_multiple_machines", interface_type="cli")
+async def handle_get_multiple_machines(
+    args: "argparse.Namespace",
+) -> dict[str, Any] | InterfaceResponse:
+    """Fetch multiple machines by ID via GetMultipleMachinesQuery through the query bus."""
+    from orb.application.dto.bulk_queries import GetMultipleMachinesQuery
+    from orb.infrastructure.di.buses import QueryBus
+
+    container = args._container
+    machine_ids: list[str] = []
+    if hasattr(args, "machine_ids") and args.machine_ids:
+        machine_ids.extend(args.machine_ids)
+    if hasattr(args, "flag_machine_ids") and args.flag_machine_ids:
+        machine_ids.extend(args.flag_machine_ids)
+    if hasattr(args, "flag_ids") and args.flag_ids:
+        machine_ids.extend(args.flag_ids)
+
+    if not machine_ids:
+        return {"error": "No machine IDs provided", "message": "At least one machine ID required"}
+
+    query = GetMultipleMachinesQuery(
+        machine_ids=[str(mid) for mid in machine_ids],
+        include_requests=bool(getattr(args, "include_requests", True)),
+    )
+    result = await container.get(QueryBus).execute(query)
+    return {
+        "machines": [
+            m.model_dump() if hasattr(m, "model_dump") else vars(m) for m in result.machines
+        ],
+        "found_count": result.found_count,
+        "not_found_ids": result.not_found_ids,
+        "total_requested": result.total_requested,
+    }

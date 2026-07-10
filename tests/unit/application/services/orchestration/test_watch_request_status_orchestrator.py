@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from orb.application.dto.queries import GetRequestQuery, GetTemplateQuery
+from orb.application.dto.queries import GetTemplateQuery, SyncAndGetRequestQuery
 from orb.application.services.orchestration.dtos import (
     WatchRequestStatusInput,
     WatchRequestStatusOutput,
@@ -70,7 +70,7 @@ class TestWatchRequestStatusOrchestrator:
         mock_query_bus.execute.return_value = _make_request_dto()
         await orchestrator.execute(WatchRequestStatusInput(request_id="req-123"))
         query = mock_query_bus.execute.call_args_list[0][0][0]
-        assert isinstance(query, GetRequestQuery)
+        assert isinstance(query, SyncAndGetRequestQuery)
         assert query.skip_cache is True
         assert query.lightweight is False
 
@@ -153,7 +153,7 @@ class TestWatchRequestStatusOrchestrator:
             _make_machine_ref(instance_type="t3.large", vcpus=2, price_type="ondemand"),
             _make_machine_ref(instance_type="t3.medium", vcpus=2, price_type="spot"),
         ]
-        # First call: GetRequestQuery, second call: GetTemplateQuery
+        # First call: SyncAndGetRequestQuery, second call: GetTemplateQuery
         template = MagicMock()
         template.machine_types = {"t3.large": 2, "t3.medium": 1}
         mock_query_bus.execute.side_effect = [

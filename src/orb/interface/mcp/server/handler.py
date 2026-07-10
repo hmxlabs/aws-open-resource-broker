@@ -5,7 +5,6 @@ import sys
 from typing import Any
 
 from orb.bootstrap import Application
-from orb.infrastructure.di.container import get_container
 from orb.infrastructure.error.decorators import handle_interface_exceptions
 from orb.infrastructure.logging.logger import get_logger
 
@@ -56,8 +55,11 @@ async def handle_mcp_serve(args) -> dict[str, Any]:
     if not await app.initialize():
         raise RuntimeError("Failed to initialize ORB application for MCP server")
 
-    # Create MCP server instance with the initialized DI container
-    mcp_server = OpenResourceBrokerMCPServer(app=get_container())
+    # Pass the already-initialised container from the Application instance so
+    # the MCP server uses the same wired container rather than calling
+    # get_container() again (service-locator avoided).
+    app._ensure_container()
+    mcp_server = OpenResourceBrokerMCPServer(app=app._container)
 
     try:
         if stdio_mode:

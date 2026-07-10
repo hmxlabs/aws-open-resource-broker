@@ -49,6 +49,16 @@ class TemplateExtensionRegistry:
         cls._extension_instances[provider_type] = extension_instance
 
     @classmethod
+    def get_or_none(cls, provider_type: str) -> Optional[type[BaseModel]]:
+        """Return the extension *class* for *provider_type*, or ``None`` if not registered.
+
+        Explicit optional lookup used by the provider-completeness assertion and
+        any other caller that documents "no extension is acceptable".  Delegates
+        to :meth:`get_extension_class`.
+        """
+        return cls.get_extension_class(provider_type)
+
+    @classmethod
     def get_extension_class(cls, provider_type: str) -> Optional[type[BaseModel]]:
         """Get extension configuration class for a provider.
 

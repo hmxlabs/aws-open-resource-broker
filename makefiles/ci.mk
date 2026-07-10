@@ -42,8 +42,12 @@ ci-arch-file-sizes:  ## Check file size compliance
 	@echo "Running file size checks..."
 	./dev-tools/quality/dev_tools_runner.py check-file-sizes --warn-only
 
+ci-arch-lint-imports: dev-install  ## Run import-linter layer-boundary contracts
+	@echo "Running import-linter layer-boundary checks..."
+	$(call run-tool,lint-imports,)
+
 # Composite target
-ci-architecture: ci-arch-cqrs ci-arch-clean ci-arch-imports ci-arch-file-sizes  ## Run all architecture checks
+ci-architecture: ci-arch-cqrs ci-arch-clean ci-arch-imports ci-arch-file-sizes ci-arch-lint-imports  ## Run all architecture checks
 
 # Individual security targets (with tool names)
 ci-security-bandit:  ## Run Bandit security scan

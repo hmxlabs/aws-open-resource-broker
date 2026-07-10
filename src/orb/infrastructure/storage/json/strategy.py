@@ -1,6 +1,7 @@
 """JSON storage strategy implementation using componentized architecture."""
 
 import json
+import os
 from typing import Any, Optional, cast
 
 from orb.infrastructure.logging.logger import get_logger
@@ -62,6 +63,29 @@ class JSONStorageStrategy(BaseStorageStrategy):
         self._cache_valid = False
 
         self.logger.debug("Initialized JSON storage strategy for %s at %s", entity_type, file_path)
+
+        # Warn operators when the process is running with multiple workers so
+        # they know the JSON backend is not suited for that topology.
+        # We inspect the environment variable set by common ASGI/WSGI servers
+        # (Uvicorn, Gunicorn) rather than importing the full config object to
+        # avoid a circular-import risk.  If multi-worker config access is ever
+        # wired here more directly the env-var check can be replaced.
+        _worker_hint = os.environ.get("WEB_CONCURRENCY", "") or os.environ.get(
+            "UVICORN_WORKERS", ""
+        )
+        try:
+            _workers = int(_worker_hint)
+        except (ValueError, TypeError):
+            _workers = 1
+        if _workers > 1:
+            self.logger.warning(
+                "JSONStorageStrategy: %d workers detected (WEB_CONCURRENCY/UVICORN_WORKERS). "
+                "The JSON file backend uses single-host flock-based serialization and is NOT "
+                "safe for multi-instance (multi-host) deployments. "
+                "Use PostgreSQL storage (strategy: sql) for multi-worker or multi-replica "
+                "configurations.",
+                _workers,
+            )
 
     def is_healthy(self) -> tuple[bool, dict[str, Any]]:
         """Verify the JSON file is reachable, parses, and has the expected shape.
@@ -395,37 +419,66 @@ class JSONStorageStrategy(BaseStorageStrategy):
                 return {}
 
     def _save_data(self, entity_data: dict[str, dict[str, Any]]) -> None:
-        """Save data to file with hierarchical structure support."""
+        """Save data to file with hierarchical structure support.
+
+        Cross-process write serialization
+        ----------------------------------
+        The read-modify-write cycle (read full file → merge entity section →
+        atomic write) is wrapped in an ``exclusive_write_lock`` that uses
+        ``fcntl.flock(LOCK_EX)`` on a sibling ``.lock`` file.  This serializes
+        concurrent CLI invocations on the *same host* so neither process clobbers
+        the other's record.
+
+        IMPORTANT: the file re-read MUST happen *inside* the lock.  Reading
+        before acquiring the lock would preserve the stale-snapshot race even
+        though the subsequent write is protected.
+
+        LIMITATION: flock is unreliable on NFS / networked filesystems.
+        For multi-host deployments use PostgreSQL storage (strategy: sql).
+        """
         try:
-            # Create backup before saving
+            # Create backup before entering the critical section (safe to do
+            # outside the lock — worst case we back up a slightly stale copy,
+            # which is acceptable for a best-effort backup).
             self.file_manager.create_backup()
 
-            # Load full file structure to preserve other entity types
-            try:
-                content = self.file_manager.read_file()
-                if content.strip():
-                    full_data = self.serializer.deserialize(content)
-                else:
+            # --- cross-process critical section ----------------------------
+            # Sequence inside the lock:
+            #   1. Re-read the current file contents (fresh, not a cached snapshot)
+            #   2. Merge our entity section into the full hierarchical structure
+            #   3. Atomic write (os.replace via tempfile)
+            # Step 1 MUST be inside the lock; moving it outside reintroduces
+            # the stale-snapshot lost-update race.
+            with self.file_manager.exclusive_write_lock():
+                # Step 1: read current file contents under the exclusive lock
+                try:
+                    content = self.file_manager.read_file()
+                    if content.strip():
+                        full_data = self.serializer.deserialize(content)
+                    else:
+                        full_data = {}
+                except Exception as e:
+                    self.logger.error(
+                        "Cannot read existing storage file before save, "
+                        "aborting to prevent data loss: %s",
+                        e,
+                    )
+                    raise
+
+                # Ensure full_data is a dictionary
+                if not isinstance(full_data, dict):
                     full_data = {}
-            except Exception as e:
-                self.logger.error(
-                    "Cannot read existing storage file before save, aborting to prevent data loss: %s",
-                    e,
-                )
-                raise
 
-            # Ensure full_data is a dictionary
-            if not isinstance(full_data, dict):
-                full_data = {}
+                # Step 2: merge — update only our entity type section in the
+                # hierarchical structure, preserving all other entity types.
+                full_data[self.entity_type] = entity_data
 
-            # Update only our entity type section in the hierarchical structure
-            full_data[self.entity_type] = entity_data
+                # Step 3: serialize and atomic-write the complete structure
+                serialized = self.serializer.serialize(full_data)
+                self.file_manager.write_file(serialized)
+            # --- end critical section --------------------------------------
 
-            # Serialize and save the complete hierarchical structure
-            content = self.serializer.serialize(full_data)
-            self.file_manager.write_file(content)
-
-            # Update cache with entity-specific data
+            # Update in-memory cache with entity-specific data
             self._data_cache = entity_data
             self._cache_valid = True
 

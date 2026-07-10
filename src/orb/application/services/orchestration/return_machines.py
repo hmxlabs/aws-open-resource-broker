@@ -5,10 +5,14 @@ from __future__ import annotations
 import asyncio
 
 from orb.application.dto.commands import CreateReturnRequestCommand
-from orb.application.dto.queries import GetRequestQuery, ListMachinesQuery
+from orb.application.dto.queries import ListMachinesQuery, SyncAndGetRequestQuery
 from orb.application.ports.command_bus_port import CommandBusPort
 from orb.application.ports.query_bus_port import QueryBusPort
-from orb.application.services.orchestration.base import OrchestratorBase
+from orb.application.services.orchestration.base import (
+    MAX_CONSECUTIVE_POLL_ERRORS as _MAX_CONSECUTIVE_POLL_ERRORS,
+    TERMINAL_STATUSES as _TERMINAL_STATUSES,
+    OrchestratorBase,
+)
 from orb.application.services.orchestration.dtos import (
     Paginated,
     ReturnMachinesInput,
@@ -16,18 +20,6 @@ from orb.application.services.orchestration.dtos import (
 )
 from orb.domain.base.exceptions import ApplicationError
 from orb.domain.base.ports.logging_port import LoggingPort
-
-_TERMINAL_STATUSES = {
-    "completed",
-    "complete",
-    "failed",
-    "error",
-    "cancelled",
-    "canceled",
-    "partial",
-    "timeout",
-}
-_MAX_CONSECUTIVE_POLL_ERRORS = 3
 
 # Rank semantics: 0=unknown/no-op, 1=completed, 2=failed/cancelled/error, 3=partial/timeout
 _STATUS_RANK = {
@@ -121,13 +113,13 @@ class ReturnMachinesOrchestrator(OrchestratorBase[ReturnMachinesInput, ReturnMac
         )
 
     async def _poll_until_terminal(self, request_id: str, timeout_seconds: int) -> str:
-        """Poll GetRequestQuery until terminal status or timeout."""
+        """Poll SyncAndGetRequestQuery until terminal status or timeout."""
         elapsed = 0
         interval = 2
         consecutive_errors = 0
         while elapsed < timeout_seconds:
             try:
-                query = GetRequestQuery(request_id=request_id, lightweight=True)
+                query = SyncAndGetRequestQuery(request_id=request_id, lightweight=True)
                 result = await self._query_bus.execute(query)
                 consecutive_errors = 0
                 status_val = getattr(result, "status", None)

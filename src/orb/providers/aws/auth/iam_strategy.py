@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING, Any, Optional
 from botocore.config import Config
 from botocore.exceptions import ClientError, NoCredentialsError
 
-from orb.domain.base.dependency_injection import injectable
 from orb.domain.base.ports import LoggingPort
 from orb.infrastructure.adapters.ports.auth import (
     AuthContext,
@@ -16,6 +15,7 @@ from orb.infrastructure.adapters.ports.auth import (
     AuthResult,
     AuthStatus,
 )
+from orb.infrastructure.di.injectable import injectable
 from orb.providers.aws.session_factory import AWSSessionFactory
 
 if TYPE_CHECKING:
@@ -244,6 +244,13 @@ class IAMAuthStrategy(AuthPort):
             getattr(iam_cfg, "assume_permissions", False) if iam_cfg is not None else False
         )
 
+        # Intentional service-locator: from_auth_config is called by the
+        # AuthRegistry as ``strategy_factory.from_auth_config(auth_config)``
+        # with a fixed signature — no logger parameter can be threaded through
+        # without changing the AuthRegistry protocol (a broad, cross-cutting
+        # change).  The DI container is therefore queried here as a best-effort
+        # bootstrap; a plain LoggingAdapter fallback ensures the classmethod
+        # remains self-contained when the container is not yet initialised.
         try:
             from orb.domain.base.ports import LoggingPort
             from orb.infrastructure.di.container import get_container

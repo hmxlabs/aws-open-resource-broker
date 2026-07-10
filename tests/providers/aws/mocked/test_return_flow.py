@@ -2,9 +2,9 @@
 
 Exercises the complete lifecycle through the application layer CQRS buses:
   CreateRequestCommand → handler.acquire_hosts()  [instances created in moto]
-  GetRequestQuery      → handler.check_hosts_status()  [instances running]
+  SyncAndGetRequestQuery      → handler.check_hosts_status()  [instances running]
   CreateReturnRequestCommand → handler.release_hosts()  [instances terminated]
-  GetRequestQuery(return_request_id) → status reflects termination
+  SyncAndGetRequestQuery(return_request_id) → status reflects termination
 
 Moto fully supports RunInstances instance lifecycle (launch, describe, terminate),
 making it the only provider suitable for end-to-end return-flow testing.
@@ -21,7 +21,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 
 from orb.application.dto.commands import CreateRequestCommand, CreateReturnRequestCommand
-from orb.application.dto.queries import GetRequestQuery
+from orb.application.dto.queries import SyncAndGetRequestQuery
 from orb.application.ports.command_bus_port import CommandBusPort
 from orb.application.ports.query_bus_port import QueryBusPort
 
@@ -134,8 +134,8 @@ def _acquire(command_bus, template_id: str, count: int = 1) -> str:
 
 
 def _get_request(query_bus, request_id: str):
-    """Dispatch GetRequestQuery and return the RequestDTO."""
-    query = GetRequestQuery(request_id=request_id)
+    """Dispatch SyncAndGetRequestQuery and return the RequestDTO."""
+    query = SyncAndGetRequestQuery(request_id=request_id)
     return asyncio.run(query_bus.execute(query))
 
 

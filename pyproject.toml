@@ -61,10 +61,6 @@ dependencies = [
     "boto3>=1.42.21",
     "botocore>=1.42.21",
     "psutil>=5.9.0", # Required by the system health check (CPU/memory)
-    "opentelemetry-instrumentation-click>=0.64b0,<1.0",
-    "opentelemetry-instrumentation-system-metrics>=0.64b0,<1.0",
-    "opentelemetry-instrumentation-logging>=0.64b0,<1.0",
-    "opentelemetry-instrumentation-botocore>=0.64b0,<1.0",
 ]
 
 [project.optional-dependencies]
@@ -221,6 +217,7 @@ ci = [
     "pyright>=1.1.408,<2.0.0",
     "bandit>=1.7.5,<2.0.0",
     "bandit-sarif-formatter>=1.1.1,<2.0.0",
+    "import-linter>=2.0,<3.0.0",
     # Testing Framework
     "pytest>=7.4.3,<10.0.0",
     "pytest-cov>=4.1.0,<8.0.0",
@@ -310,6 +307,7 @@ ci = [
     "pyright>=1.1.408,<2.0.0",
     "bandit>=1.7.5,<2.0.0",
     "bandit-sarif-formatter>=1.1.1,<2.0.0",
+    "import-linter>=2.0,<3.0.0",  # Architecture layer-boundary enforcement
 
     # Testing Framework
     "pytest>=7.4.3,<10.0.0",

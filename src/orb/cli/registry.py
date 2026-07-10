@@ -193,6 +193,7 @@ def build_registry() -> None:
     from orb.interface.template_command_handlers import (
         handle_create_template,
         handle_delete_template,
+        handle_get_multiple_templates,
         handle_get_template,
         handle_list_templates,
         handle_refresh_templates,
@@ -209,10 +210,12 @@ def build_registry() -> None:
     register("templates", "validate", handle_validate_template)
     register("templates", "refresh", handle_refresh_templates)
     register("templates", "generate", handle_templates_generate)
+    register("templates", "get-bulk", handle_get_multiple_templates)
 
     # --- requests ---
     from orb.interface.request_command_handlers import (
         handle_cancel_request,
+        handle_get_multiple_requests,
         handle_get_request_status,
         handle_get_return_requests,
         handle_list_requests,
@@ -227,11 +230,13 @@ def build_registry() -> None:
     register("requests", "cancel", handle_cancel_request)
     register("requests", "list-returns", handle_get_return_requests)
     register("requests", "watch", handle_watch_request_status)
+    register("requests", "get-bulk", handle_get_multiple_requests)
 
     # --- machines ---
     from orb.interface.machine_command_handlers import (
         handle_get_machine,
         handle_get_machine_status,
+        handle_get_multiple_machines,
         handle_list_machines,
         handle_start_machines,
         handle_stop_machines,
@@ -245,6 +250,7 @@ def build_registry() -> None:
     register("machines", "terminate", handle_request_return_machines)
     register("machines", "stop", handle_stop_machines)
     register("machines", "start", handle_start_machines)
+    register("machines", "get-bulk", handle_get_multiple_machines)
 
     # --- scheduler ---
     from orb.interface.scheduler_command_handlers import (

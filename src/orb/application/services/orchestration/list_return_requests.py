@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from orb.application.dto.queries import ListReturnRequestsQuery
+from orb.application.dto.queries import SyncAndListReturnRequestsQuery
 from orb.application.ports.command_bus_port import CommandBusPort
 from orb.application.ports.query_bus_port import QueryBusPort
 from orb.application.services.orchestration.base import OrchestratorBase
@@ -50,7 +50,7 @@ class ListReturnRequestsOrchestrator(
         offset = decode_cursor(input.cursor) if input.cursor else input.offset
         sort = input.sort if input.sort else _DEFAULT_SORT
 
-        query = ListReturnRequestsQuery(
+        query = SyncAndListReturnRequestsQuery(
             status=input.status,
             limit=input.limit,
             offset=offset,

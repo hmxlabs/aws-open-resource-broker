@@ -850,7 +850,7 @@ class TestCleanupViaOrchestrator:
         import asyncio
 
         from orb.application.dto.commands import CreateRequestCommand, CreateReturnRequestCommand
-        from orb.application.dto.queries import GetRequestQuery
+        from orb.application.dto.queries import SyncAndGetRequestQuery
 
         command_bus = cqrs_buses["command_bus"]
         query_bus = cqrs_buses["query_bus"]
@@ -862,7 +862,7 @@ class TestCleanupViaOrchestrator:
         request_id = create_cmd.created_request_id
 
         # --- Act: poll request to get machine IDs ---
-        request_dto = asyncio.run(query_bus.execute(GetRequestQuery(request_id=request_id)))
+        request_dto = asyncio.run(query_bus.execute(SyncAndGetRequestQuery(request_id=request_id)))
         assert request_dto is not None
 
         machine_ids = getattr(request_dto, "machine_ids", None) or []
@@ -899,7 +899,9 @@ class TestCleanupViaOrchestrator:
         return_request_id = return_cmd.created_request_ids[0]
 
         # Poll return request status
-        return_dto = asyncio.run(query_bus.execute(GetRequestQuery(request_id=return_request_id)))
+        return_dto = asyncio.run(
+            query_bus.execute(SyncAndGetRequestQuery(request_id=return_request_id))
+        )
         assert return_dto is not None
         return_status = getattr(return_dto, "status", None)
         assert return_status in ("complete", "completed", "failed", "running", "in_progress"), (

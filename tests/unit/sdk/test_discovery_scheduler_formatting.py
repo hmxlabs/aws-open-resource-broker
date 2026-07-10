@@ -182,7 +182,7 @@ async def test_raw_response_bypasses_scheduler_formatting(mock_scheduler_port):
     )
 
     query_type = MagicMock()
-    query_type.__name__ = "GetRequestQuery"
+    query_type.__name__ = "SyncAndGetRequestQuery"
     query_type.return_value = MagicMock()
 
     sdk_method = discovery._create_query_method_cqrs(query_bus, query_type, method_info)

@@ -46,7 +46,6 @@ from typing import Optional
 
 from orb.domain.base.ports import LoggingPort
 
-from .base_provider_strategy import BaseProviderStrategy
 from .composite_strategy import (
     AggregationPolicy,
     CompositeProviderStrategy,
@@ -97,7 +96,6 @@ from .provider_strategy import (
 __all__: list[str] = [
     "AggregationPolicy",
     # Core interfaces
-    "BaseProviderStrategy",
     "CircuitBreakerState",
     "CircuitState",
     # Advanced strategies

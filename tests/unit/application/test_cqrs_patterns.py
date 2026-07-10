@@ -15,7 +15,7 @@ try:
         RequestStatus,
         UpdateRequestStatusCommand,
     )
-    from orb.application.dto.queries import GetRequestQuery, Query
+    from orb.application.dto.queries import Query, SyncAndGetRequestQuery
     from orb.infrastructure.di.buses import CommandBus, QueryBus
 
     IMPORTS_AVAILABLE = True
@@ -87,7 +87,7 @@ class TestCommandQuerySeparation:
 
     def test_queries_do_not_modify_state(self):
         """Test that queries do not modify system state."""
-        query = GetRequestQuery(request_id="test-request")
+        query = SyncAndGetRequestQuery(request_id="test-request")
 
         # Query should not contain state-modifying methods
         query_methods = [
@@ -210,7 +210,7 @@ class TestCommandQuerySeparation:
         mock_request.machine_count = 2
         mock_repository.find_by_id.return_value = mock_request
 
-        query = GetRequestQuery(request_id="test-request")
+        query = SyncAndGetRequestQuery(request_id="test-request")
         handler.handle(query)
 
         # Should have called repository read method only
@@ -346,14 +346,14 @@ class TestQueryBusImplementation:
 
             mock_get_handler.side_effect = lambda query_type: (
                 "GetRequestStatusHandler"
-                if query_type == GetRequestQuery
+                if query_type == SyncAndGetRequestQuery
                 else "GetAvailableTemplatesHandler"
             )
 
             query_bus = QueryBus(container=mock_container, logger=Mock())
 
             # Execute queries
-            status_query = GetRequestQuery(request_id="test-request")
+            status_query = SyncAndGetRequestQuery(request_id="test-request")
             templates_query = GetAvailableTemplatesQuery()
 
             await query_bus.execute(status_query)
@@ -386,7 +386,7 @@ class TestQueryBusImplementation:
             query_bus = QueryBus(container=mock_container, logger=mock_logger)
 
             # Execute same query twice
-            query = GetRequestQuery(request_id="test-request")
+            query = SyncAndGetRequestQuery(request_id="test-request")
             result1 = await query_bus.execute(query)
             result2 = await query_bus.execute(query)
 
@@ -438,15 +438,15 @@ class TestQueryBusImplementation:
         raw_result = {"id": "123", "name": "test"}
         handler.handle.return_value = raw_result
 
-        query_bus.register_handler(GetRequestQuery, handler)  # type: ignore[attr-defined]
+        query_bus.register_handler(SyncAndGetRequestQuery, handler)  # type: ignore[attr-defined]
 
         # Add result transformer if supported
         if hasattr(query_bus, "add_transformer"):
             transformer = Mock()
             transformer.transform.return_value = RequestStatusResponse(**raw_result)
-            query_bus.add_transformer(GetRequestQuery, transformer)  # type: ignore[attr-defined]
+            query_bus.add_transformer(SyncAndGetRequestQuery, transformer)  # type: ignore[attr-defined]
 
-        query = GetRequestQuery(request_id="test-request")
+        query = SyncAndGetRequestQuery(request_id="test-request")
         query_bus.dispatch(query)  # type: ignore[attr-defined]
 
         # Should have applied transformation if supported
@@ -653,7 +653,7 @@ class TestQueryHandlerImplementation:
         mock_repository.find_by_id_optimized = Mock()
         mock_repository.find_by_id_optimized.return_value = Mock()
 
-        query = GetRequestQuery(request_id="test-request")
+        query = SyncAndGetRequestQuery(request_id="test-request")
 
         # Should use optimized read methods if available
         if hasattr(mock_repository, "find_by_id_optimized"):
@@ -688,11 +688,11 @@ class TestQueryHandlerImplementation:
 
     @pytest.mark.asyncio
     async def test_query_handlers_support_filtering(self):
-        """Test that query handlers support filtering with real GetRequestHandler."""
+        """Test that query handlers support filtering with real SyncAndGetRequestHandler."""
         from unittest.mock import MagicMock, Mock
 
-        from orb.application.dto.queries import GetRequestQuery
-        from orb.application.queries.request_query_handlers import GetRequestHandler
+        from orb.application.dto.queries import SyncAndGetRequestQuery
+        from orb.application.queries.request_query_handlers import SyncAndGetRequestHandler
 
         # Mock dependencies
         mock_uow_factory = Mock()
@@ -703,7 +703,7 @@ class TestQueryHandlerImplementation:
         # Mock container to return cache service and event publisher
         mock_container.get.side_effect = lambda service_type: Mock()
 
-        handler = GetRequestHandler(
+        handler = SyncAndGetRequestHandler(
             uow_factory=mock_uow_factory,
             logger=mock_logger,
             error_handler=mock_error_handler,
@@ -730,7 +730,7 @@ class TestQueryHandlerImplementation:
         mock_request_repo.find_by_id.return_value = mock_request
 
         # Query with request ID (filtering by ID)
-        query = GetRequestQuery(request_id="test-request")
+        query = SyncAndGetRequestQuery(request_id="test-request")
 
         # This should work without errors
         try:
@@ -743,11 +743,11 @@ class TestQueryHandlerImplementation:
             assert hasattr(handler, "handle"), "Handler should have handle method"
 
     def test_query_handlers_support_projections(self):
-        """Test that query handlers support data projections with real GetRequestQueryHandler."""
+        """Test that query handlers support data projections with real SyncAndGetRequestQueryHandler."""
         from unittest.mock import MagicMock, Mock
 
-        from orb.application.dto.queries import GetRequestQuery
-        from orb.application.queries.request_query_handlers import GetRequestHandler
+        from orb.application.dto.queries import SyncAndGetRequestQuery
+        from orb.application.queries.request_query_handlers import SyncAndGetRequestHandler
 
         # Mock dependencies
         mock_uow_factory = Mock()
@@ -757,7 +757,7 @@ class TestQueryHandlerImplementation:
         mock_provider_registry = Mock()
         mock_container.get.return_value = Mock()
 
-        handler = GetRequestHandler(
+        handler = SyncAndGetRequestHandler(
             uow_factory=mock_uow_factory,
             logger=mock_logger,
             error_handler=mock_error_handler,
@@ -784,7 +784,7 @@ class TestQueryHandlerImplementation:
         mock_request.get_domain_events.return_value = []  # This makes it a domain entity
         mock_request_repo.find_by_id.return_value = mock_request
 
-        GetRequestQuery(request_id="test-request")
+        SyncAndGetRequestQuery(request_id="test-request")
 
         try:
             # This handler is async, so we test the interface exists
@@ -837,7 +837,10 @@ class TestCQRSIntegration:
         """Test that CQRS supports read models using real QueryBus and query classes."""
         from unittest.mock import Mock
 
-        from orb.application.dto.queries import GetRequestQuery, ListActiveRequestsQuery
+        from orb.application.dto.queries import (
+            SyncAndGetRequestQuery,
+            SyncAndListActiveRequestsQuery,
+        )
         from orb.infrastructure.di.buses import QueryBus
 
         # Mock dependencies for QueryBus
@@ -851,8 +854,8 @@ class TestCQRSIntegration:
         assert hasattr(query_bus, "execute"), "QueryBus should have execute method"
 
         # Create real queries that represent read models
-        list_query = ListActiveRequestsQuery()
-        get_query = GetRequestQuery(request_id="test-request")
+        list_query = SyncAndListActiveRequestsQuery()
+        get_query = SyncAndGetRequestQuery(request_id="test-request")
 
         # Test that queries have expected structure for read models
         assert hasattr(list_query, "model_validate"), "Query should be a Pydantic model"
@@ -867,7 +870,7 @@ class TestCQRSIntegration:
         from unittest.mock import Mock
 
         from orb.application.dto.commands import CreateRequestCommand, UpdateRequestStatusCommand
-        from orb.application.dto.queries import GetRequestQuery
+        from orb.application.dto.queries import SyncAndGetRequestQuery
         from orb.infrastructure.di.buses import CommandBus, QueryBus
 
         # Mock dependencies for buses
@@ -892,8 +895,8 @@ class TestCQRSIntegration:
             status=RequestStatus.IN_PROGRESS,  # Use valid enum value
         )
 
-        get_query = GetRequestQuery(request_id="test-request")
-        status_query = GetRequestQuery(request_id="test-request")
+        get_query = SyncAndGetRequestQuery(request_id="test-request")
+        status_query = SyncAndGetRequestQuery(request_id="test-request")
 
         # Test that commands and queries have expected structure
         assert hasattr(create_command, "template_id"), "Command should have template_id"

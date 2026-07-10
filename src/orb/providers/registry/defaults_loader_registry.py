@@ -3,14 +3,18 @@
 from __future__ import annotations
 
 from orb.domain.base.ports.provider_defaults_loader_port import ProviderDefaultsLoaderPort
+from orb.infrastructure.registry.simple_registry import SimpleRegistry
 
 
-class DefaultsLoaderRegistry:
-    """Simple class-variable registry mapping provider type strings to
-    ``ProviderDefaultsLoaderPort`` implementations.
+class DefaultsLoaderRegistry(SimpleRegistry[ProviderDefaultsLoaderPort]):
+    """Registry mapping provider type strings to ProviderDefaultsLoaderPort implementations.
 
-    Follows the same lightweight pattern as ``CLISpecRegistry`` and
-    ``FieldMappingRegistry``.
+    Use ``get_or_none`` when the absence of a defaults loader is acceptable
+    (e.g. checking before registration to avoid duplicate registration).  Use
+    ``get`` when the loader must exist.
+
+    Follows the same lightweight pattern as :class:`CLISpecRegistry` and
+    :class:`FieldMappingRegistry`.
 
     Usage::
 
@@ -22,33 +26,10 @@ class DefaultsLoaderRegistry:
             defaults = loader.load_defaults()
     """
 
-    _loaders: dict[str, ProviderDefaultsLoaderPort] = {}
-
-    @classmethod
-    def register(cls, provider_type: str, loader: ProviderDefaultsLoaderPort) -> None:
-        """Register a defaults loader for *provider_type*.
-
-        Registration is idempotent — re-registering the same provider type
-        silently overwrites the previous entry.
-        """
-        cls._loaders[provider_type] = loader
-
-    @classmethod
-    def get(cls, provider_type: str) -> ProviderDefaultsLoaderPort | None:
-        """Return the loader for *provider_type*, or ``None`` if not registered."""
-        return cls._loaders.get(provider_type)
-
-    @classmethod
-    def all(cls) -> dict[str, ProviderDefaultsLoaderPort]:
-        """Return all registered loaders keyed by provider type."""
-        return dict(cls._loaders)
+    _registry_name = "DefaultsLoaderRegistry"
+    _store: dict[str, ProviderDefaultsLoaderPort] = {}
 
     @classmethod
     def registered_providers(cls) -> list[str]:
         """Return all registered provider type strings."""
-        return list(cls._loaders.keys())
-
-    @classmethod
-    def clear(cls) -> None:
-        """Remove all registrations (primarily for use in tests)."""
-        cls._loaders.clear()
+        return cls.registered_keys()

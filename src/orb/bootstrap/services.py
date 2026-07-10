@@ -145,6 +145,23 @@ def _register_services_lazy(container: "DIContainer") -> "DIContainer":
     # 8. Register provider services immediately (fix for provider context errors)
     register_provider_services(container)
 
+    # 8a. Assert all registered providers have complete satellite registrations.
+    # This catches "provider registered with ProviderRegistry but initialize_
+    # not called" immediately at startup rather than at a random call site.
+    from orb.bootstrap.provider_completeness import (
+        ProviderCompletenessError,
+        assert_provider_registrations_complete,
+    )
+    from orb.infrastructure.logging.logger import get_logger as _get_logger
+
+    _bc_logger = _get_logger(__name__)
+    try:
+        assert_provider_registrations_complete()
+        _bc_logger.debug("Provider completeness assertion passed")
+    except ProviderCompletenessError as _bce:
+        _bc_logger.error("Provider completeness check failed: %s", _bce)
+        raise
+
     # 9. Register infrastructure services immediately (needed for template system)
     register_infrastructure_services(container)
 
@@ -189,6 +206,21 @@ def _register_services_eager(container: "DIContainer") -> "DIContainer":
     register_domain_services(container)
     setup_cqrs_infrastructure(container)
     register_provider_services(container)
+
+    from orb.bootstrap.provider_completeness import (
+        ProviderCompletenessError,
+        assert_provider_registrations_complete,
+    )
+    from orb.infrastructure.logging.logger import get_logger as _get_logger_eager
+
+    _eager_logger = _get_logger_eager(__name__)
+    try:
+        assert_provider_registrations_complete()
+        _eager_logger.debug("Provider completeness assertion passed")
+    except ProviderCompletenessError as _bce_eager:
+        _eager_logger.error("Provider completeness check failed: %s", _bce_eager)
+        raise
+
     register_infrastructure_services(container)
     from orb.bootstrap.orchestrator_registry import register_orchestrators
 

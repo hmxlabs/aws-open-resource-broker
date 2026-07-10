@@ -18,12 +18,13 @@ from typing import TYPE_CHECKING, Any, Optional
 
 from orb.application.ports.scheduler_port import SchedulerPort
 from orb.config.managers.configuration_manager import ConfigurationManager
-from orb.domain.base.dependency_injection import injectable
 from orb.domain.base.exceptions import DomainException, EntityNotFoundError, ValidationError
 from orb.domain.base.ports.event_publisher_port import EventPublisherPort
 from orb.domain.base.ports.logging_port import LoggingPort
+from orb.infrastructure.di.injectable import injectable
 
 from .dtos import TemplateDTO
+from .factories import TemplateDTOFactory
 from .services.template_storage_service import TemplateStorageService
 from .template_cache_service import TemplateCacheService, create_template_cache_service
 
@@ -214,8 +215,8 @@ class TemplateConfigurationManager:
         # preserving fields that base Template silently drops (extra="ignore").
         template_domain = self.template_factory.create_template(template_dict)
 
-        # Convert domain → DTO using existing method
-        return TemplateDTO.from_domain(template_domain)
+        # Convert domain → DTO using factory (factory owns the TemplateExtensionRegistry call)
+        return TemplateDTOFactory().from_domain(template_domain)
 
     def _get_active_provider_types(self) -> set[str]:
         """Return the set of active provider type strings, or an empty set on failure."""
@@ -347,7 +348,7 @@ class TemplateConfigurationManager:
         """Return True when the active provider requires SSM / image-ID resolution.
 
         Delegates to the active provider strategy's
-        :meth:`~orb.providers.base.strategy.base_provider_strategy.BaseProviderStrategy.is_image_resolution_needed`
+        :meth:`~orb.providers.aws.strategy.aws_provider_strategy.AWSProviderStrategy.is_image_resolution_needed`
         classmethod so the decision is provider-owned and does not require the
         configuration manager to hard-code AWS-specific knowledge.
 

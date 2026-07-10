@@ -9,9 +9,9 @@ from orb.application.dto.commands import (
     CreateReturnRequestCommand,
 )
 from orb.application.dto.queries import (
-    GetRequestQuery,
-    ListActiveRequestsQuery,
-    ListReturnRequestsQuery,
+    SyncAndGetRequestQuery,
+    SyncAndListActiveRequestsQuery,
+    SyncAndListReturnRequestsQuery,
 )
 from orb.application.request.queries import ListRequestsQuery
 
@@ -38,10 +38,10 @@ class RequestCommandFactory:
         provider: Optional[str] = None,
         lightweight: bool = False,
         **kwargs: Any,
-    ) -> GetRequestQuery:
-        """Create query to get request status."""
+    ) -> SyncAndGetRequestQuery:
+        """Create query to get request status (with live provider sync)."""
         provider_name = kwargs.get("provider_name") or provider
-        return GetRequestQuery(
+        return SyncAndGetRequestQuery(
             request_id=request_id,
             provider_name=provider_name,
             lightweight=lightweight,
@@ -82,9 +82,9 @@ class RequestCommandFactory:
         limit: Optional[int] = 50,
         offset: Optional[int] = 0,
         **kwargs: Any,
-    ) -> ListReturnRequestsQuery:
-        """Create query to list return requests."""
-        return ListReturnRequestsQuery.model_validate(  # type: ignore[attr-defined]
+    ) -> SyncAndListReturnRequestsQuery:
+        """Create query to list return requests (with live provider sync)."""
+        return SyncAndListReturnRequestsQuery.model_validate(  # type: ignore[attr-defined]
             {
                 "status": status,
                 "limit": min(limit or 50, 1000),
@@ -98,9 +98,9 @@ class RequestCommandFactory:
         limit: Optional[int] = 50,
         offset: Optional[int] = 0,
         **kwargs: Any,
-    ) -> ListActiveRequestsQuery:
-        """Create query to list active requests."""
-        return ListActiveRequestsQuery.model_validate(  # type: ignore[attr-defined]
+    ) -> SyncAndListActiveRequestsQuery:
+        """Create query to list active requests (with live provider sync)."""
+        return SyncAndListActiveRequestsQuery.model_validate(  # type: ignore[attr-defined]
             {
                 "provider_name": provider_name,
                 "limit": min(limit or 50, 1000),

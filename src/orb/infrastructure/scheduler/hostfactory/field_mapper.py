@@ -27,7 +27,7 @@ class HostFactoryFieldMapper(SchedulerFieldMapper):
         )
 
         base = dict(HostFactoryFieldMappings.get_mappings(self.provider_type or ""))
-        adapter = FieldMappingRegistry.get(self.provider_type or "")
+        adapter = FieldMappingRegistry.get_or_none(self.provider_type or "")
         if adapter is not None:
             base.update(adapter.get_mappings())
         return base
@@ -167,7 +167,7 @@ class HostFactoryFieldMapper(SchedulerFieldMapper):
             FieldMappingRegistry,
         )
 
-        adapter = FieldMappingRegistry.get(self.provider_type or "")
+        adapter = FieldMappingRegistry.get_or_none(self.provider_type or "")
         if adapter is not None:
             result = adapter.derive_attributes(instance_type)
             if result is not None:
