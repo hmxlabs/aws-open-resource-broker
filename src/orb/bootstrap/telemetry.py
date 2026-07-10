@@ -192,8 +192,10 @@ def configure_telemetry(container: "DIContainer") -> None:  # noqa: C901
         return
 
     # Mark as configured regardless of what happens below, so we never
-    # attempt a partial second initialisation on re-entry.
-    _telemetry_configured = True
+    # attempt a partial second initialisation on re-entry.  (Read back in the
+    # re-entry guard above and in _reset_telemetry_state; the flow analyser
+    # does not see the cross-function read.)
+    _telemetry_configured = True  # lgtm[py/unused-global-variable]
 
     # --- guard: SDK may not be installed ---
     try:
@@ -480,7 +482,7 @@ def shutdown_telemetry() -> None:
     if _telemetry_shutdown:
         return
 
-    _telemetry_shutdown = True
+    _telemetry_shutdown = True  # lgtm[py/unused-global-variable]
 
     if _meter_provider is not None:
         try:
