@@ -4,7 +4,7 @@ auto-instrumentation wiring, and OtelConfig new fields.
 Scope:
   A. File exporter flush-on-exit regression (CRITICAL):
        Configure telemetry with a file exporter, emit a counter, call
-       shutdown_telemetry(), assert data flushed to the file.  Proves CLI
+       telemetry_module.shutdown_telemetry(), assert data flushed to the file.  Proves CLI
        metrics survive process exit when shutdown is called.
 
   B. configure_telemetry wires each instrumentor when enabled + SDK present;
@@ -28,12 +28,6 @@ from unittest.mock import MagicMock, Mock, patch
 import pytest
 
 import orb.bootstrap.telemetry as telemetry_module
-from orb.bootstrap.telemetry import (
-    _reset_telemetry_state,
-    _resolve_telemetry_file_dir,
-    configure_telemetry,
-    shutdown_telemetry,
-)
 from orb.config.schemas.observability_schema import OtelConfig
 from orb.domain.base.ports.logging_port import LoggingPort
 from orb.infrastructure.di.container import DIContainer
@@ -70,9 +64,9 @@ def _make_container_with_otel(otel_config: OtelConfig) -> DIContainer:
 @pytest.fixture(autouse=True)
 def reset_telemetry():
     """Reset telemetry state before and after every test for isolation."""
-    _reset_telemetry_state()
+    telemetry_module._reset_telemetry_state()
     yield
-    _reset_telemetry_state()
+    telemetry_module._reset_telemetry_state()
     # Un-instrument any auto-instrumentors wired during the test.
     for pkg in [
         "opentelemetry.instrumentation.logging",
@@ -102,7 +96,7 @@ def reset_telemetry():
 
 
 class TestFileExporterFlushOnExit:
-    """Verify that shutdown_telemetry() flushes metrics to the file exporter."""
+    """Verify that telemetry_module.shutdown_telemetry() flushes metrics to the file exporter."""
 
     def test_file_exporter_receives_metrics_after_shutdown(self, tmp_path):
         """Regression: CLI metrics must survive process exit when shutdown is called.
@@ -119,14 +113,14 @@ class TestFileExporterFlushOnExit:
 
         When opentelemetry-proto-json ships on PyPI, the production code will
         transparently prefer FileMetricExporter; this test will remain valid
-        as it validates the baseline guarantee: shutdown_telemetry() flushes
+        as it validates the baseline guarantee: telemetry_module.shutdown_telemetry() flushes
         metrics to a file.
 
         Strategy:
           1. Build a real MeterProvider with a PeriodicExportingMetricReader
              backed by ConsoleMetricExporter writing compact JSON to a file.
           2. Create a counter on the meter and add 42.
-          3. Call shutdown_telemetry() → force_flush cascades to the reader
+          3. Call telemetry_module.shutdown_telemetry() → force_flush cascades to the reader
              and the exporter writes before the call returns.
           4. Read the JSONL file — must contain at least one non-empty line
              that is valid JSON.
@@ -170,13 +164,13 @@ class TestFileExporterFlushOnExit:
             counter.add(42)
 
             # Flush — export_interval is 60 s so without shutdown() nothing would write.
-            shutdown_telemetry()
+            telemetry_module.shutdown_telemetry()
             fh.flush()
 
         # The file must exist and contain valid JSON Lines.
         assert metrics_path.exists(), "metrics.jsonl was not created"
         content = metrics_path.read_text(encoding="utf-8").strip()
-        assert content, "metrics.jsonl is empty after shutdown_telemetry()"
+        assert content, "metrics.jsonl is empty after telemetry_module.shutdown_telemetry()"
 
         lines = [ln for ln in content.splitlines() if ln.strip()]
         assert lines, "metrics.jsonl has no non-empty lines"
@@ -186,29 +180,29 @@ class TestFileExporterFlushOnExit:
             assert isinstance(parsed, dict), f"Expected JSON object, got: {type(parsed)}"
 
     def test_shutdown_calls_meter_provider_shutdown(self):
-        """shutdown_telemetry() calls MeterProvider.shutdown()."""
+        """telemetry_module.shutdown_telemetry() calls MeterProvider.shutdown()."""
         mock_mp = Mock()
         telemetry_module._meter_provider = mock_mp
         telemetry_module._telemetry_configured = True
         telemetry_module._telemetry_shutdown = False
 
-        shutdown_telemetry()
+        telemetry_module.shutdown_telemetry()
 
         mock_mp.shutdown.assert_called_once()
 
     def test_shutdown_calls_tracer_provider_shutdown(self):
-        """shutdown_telemetry() calls TracerProvider.shutdown()."""
+        """telemetry_module.shutdown_telemetry() calls TracerProvider.shutdown()."""
         mock_tp = Mock()
         telemetry_module._tracer_provider = mock_tp
         telemetry_module._telemetry_configured = True
         telemetry_module._telemetry_shutdown = False
 
-        shutdown_telemetry()
+        telemetry_module.shutdown_telemetry()
 
         mock_tp.shutdown.assert_called_once()
 
     def test_shutdown_calls_both_providers(self):
-        """shutdown_telemetry() calls shutdown() on both meter and tracer providers."""
+        """telemetry_module.shutdown_telemetry() calls shutdown() on both meter and tracer providers."""
         mock_mp = Mock()
         mock_tp = Mock()
         telemetry_module._meter_provider = mock_mp
@@ -216,7 +210,7 @@ class TestFileExporterFlushOnExit:
         telemetry_module._telemetry_configured = True
         telemetry_module._telemetry_shutdown = False
 
-        shutdown_telemetry()
+        telemetry_module.shutdown_telemetry()
 
         mock_mp.shutdown.assert_called_once()
         mock_tp.shutdown.assert_called_once()
@@ -230,7 +224,7 @@ class TestFileExporterFlushOnExit:
         telemetry_module._telemetry_shutdown = False
 
         # Must not raise.
-        shutdown_telemetry()
+        telemetry_module.shutdown_telemetry()
 
 
 # ===========================================================================
@@ -239,60 +233,60 @@ class TestFileExporterFlushOnExit:
 
 
 class TestShutdownTelemetry:
-    """Tests for shutdown_telemetry() behaviour."""
+    """Tests for telemetry_module.shutdown_telemetry() behaviour."""
 
     def test_safe_when_never_configured(self):
-        """shutdown_telemetry() is a no-op when configure_telemetry was never called."""
+        """telemetry_module.shutdown_telemetry() is a no-op when configure_telemetry was never called."""
         # _meter_provider and _tracer_provider are None (reset by fixture).
         assert telemetry_module._meter_provider is None
         assert telemetry_module._tracer_provider is None
         # Must not raise.
-        shutdown_telemetry()
+        telemetry_module.shutdown_telemetry()
 
     def test_safe_when_providers_are_none(self):
-        """shutdown_telemetry() is safe when providers are None regardless of flags."""
+        """telemetry_module.shutdown_telemetry() is safe when providers are None regardless of flags."""
         telemetry_module._telemetry_configured = True
         telemetry_module._meter_provider = None
         telemetry_module._tracer_provider = None
         telemetry_module._telemetry_shutdown = False
 
-        shutdown_telemetry()  # Must not raise.
+        telemetry_module.shutdown_telemetry()  # Must not raise.
 
     def test_idempotent_second_call_is_noop(self):
-        """A second call to shutdown_telemetry() must not call provider.shutdown() again."""
+        """A second call to telemetry_module.shutdown_telemetry() must not call provider.shutdown() again."""
         mock_mp = Mock()
         telemetry_module._meter_provider = mock_mp
         telemetry_module._telemetry_configured = True
         telemetry_module._telemetry_shutdown = False
 
-        shutdown_telemetry()
-        shutdown_telemetry()
+        telemetry_module.shutdown_telemetry()
+        telemetry_module.shutdown_telemetry()
 
         mock_mp.shutdown.assert_called_once()
 
     def test_shutdown_flag_set_after_call(self):
-        """shutdown_telemetry() sets _telemetry_shutdown to True."""
+        """telemetry_module.shutdown_telemetry() sets _telemetry_shutdown to True."""
         telemetry_module._telemetry_configured = True
         telemetry_module._telemetry_shutdown = False
 
-        shutdown_telemetry()
+        telemetry_module.shutdown_telemetry()
 
         assert telemetry_module._telemetry_shutdown is True
 
     def test_reset_clears_shutdown_flag(self):
-        """_reset_telemetry_state() resets _telemetry_shutdown for test isolation."""
-        shutdown_telemetry()
+        """telemetry_module._reset_telemetry_state() resets _telemetry_shutdown for test isolation."""
+        telemetry_module.shutdown_telemetry()
         assert telemetry_module._telemetry_shutdown is True
 
-        _reset_telemetry_state()
+        telemetry_module._reset_telemetry_state()
         assert telemetry_module._telemetry_shutdown is False
 
     def test_reset_clears_provider_refs(self):
-        """_reset_telemetry_state() clears _meter_provider and _tracer_provider."""
+        """telemetry_module._reset_telemetry_state() clears _meter_provider and _tracer_provider."""
         telemetry_module._meter_provider = Mock()
         telemetry_module._tracer_provider = Mock()
 
-        _reset_telemetry_state()
+        telemetry_module._reset_telemetry_state()
 
         assert telemetry_module._meter_provider is None
         assert telemetry_module._tracer_provider is None
@@ -380,12 +374,12 @@ class TestOtelConfigNewFields:
 
 
 class TestResolveFileDir:
-    """Tests for _resolve_telemetry_file_dir()."""
+    """Tests for telemetry_module._resolve_telemetry_file_dir()."""
 
     def test_uses_configured_dir_when_writable(self, tmp_path):
         """Returns the configured path when it is writable."""
         target = tmp_path / "telemetry"
-        result = _resolve_telemetry_file_dir(str(target))
+        result = telemetry_module._resolve_telemetry_file_dir(str(target))
         assert result == target
         assert result.exists()
 
@@ -411,7 +405,7 @@ class TestResolveFileDir:
 
         monkeypatch.setattr(Path, "mkdir", _flaky_mkdir)
 
-        result = _resolve_telemetry_file_dir(str(tmp_path / "bad_dir" / "sub"))
+        result = telemetry_module._resolve_telemetry_file_dir(str(tmp_path / "bad_dir" / "sub"))
         # Should have landed on one of the fallback paths.
         assert result.exists()
 
@@ -428,14 +422,14 @@ class TestResolveFileDir:
         # Patch tempfile.mkdtemp to return our sentinel.
         monkeypatch.setattr(tempfile, "mkdtemp", lambda **kw: str(temp_sentinel))
 
-        result = _resolve_telemetry_file_dir("/non/existent/path")
+        result = telemetry_module._resolve_telemetry_file_dir("/non/existent/path")
         assert result == temp_sentinel
 
     def test_none_input_skips_to_tier2(self, tmp_path, monkeypatch):
         """None input skips tier-1 and goes to tier-2."""
         # Redirect tier-2 to our tmp_path.
         monkeypatch.setattr(Path, "home", staticmethod(lambda: tmp_path))
-        result = _resolve_telemetry_file_dir(None)
+        result = telemetry_module._resolve_telemetry_file_dir(None)
         # Should be under tmp_path (which acts as "home" here).
         assert result.exists()
 
@@ -479,7 +473,7 @@ class TestAutoInstrumentation:
                 {"opentelemetry.instrumentation.logging": Mock(LoggingInstrumentor=mock_cls)},
             ),
         ):
-            configure_telemetry(container)
+            telemetry_module.configure_telemetry(container)
 
         mock_instance.instrument.assert_called_once()
 
@@ -502,7 +496,7 @@ class TestAutoInstrumentation:
                 {"opentelemetry.instrumentation.logging": Mock(LoggingInstrumentor=mock_cls)},
             ),
         ):
-            configure_telemetry(container)
+            telemetry_module.configure_telemetry(container)
 
         mock_instance.instrument.assert_not_called()
 
@@ -525,7 +519,7 @@ class TestAutoInstrumentation:
                 {"opentelemetry.instrumentation.sqlalchemy": Mock(SQLAlchemyInstrumentor=mock_cls)},
             ),
         ):
-            configure_telemetry(container)
+            telemetry_module.configure_telemetry(container)
 
         mock_instance.instrument.assert_called_once()
 
@@ -548,7 +542,7 @@ class TestAutoInstrumentation:
                 {"opentelemetry.instrumentation.botocore": Mock(BotocoreInstrumentor=mock_cls)},
             ),
         ):
-            configure_telemetry(container)
+            telemetry_module.configure_telemetry(container)
 
         mock_instance.instrument.assert_called_once()
 
@@ -571,7 +565,7 @@ class TestAutoInstrumentation:
                 {"opentelemetry.instrumentation.click": Mock(ClickInstrumentor=mock_cls)},
             ),
         ):
-            configure_telemetry(container)
+            telemetry_module.configure_telemetry(container)
 
         mock_instance.instrument.assert_called_once()
 
@@ -598,7 +592,7 @@ class TestAutoInstrumentation:
                 },
             ),
         ):
-            configure_telemetry(container)
+            telemetry_module.configure_telemetry(container)
 
         mock_instance.instrument.assert_called_once()
 
@@ -631,7 +625,7 @@ class TestAutoInstrumentation:
             patch.dict(sys.modules, absent_modules),
         ):
             # Must complete without raising.
-            configure_telemetry(container)
+            telemetry_module.configure_telemetry(container)
 
     def test_all_disabled_no_instrumentors_called(self):
         """When all instrument_* are False, no instrumentors are called."""
@@ -659,7 +653,7 @@ class TestAutoInstrumentation:
             patch("opentelemetry.sdk.trace.sampling.TraceIdRatioBased"),
             patch.dict(sys.modules, mock_modules),
         ):
-            configure_telemetry(container)
+            telemetry_module.configure_telemetry(container)
 
         for cls_name, inst in mock_instances.items():
             inst.instrument.assert_not_called(), f"{cls_name}.instrument was unexpectedly called"
@@ -718,7 +712,7 @@ class TestFileExporterWiring:
                 side_effect=capture_periodic,
             ),
         ):
-            configure_telemetry(container)
+            telemetry_module.configure_telemetry(container)
 
         assert mock_file_exporter_cls.called, "FileMetricExporter constructor was not called"
         call_kwargs = mock_file_exporter_cls.call_args
@@ -759,7 +753,7 @@ class TestFileExporterWiring:
                 side_effect=capture_processor,
             ),
         ):
-            configure_telemetry(container)
+            telemetry_module.configure_telemetry(container)
 
         assert mock_file_span_cls.called, "FileSpanExporter constructor was not called"
 
@@ -785,4 +779,4 @@ class TestFileExporterWiring:
             ),
         ):
             # Must complete without raising even when the file exporter is absent.
-            configure_telemetry(container)
+            telemetry_module.configure_telemetry(container)

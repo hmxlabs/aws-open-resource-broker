@@ -382,8 +382,8 @@ def reset_container() -> None:
             from orb.bootstrap.telemetry import _reset_telemetry_state
 
             _reset_telemetry_state()
-        except ImportError:
-            logger.debug("orb.bootstrap.telemetry not available; skipping OTel state reset")
+        except ImportError as e:
+            logger.debug("orb.bootstrap.telemetry not available; skipping OTel state reset: %s", e)
 
 
 __all__: list[str] = [

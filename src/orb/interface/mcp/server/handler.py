@@ -21,10 +21,11 @@ def _flush_telemetry_mcp() -> None:
         from orb.bootstrap.telemetry import shutdown_telemetry
 
         shutdown_telemetry()
-    except Exception:
+    except Exception as e:
         # Best-effort cleanup: telemetry flush must never prevent MCP shutdown.
         get_logger(__name__).debug(
-            "telemetry flush during MCP shutdown failed (ignored, best-effort cleanup)",
+            "telemetry flush during MCP shutdown failed: %s (ignored, best-effort cleanup)",
+            e,
             exc_info=True,
         )
 

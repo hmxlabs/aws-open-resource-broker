@@ -1,10 +1,10 @@
-"""Tests for configure_telemetry() bootstrap function.
+"""Tests for telemetry_module.configure_telemetry() bootstrap function.
 
 Scope:
   1. enabled=False → no-op (no provider set, no raise).
   2. SDK absent (ImportError path) → no-op, no raise.
   3. Idempotency — second call is a no-op.
-  4. _reset_telemetry_state() re-arms the idempotency flag.
+  4. telemetry_module._reset_telemetry_state() re-arms the idempotency flag.
   5. enabled=True end-to-end: a real SDK MeterProvider is installed (not no-op).
   6. File-handle close on exporter-init failure (exception safety).
   7. shutdown_telemetry call-site wiring: CLI main + SDK ORBClient.cleanup().
@@ -20,7 +20,6 @@ from unittest.mock import MagicMock, Mock, patch
 import pytest
 
 import orb.bootstrap.telemetry as telemetry_module
-from orb.bootstrap.telemetry import _reset_telemetry_state, configure_telemetry
 from orb.config.schemas.observability_schema import OtelConfig
 from orb.domain.base.ports.logging_port import LoggingPort
 from orb.infrastructure.di.container import DIContainer
@@ -63,7 +62,7 @@ def _reset_otel_globals():
     Also restores the global OTel MeterProvider so that enabled=True tests
     installing a real provider do not leak into subsequent tests.
     """
-    _reset_telemetry_state()
+    telemetry_module._reset_telemetry_state()
     # Capture the current global meter provider so we can restore it.
     try:
         from opentelemetry import metrics as _otel_metrics
@@ -74,7 +73,7 @@ def _reset_otel_globals():
 
     yield
 
-    _reset_telemetry_state()
+    telemetry_module._reset_telemetry_state()
 
     # Restore the global meter provider to what it was before the test.
     if _original_meter_provider is not None:
@@ -95,7 +94,7 @@ class TestConfigureTelemetryDisabled:
     def test_does_not_raise_when_disabled(self):
         container = _make_container_with_otel(OtelConfig(enabled=False))
         # Must not raise under any circumstances.
-        configure_telemetry(container)
+        telemetry_module.configure_telemetry(container)
 
     def test_does_not_set_meter_provider_when_disabled(self):
         """enabled=False: set_meter_provider must NOT be called.
@@ -108,7 +107,7 @@ class TestConfigureTelemetryDisabled:
         """
         container_disabled = _make_container_with_otel(OtelConfig(enabled=False))
         with patch("opentelemetry.metrics.set_meter_provider") as mock_set:
-            configure_telemetry(container_disabled)
+            telemetry_module.configure_telemetry(container_disabled)
         # The enabled=False guard returns before set_meter_provider is ever reached.
         mock_set.assert_not_called()
         # And the flag confirms we returned via the no-op path (flag still set
@@ -119,7 +118,7 @@ class TestConfigureTelemetryDisabled:
         """enabled=False: set_tracer_provider must NOT be called."""
         container_disabled = _make_container_with_otel(OtelConfig(enabled=False))
         with patch("opentelemetry.trace.set_tracer_provider") as mock_set:
-            configure_telemetry(container_disabled)
+            telemetry_module.configure_telemetry(container_disabled)
         mock_set.assert_not_called()
 
 
@@ -132,7 +131,7 @@ class TestConfigureTelemetryEnabled:
     """When otel.enabled=True and the SDK is present, a real MeterProvider is installed."""
 
     def test_enabled_installs_sdk_meter_provider(self):
-        """configure_telemetry(enabled=True) must call set_meter_provider with a real provider.
+        """telemetry_module.configure_telemetry(enabled=True) must call set_meter_provider with a real provider.
 
         This test is the key proof that the enabled guard is actually guarding
         real work: if the guard were removed or inverted, set_meter_provider
@@ -161,7 +160,7 @@ class TestConfigureTelemetryEnabled:
             original_set(provider)
 
         with patch("opentelemetry.metrics.set_meter_provider", side_effect=_capture_set):
-            configure_telemetry(container)
+            telemetry_module.configure_telemetry(container)
 
         assert captured_providers, (
             "set_meter_provider was never called — configure_telemetry did not run the "
@@ -174,17 +173,17 @@ class TestConfigureTelemetryEnabled:
         )
 
     def test_enabled_sets_module_meter_provider_ref(self):
-        """After configure_telemetry(enabled=True), _meter_provider is not None."""
+        """After telemetry_module.configure_telemetry(enabled=True), _meter_provider is not None."""
         try:
             from opentelemetry.sdk.metrics import MeterProvider as SDKMeterProvider  # noqa: F401
         except ImportError:
             pytest.skip("opentelemetry-sdk not installed")
 
         container = _make_container_with_otel(OtelConfig(enabled=True))
-        configure_telemetry(container)
+        telemetry_module.configure_telemetry(container)
 
         assert telemetry_module._meter_provider is not None, (
-            "_meter_provider module ref is None after configure_telemetry(enabled=True) — "
+            "_meter_provider module ref is None after telemetry_module.configure_telemetry(enabled=True) — "
             "the enabled guard or the provider construction is broken"
         )
 
@@ -209,10 +208,10 @@ class TestConfigureTelemetryEnabled:
 
         # Phase 1: BREAK the path by pre-setting the idempotency flag
         # (simulates what happens when the guard fires too early / is inverted).
-        _reset_telemetry_state()
+        telemetry_module._reset_telemetry_state()
         telemetry_module._telemetry_configured = True  # BREAK: skip all setup
         container = _make_container_with_otel(OtelConfig(enabled=True))
-        configure_telemetry(container)
+        telemetry_module.configure_telemetry(container)
         # ASSERT FAILURE: with the guard pre-fired, _meter_provider stays None.
         assert telemetry_module._meter_provider is None, (
             "Phase 1 expected _meter_provider=None (guard pre-fired) but it was set — "
@@ -220,11 +219,11 @@ class TestConfigureTelemetryEnabled:
         )
 
         # Phase 2: RESTORE and verify the real path works correctly.
-        _reset_telemetry_state()
-        configure_telemetry(container)
+        telemetry_module._reset_telemetry_state()
+        telemetry_module.configure_telemetry(container)
         assert telemetry_module._meter_provider is not None, (
             "Phase 2 expected _meter_provider to be set after a clean call — "
-            "configure_telemetry(enabled=True) is broken"
+            "telemetry_module.configure_telemetry(enabled=True) is broken"
         )
 
 
@@ -253,7 +252,7 @@ class TestConfigureTelemetrySDKAbsent:
         with patch("builtins.__import__", side_effect=fake_import):
             # Must complete without raising.
             try:
-                configure_telemetry(container)
+                telemetry_module.configure_telemetry(container)
             except ImportError:
                 pytest.fail(
                     "configure_telemetry raised ImportError — the SDK-absent guard is broken"
@@ -271,7 +270,7 @@ class TestConfigureTelemetrySDKAbsent:
         monkeypatch.setitem(sys.modules, "opentelemetry", None)  # type: ignore[arg-type]
 
         try:
-            configure_telemetry(container)
+            telemetry_module.configure_telemetry(container)
         except Exception as exc:
             pytest.fail(f"configure_telemetry raised unexpectedly: {exc}")
         finally:
@@ -308,13 +307,13 @@ class TestConfigureTelemetryIdempotency:
             "opentelemetry.metrics.set_meter_provider",
             side_effect=lambda p: set_calls.append(p),
         ):
-            configure_telemetry(container)
+            telemetry_module.configure_telemetry(container)
             second_count_before = len(set_calls)
-            configure_telemetry(container)  # second call — must be no-op
+            telemetry_module.configure_telemetry(container)  # second call — must be no-op
             second_count_after = len(set_calls)
 
         assert second_count_before == 1, (
-            "First configure_telemetry(enabled=True) call did not invoke set_meter_provider"
+            "First telemetry_module.configure_telemetry(enabled=True) call did not invoke set_meter_provider"
         )
         assert second_count_after == 1, (
             "Second configure_telemetry call invoked set_meter_provider again — "
@@ -324,23 +323,23 @@ class TestConfigureTelemetryIdempotency:
     def test_flag_set_after_first_call(self):
         container = _make_container_with_otel(OtelConfig(enabled=False))
         assert telemetry_module._telemetry_configured is False
-        configure_telemetry(container)
+        telemetry_module.configure_telemetry(container)
         assert telemetry_module._telemetry_configured is True
 
     def test_reset_re_arms_flag(self):
         container = _make_container_with_otel(OtelConfig(enabled=False))
-        configure_telemetry(container)
+        telemetry_module.configure_telemetry(container)
         assert telemetry_module._telemetry_configured is True
-        _reset_telemetry_state()
+        telemetry_module._reset_telemetry_state()
         assert telemetry_module._telemetry_configured is False
 
     def test_after_reset_call_runs_again(self):
         container = _make_container_with_otel(OtelConfig(enabled=False))
-        configure_telemetry(container)
-        _reset_telemetry_state()
+        telemetry_module.configure_telemetry(container)
+        telemetry_module._reset_telemetry_state()
 
         # After reset, the function should run (and complete without error).
-        configure_telemetry(container)
+        telemetry_module.configure_telemetry(container)
         assert telemetry_module._telemetry_configured is True
 
 
@@ -399,7 +398,7 @@ class TestFileHandleCloseOnExporterFailure:
             ),
             pytest.raises(RuntimeError, match="simulated ConsoleMetricExporter failure"),
         ):
-            configure_telemetry(container)
+            telemetry_module.configure_telemetry(container)
 
         # At least one file handle must have been opened (for metrics.jsonl).
         assert opened_handles, "No file handle was opened — test scaffold may be wrong"
@@ -453,7 +452,7 @@ class TestFileHandleCloseOnExporterFailure:
             ),
             pytest.raises(RuntimeError, match="simulated ConsoleSpanExporter failure"),
         ):
-            configure_telemetry(container)
+            telemetry_module.configure_telemetry(container)
 
         assert opened_handles, "No file handle was opened — test scaffold may be wrong"
         for fh in opened_handles:
