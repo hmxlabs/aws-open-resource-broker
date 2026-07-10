@@ -4,7 +4,7 @@ Scope:
   1. enabled=False → no-op (no provider set, no raise).
   2. SDK absent (ImportError path) → no-op, no raise.
   3. Idempotency — second call is a no-op.
-  4. telemetry_module._reset_telemetry_state() re-arms the idempotency flag.
+  4. telemetry_module._reset_telemetry_state() re-arms the idempotency flag (_state.configured).
   5. enabled=True end-to-end: a real SDK MeterProvider is installed (not no-op).
   6. File-handle close on exporter-init failure (exception safety).
   7. shutdown_telemetry call-site wiring: CLI main + SDK ORBClient.cleanup().
@@ -111,8 +111,8 @@ class TestConfigureTelemetryDisabled:
         # The enabled=False guard returns before set_meter_provider is ever reached.
         mock_set.assert_not_called()
         # And the flag confirms we returned via the no-op path (flag still set
-        # because _telemetry_configured was set to True before the early return).
-        assert telemetry_module._telemetry_configured is True
+        # because _state.configured was set to True before the early return).
+        assert telemetry_module._state.configured is True
 
     def test_does_not_set_tracer_provider_when_disabled(self):
         """enabled=False: set_tracer_provider must NOT be called."""
@@ -173,7 +173,7 @@ class TestConfigureTelemetryEnabled:
         )
 
     def test_enabled_sets_module_meter_provider_ref(self):
-        """After telemetry_module.configure_telemetry(enabled=True), _meter_provider is not None."""
+        """After telemetry_module.configure_telemetry(enabled=True), _state.meter_provider is not None."""
         try:
             from opentelemetry.sdk.metrics import MeterProvider as SDKMeterProvider  # noqa: F401
         except ImportError:
@@ -182,8 +182,8 @@ class TestConfigureTelemetryEnabled:
         container = _make_container_with_otel(OtelConfig(enabled=True))
         telemetry_module.configure_telemetry(container)
 
-        assert telemetry_module._meter_provider is not None, (
-            "_meter_provider module ref is None after telemetry_module.configure_telemetry(enabled=True) — "
+        assert telemetry_module._state.meter_provider is not None, (
+            "_state.meter_provider is None after telemetry_module.configure_telemetry(enabled=True) — "
             "the enabled guard or the provider construction is broken"
         )
 
@@ -193,13 +193,13 @@ class TestConfigureTelemetryEnabled:
         Temporarily break the enabled guard, assert failure, then restore.
         This is the fail-then-pass proof required by the task specification.
 
-        We simulate breaking the guard by patching _telemetry_configured to
+        We simulate breaking the guard by pre-setting _state.configured to
         True before the call (makes the idempotency guard fire, returning
         immediately without doing any work).  We then assert that
-        _meter_provider is still None — confirming that the early return
+        _state.meter_provider is still None — confirming that the early return
         skipped the provider setup.  This is the exact failure mode that
         would occur if someone were to accidentally move
-        ``_telemetry_configured = True`` AFTER the enabled check.
+        ``_state.configured = True`` AFTER the enabled check.
         """
         try:
             from opentelemetry.sdk.metrics import MeterProvider as SDKMeterProvider  # noqa: F401
@@ -209,20 +209,20 @@ class TestConfigureTelemetryEnabled:
         # Phase 1: BREAK the path by pre-setting the idempotency flag
         # (simulates what happens when the guard fires too early / is inverted).
         telemetry_module._reset_telemetry_state()
-        telemetry_module._telemetry_configured = True  # BREAK: skip all setup
+        telemetry_module._state.configured = True  # BREAK: skip all setup
         container = _make_container_with_otel(OtelConfig(enabled=True))
         telemetry_module.configure_telemetry(container)
-        # ASSERT FAILURE: with the guard pre-fired, _meter_provider stays None.
-        assert telemetry_module._meter_provider is None, (
-            "Phase 1 expected _meter_provider=None (guard pre-fired) but it was set — "
+        # ASSERT FAILURE: with the guard pre-fired, _state.meter_provider stays None.
+        assert telemetry_module._state.meter_provider is None, (
+            "Phase 1 expected _state.meter_provider=None (guard pre-fired) but it was set — "
             "the test scaffold is wrong"
         )
 
         # Phase 2: RESTORE and verify the real path works correctly.
         telemetry_module._reset_telemetry_state()
         telemetry_module.configure_telemetry(container)
-        assert telemetry_module._meter_provider is not None, (
-            "Phase 2 expected _meter_provider to be set after a clean call — "
+        assert telemetry_module._state.meter_provider is not None, (
+            "Phase 2 expected _state.meter_provider to be set after a clean call — "
             "telemetry_module.configure_telemetry(enabled=True) is broken"
         )
 
@@ -322,16 +322,16 @@ class TestConfigureTelemetryIdempotency:
 
     def test_flag_set_after_first_call(self):
         container = _make_container_with_otel(OtelConfig(enabled=False))
-        assert telemetry_module._telemetry_configured is False
+        assert telemetry_module._state.configured is False
         telemetry_module.configure_telemetry(container)
-        assert telemetry_module._telemetry_configured is True
+        assert telemetry_module._state.configured is True
 
     def test_reset_re_arms_flag(self):
         container = _make_container_with_otel(OtelConfig(enabled=False))
         telemetry_module.configure_telemetry(container)
-        assert telemetry_module._telemetry_configured is True
+        assert telemetry_module._state.configured is True
         telemetry_module._reset_telemetry_state()
-        assert telemetry_module._telemetry_configured is False
+        assert telemetry_module._state.configured is False
 
     def test_after_reset_call_runs_again(self):
         container = _make_container_with_otel(OtelConfig(enabled=False))
@@ -340,7 +340,7 @@ class TestConfigureTelemetryIdempotency:
 
         # After reset, the function should run (and complete without error).
         telemetry_module.configure_telemetry(container)
-        assert telemetry_module._telemetry_configured is True
+        assert telemetry_module._state.configured is True
 
 
 # ---------------------------------------------------------------------------

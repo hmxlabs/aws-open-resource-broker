@@ -154,9 +154,9 @@ class TestFileExporterFlushOnExit:
 
             # Install as global and register with the shutdown machinery.
             otel_metrics.set_meter_provider(provider)
-            telemetry_module._meter_provider = provider
-            telemetry_module._telemetry_configured = True
-            telemetry_module._telemetry_shutdown = False
+            telemetry_module._state.meter_provider = provider
+            telemetry_module._state.configured = True
+            telemetry_module._state.shutdown = False
 
             # Record a metric.
             meter = otel_metrics.get_meter("orb.test")
@@ -182,9 +182,9 @@ class TestFileExporterFlushOnExit:
     def test_shutdown_calls_meter_provider_shutdown(self):
         """telemetry_module.shutdown_telemetry() calls MeterProvider.shutdown()."""
         mock_mp = Mock()
-        telemetry_module._meter_provider = mock_mp
-        telemetry_module._telemetry_configured = True
-        telemetry_module._telemetry_shutdown = False
+        telemetry_module._state.meter_provider = mock_mp
+        telemetry_module._state.configured = True
+        telemetry_module._state.shutdown = False
 
         telemetry_module.shutdown_telemetry()
 
@@ -193,9 +193,9 @@ class TestFileExporterFlushOnExit:
     def test_shutdown_calls_tracer_provider_shutdown(self):
         """telemetry_module.shutdown_telemetry() calls TracerProvider.shutdown()."""
         mock_tp = Mock()
-        telemetry_module._tracer_provider = mock_tp
-        telemetry_module._telemetry_configured = True
-        telemetry_module._telemetry_shutdown = False
+        telemetry_module._state.tracer_provider = mock_tp
+        telemetry_module._state.configured = True
+        telemetry_module._state.shutdown = False
 
         telemetry_module.shutdown_telemetry()
 
@@ -205,10 +205,10 @@ class TestFileExporterFlushOnExit:
         """telemetry_module.shutdown_telemetry() calls shutdown() on both meter and tracer providers."""
         mock_mp = Mock()
         mock_tp = Mock()
-        telemetry_module._meter_provider = mock_mp
-        telemetry_module._tracer_provider = mock_tp
-        telemetry_module._telemetry_configured = True
-        telemetry_module._telemetry_shutdown = False
+        telemetry_module._state.meter_provider = mock_mp
+        telemetry_module._state.tracer_provider = mock_tp
+        telemetry_module._state.configured = True
+        telemetry_module._state.shutdown = False
 
         telemetry_module.shutdown_telemetry()
 
@@ -219,9 +219,9 @@ class TestFileExporterFlushOnExit:
         """Exceptions from provider.shutdown() must not propagate."""
         mock_mp = Mock()
         mock_mp.shutdown.side_effect = RuntimeError("boom")
-        telemetry_module._meter_provider = mock_mp
-        telemetry_module._telemetry_configured = True
-        telemetry_module._telemetry_shutdown = False
+        telemetry_module._state.meter_provider = mock_mp
+        telemetry_module._state.configured = True
+        telemetry_module._state.shutdown = False
 
         # Must not raise.
         telemetry_module.shutdown_telemetry()
@@ -237,27 +237,27 @@ class TestShutdownTelemetry:
 
     def test_safe_when_never_configured(self):
         """telemetry_module.shutdown_telemetry() is a no-op when configure_telemetry was never called."""
-        # _meter_provider and _tracer_provider are None (reset by fixture).
-        assert telemetry_module._meter_provider is None
-        assert telemetry_module._tracer_provider is None
+        # _state.meter_provider and _state.tracer_provider are None (reset by fixture).
+        assert telemetry_module._state.meter_provider is None
+        assert telemetry_module._state.tracer_provider is None
         # Must not raise.
         telemetry_module.shutdown_telemetry()
 
     def test_safe_when_providers_are_none(self):
         """telemetry_module.shutdown_telemetry() is safe when providers are None regardless of flags."""
-        telemetry_module._telemetry_configured = True
-        telemetry_module._meter_provider = None
-        telemetry_module._tracer_provider = None
-        telemetry_module._telemetry_shutdown = False
+        telemetry_module._state.configured = True
+        telemetry_module._state.meter_provider = None
+        telemetry_module._state.tracer_provider = None
+        telemetry_module._state.shutdown = False
 
         telemetry_module.shutdown_telemetry()  # Must not raise.
 
     def test_idempotent_second_call_is_noop(self):
         """A second call to telemetry_module.shutdown_telemetry() must not call provider.shutdown() again."""
         mock_mp = Mock()
-        telemetry_module._meter_provider = mock_mp
-        telemetry_module._telemetry_configured = True
-        telemetry_module._telemetry_shutdown = False
+        telemetry_module._state.meter_provider = mock_mp
+        telemetry_module._state.configured = True
+        telemetry_module._state.shutdown = False
 
         telemetry_module.shutdown_telemetry()
         telemetry_module.shutdown_telemetry()
@@ -265,31 +265,31 @@ class TestShutdownTelemetry:
         mock_mp.shutdown.assert_called_once()
 
     def test_shutdown_flag_set_after_call(self):
-        """telemetry_module.shutdown_telemetry() sets _telemetry_shutdown to True."""
-        telemetry_module._telemetry_configured = True
-        telemetry_module._telemetry_shutdown = False
+        """telemetry_module.shutdown_telemetry() sets _state.shutdown to True."""
+        telemetry_module._state.configured = True
+        telemetry_module._state.shutdown = False
 
         telemetry_module.shutdown_telemetry()
 
-        assert telemetry_module._telemetry_shutdown is True
+        assert telemetry_module._state.shutdown is True
 
     def test_reset_clears_shutdown_flag(self):
-        """telemetry_module._reset_telemetry_state() resets _telemetry_shutdown for test isolation."""
+        """telemetry_module._reset_telemetry_state() resets _state.shutdown for test isolation."""
         telemetry_module.shutdown_telemetry()
-        assert telemetry_module._telemetry_shutdown is True
+        assert telemetry_module._state.shutdown is True
 
         telemetry_module._reset_telemetry_state()
-        assert telemetry_module._telemetry_shutdown is False
+        assert telemetry_module._state.shutdown is False
 
     def test_reset_clears_provider_refs(self):
-        """telemetry_module._reset_telemetry_state() clears _meter_provider and _tracer_provider."""
-        telemetry_module._meter_provider = Mock()
-        telemetry_module._tracer_provider = Mock()
+        """telemetry_module._reset_telemetry_state() clears _state.meter_provider and _state.tracer_provider."""
+        telemetry_module._state.meter_provider = Mock()
+        telemetry_module._state.tracer_provider = Mock()
 
         telemetry_module._reset_telemetry_state()
 
-        assert telemetry_module._meter_provider is None
-        assert telemetry_module._tracer_provider is None
+        assert telemetry_module._state.meter_provider is None
+        assert telemetry_module._state.tracer_provider is None
 
 
 # ===========================================================================
