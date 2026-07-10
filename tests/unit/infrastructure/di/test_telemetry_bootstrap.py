@@ -478,8 +478,8 @@ class TestShutdownTelemetryCallSiteWiring:
     def test_sdk_orb_client_cleanup_calls_shutdown_telemetry(self):
         """ORBClient.cleanup() must call shutdown_telemetry().
 
-        ORBClient.cleanup() imports shutdown_telemetry lazily inside the
-        method body (``from orb.bootstrap.telemetry import shutdown_telemetry``).
+        ORBClient.cleanup() imports the shutdown helper lazily inside the
+        method body (a module-local import of the telemetry shutdown function).
         We verify the call by inspecting the cleanup() source: the method body
         explicitly calls ``shutdown_telemetry()`` after delegating to
         ``self._app.cleanup()``.  We exercise the method with a real ORBClient
