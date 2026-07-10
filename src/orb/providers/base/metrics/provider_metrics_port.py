@@ -37,6 +37,7 @@ transparently — the application runs fully without the ``[monitoring]`` extra.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from contextlib import suppress
 from typing import Optional
 
 
@@ -362,16 +363,12 @@ def _create_histogram(meter: object, name: str, description: str, unit: str) -> 
 
 
 def _add(instrument: object, value: float, attrs: dict) -> None:
-    try:
+    # Metrics recording must never break the caller; swallow all errors.
+    with suppress(Exception):
         instrument.add(value, attributes=attrs)  # type: ignore[union-attr]
-    except Exception:
-        # Metrics recording must never break the caller; swallow all errors.
-        pass
 
 
 def _record(instrument: object, value: float, attrs: dict) -> None:
-    try:
+    # Metrics recording must never break the caller; swallow all errors.
+    with suppress(Exception):
         instrument.record(value, attributes=attrs)  # type: ignore[union-attr]
-    except Exception:
-        # Metrics recording must never break the caller; swallow all errors.
-        pass

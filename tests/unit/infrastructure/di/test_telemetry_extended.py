@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 import sys
+from contextlib import suppress
 from pathlib import Path
 from unittest.mock import MagicMock, Mock, patch
 
@@ -91,10 +92,8 @@ def reset_telemetry():
             ]:
                 cls = getattr(mod, cls_name, None)
                 if cls:
-                    try:
+                    with suppress(Exception):
                         cls().uninstrument()
-                    except Exception:
-                        pass
 
 
 # ===========================================================================
