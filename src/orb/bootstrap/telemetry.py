@@ -292,13 +292,22 @@ def configure_telemetry(container: "DIContainer") -> None:  # noqa: C901
                 from opentelemetry.sdk.metrics.export import ConsoleMetricExporter
 
                 global _metrics_file_handle
-                _metrics_file_handle = open(  # noqa: SIM115,WPS515
+                _metrics_fh = open(  # noqa: SIM115,WPS515
                     metrics_path, "a", encoding="utf-8"
                 )
-                _metric_file_exporter = ConsoleMetricExporter(
-                    out=_metrics_file_handle,
-                    formatter=lambda md: md.to_json(indent=None) + "\n",
-                )
+                try:
+                    _metric_file_exporter = ConsoleMetricExporter(
+                        out=_metrics_fh,
+                        formatter=lambda md: md.to_json(indent=None) + "\n",
+                    )
+                except Exception:
+                    # Exporter construction failed: close the handle we just
+                    # opened so a partial init cannot leak a descriptor.
+                    _metrics_fh.close()
+                    raise
+                # Only retain the handle for lifecycle close once the exporter
+                # owns it successfully.
+                _metrics_file_handle = _metrics_fh
 
             metric_readers.append(
                 PeriodicExportingMetricReader(_metric_file_exporter)  # type: ignore[arg-type]
@@ -355,13 +364,22 @@ def configure_telemetry(container: "DIContainer") -> None:  # noqa: C901
                 from opentelemetry.sdk.trace.export import ConsoleSpanExporter
 
                 global _traces_file_handle
-                _traces_file_handle = open(  # noqa: SIM115,WPS515
+                _traces_fh = open(  # noqa: SIM115,WPS515
                     traces_path, "a", encoding="utf-8"
                 )
-                _span_file_exporter = ConsoleSpanExporter(
-                    out=_traces_file_handle,
-                    formatter=lambda span: span.to_json(indent=None) + "\n",
-                )
+                try:
+                    _span_file_exporter = ConsoleSpanExporter(
+                        out=_traces_fh,
+                        formatter=lambda span: span.to_json(indent=None) + "\n",
+                    )
+                except Exception:
+                    # Exporter construction failed: close the handle we just
+                    # opened so a partial init cannot leak a descriptor.
+                    _traces_fh.close()
+                    raise
+                # Only retain the handle for lifecycle close once the exporter
+                # owns it successfully.
+                _traces_file_handle = _traces_fh
 
             tracer_provider.add_span_processor(
                 BatchSpanProcessor(_span_file_exporter)  # type: ignore[arg-type]
