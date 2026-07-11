@@ -26,7 +26,7 @@ from typing import TYPE_CHECKING, Any, Optional
 
 from orb.domain.request.aggregate import Request
 from orb.domain.template.template_aggregate import Template
-from orb.providers.k8s.configuration.config import K8sProviderConfig
+from orb.providers.k8s.configuration.config import K8sNamingConfig, K8sProviderConfig
 from orb.providers.k8s.domain.template.k8s_template_aggregate import upcast_to_k8s_template
 from orb.providers.k8s.utilities.pod_spec import (
     _DEFAULT_LABEL_PREFIX,
@@ -56,13 +56,33 @@ if TYPE_CHECKING:  # pragma: no cover — type-checking only
 # plus a pod-suffix (~16 chars), so the deployment name needs headroom.
 _DEPLOYMENT_NAME_MAX_LEN = 47  # 63 - 16-char controller suffix budget
 
+# Default uuid_chars for callers without a naming config (reproduces
+# the original ``orb-{request_id[:8]}`` pattern).
+_DEFAULT_DEPLOYMENT_UUID_CHARS = 8
 
-def make_deployment_name(request_id: str) -> str:
-    """Build a deterministic Deployment name for an ORB request."""
-    prefix = (request_id or "unknown")[:8]
-    name = f"orb-{prefix}"
-    if len(name) > _DEPLOYMENT_NAME_MAX_LEN:  # pragma: no cover — defensive
-        name = name[:_DEPLOYMENT_NAME_MAX_LEN]
+
+def make_deployment_name(
+    request_id: str,
+    naming: Optional[K8sNamingConfig] = None,
+) -> str:
+    """Build a deterministic Deployment name for an ORB request.
+
+    When *naming* is ``None`` the historical ``orb-{uuid[:8]}`` pattern is
+    reproduced for backward compatibility.
+    """
+    if naming is not None:
+        pfx = naming.prefix
+        n_chars = naming.uuid_chars
+        max_len = naming.max_deployment_name_len
+    else:
+        pfx = "orb"
+        n_chars = _DEFAULT_DEPLOYMENT_UUID_CHARS
+        max_len = _DEPLOYMENT_NAME_MAX_LEN
+    safe = (request_id or "unknown").replace("-", "")
+    uuid_seg = safe[:n_chars] if safe else "unknown"
+    name = f"{pfx}-{uuid_seg}"
+    if len(name) > max_len:  # pragma: no cover — defensive
+        name = name[:max_len]
     return name
 
 
@@ -208,4 +228,5 @@ def build_deployment_spec(
 __all__ = [
     "build_deployment_spec",
     "make_deployment_name",
+    "_DEPLOYMENT_NAME_MAX_LEN",
 ]

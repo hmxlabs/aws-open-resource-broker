@@ -202,6 +202,40 @@ class K8sNativeSpecService:
     # Internals
     # ------------------------------------------------------------------
 
+    def _resolve_resource_name(self, request: Request, api_type: str) -> str:
+        """Compute the configured resource name for the native-spec path.
+
+        Both the typed-builder path (handlers calling make_*_name) and the
+        native-spec path (Jinja templates using ``{{ resource_name }}``) must
+        produce the **same** name so that release/status lookups via
+        ``provider_data["<kind>_name"]`` work regardless of which path was used.
+
+        Delegates to the same make_*_name utilities the typed-builder handlers
+        use, passing the naming config from the provider config when available.
+        """
+        from orb.providers.k8s.utilities.deployment_spec import make_deployment_name
+        from orb.providers.k8s.utilities.job_spec import make_job_name
+        from orb.providers.k8s.utilities.pod_spec import make_pod_name
+        from orb.providers.k8s.utilities.statefulset_spec import make_statefulset_name
+
+        naming = getattr(self._k8s_config, "naming", None) if self._k8s_config is not None else None
+        rid = str(request.request_id)
+
+        key = api_type.lower()
+        if key == "pod":
+            # For the native-spec path a single Pod-0 name is produced; the
+            # per-pod loop in K8sPodHandler overrides with the per-seq name.
+            return make_pod_name(rid, 0, naming=naming)
+        if key == "deployment":
+            return make_deployment_name(rid, naming=naming)
+        if key == "statefulset":
+            return make_statefulset_name(rid, naming=naming)
+        if key == "job":
+            return make_job_name(rid, naming=naming)
+        # Fallback for unknown api_types: use the request_id prefix directly.
+        safe = rid.replace("-", "")
+        return f"orb-{safe[:8]}"
+
     def _process(
         self,
         template: Any,
@@ -246,7 +280,9 @@ class K8sNativeSpecService:
                 )
             return None
 
-        context = self._build_k8s_context(k8s_template, request, namespace=namespace)
+        context = self._build_k8s_context(
+            k8s_template, request, namespace=namespace, api_type=api_type
+        )
 
         # Always render the default first so operators can submit a
         # partial override (e.g. only ``spec.containers[0].resources``).
@@ -272,6 +308,7 @@ class K8sNativeSpecService:
         request: Request,
         *,
         namespace: str,
+        api_type: str = "pod",
     ) -> dict[str, Any]:
         """Build the kubernetes-specific Jinja context.
 
@@ -311,7 +348,13 @@ class K8sNativeSpecService:
         volumes_list = k8s_template.resolve_volumes_api_list() or []
         tolerations_list = k8s_template.resolve_tolerations_api_list() or []
 
+        # Compute the configured resource name once so both the metadata.name
+        # field and any template references to {{ resource_name }} are consistent
+        # with the typed-builder path.
+        resource_name = self._resolve_resource_name(request, api_type)
+
         return {
+            "resource_name": resource_name,
             "request_id": str(request.request_id),
             "requested_count": replicas,
             "replicas": replicas,

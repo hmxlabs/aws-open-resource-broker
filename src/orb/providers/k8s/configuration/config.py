@@ -11,12 +11,15 @@ import contextlib
 from pathlib import Path
 from typing import Any, Optional
 
-from pydantic import Field, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from orb.infrastructure.interfaces.provider import BaseProviderConfig
 from orb.infrastructure.logging.logger import get_logger
-from orb.providers.k8s.utilities.dns_names import DNS_1123_SUBDOMAIN_REGEX as _DNS_SUBDOMAIN_RE
+from orb.providers.k8s.utilities.dns_names import (
+    DNS_1123_LABEL_REGEX as _DNS_1123_LABEL_RE,
+    DNS_1123_SUBDOMAIN_REGEX as _DNS_SUBDOMAIN_RE,
+)
 
 _SA_NAMESPACE_FILE = Path("/var/run/secrets/kubernetes.io/serviceaccount/namespace")
 
@@ -62,6 +65,153 @@ def _read_in_cluster_namespace() -> Optional[str]:
             if ns:
                 return ns
     return None
+
+
+class K8sNamingConfig(BaseModel):
+    """Configurable resource-naming policy for managed Kubernetes workloads.
+
+    All four controller kinds (Pod, Deployment, StatefulSet, Job) use the
+    pattern ``<prefix>-<uuid_segment>`` for the resource name, where
+    ``uuid_segment`` is the first ``uuid_chars`` hex characters of the
+    request UUID (hyphens stripped).  Pods additionally append a
+    zero-padded sequential suffix ``-<seq:04d>`` so each pod in a batch
+    gets a unique name.
+
+    Budget math (must pass the model validator):
+
+    * **Deployment** (tightest): pod names inherit the deployment name as a
+      prefix and the ReplicaSet controller appends ``-<hash>-<suffix>``
+      (≈16 chars).  So the deployment name must satisfy
+      ``len(prefix) + 1 + uuid_chars ≤ max_deployment_name_len``.
+    * **StatefulSet**: pod names are ``<statefulset-name>-<ordinal>``; the
+      ordinal can be up to 5 digits for very large sets, so the
+      statefulset name must leave room: ``len(prefix) + 1 + uuid_chars ≤
+      max_statefulset_name_len``.
+    * **Job**: the Job controller may append a controller-suffix;
+      ``len(prefix) + 1 + uuid_chars ≤ max_job_name_len``.
+    * **Pod**: ``len(prefix) + 1 + uuid_chars + 1 + 4 ≤ max_pod_name_len``
+      (4 digits for the sequence number, 1 for the hyphen separator).
+    """
+
+    prefix: str = Field(
+        "orb",
+        description=(
+            "Name prefix applied to every managed Kubernetes resource.  "
+            "Must be a valid DNS-1123 label segment (lowercase alphanumeric "
+            "and hyphens, starting and ending with alphanumeric, max 20 chars "
+            "to leave room for the uuid segment)."
+        ),
+    )
+    uuid_chars: int = Field(
+        20,
+        ge=8,
+        le=32,
+        description=(
+            "Number of hex characters taken from the hyphen-stripped request "
+            "UUID to form the name's uuid segment.  Default 20 (≈2^80 "
+            "collision space — negligible at production scale; matches the "
+            "historical pod-name pattern).  Must be at least 8 for a "
+            "reasonable collision budget."
+        ),
+    )
+
+    # Per-kind maximum name length budgets.  Callers use these to truncate
+    # defensively; the model_validator enforces that prefix+uuid_chars fit.
+    max_pod_name_len: int = Field(
+        63,
+        ge=20,
+        le=253,
+        description="Maximum DNS-1123 label length for Pod names (default 63).",
+    )
+    max_deployment_name_len: int = Field(
+        47,
+        ge=10,
+        le=253,
+        description=(
+            "Maximum length for Deployment names.  Default 47 = 63 – 16-char "
+            "ReplicaSet controller suffix budget."
+        ),
+    )
+    max_statefulset_name_len: int = Field(
+        57,
+        ge=10,
+        le=253,
+        description=(
+            "Maximum length for StatefulSet names.  Default 57 = 63 – 6-char "
+            "ordinal suffix budget (up to -99999)."
+        ),
+    )
+    max_job_name_len: int = Field(
+        50,
+        ge=10,
+        le=253,
+        description=(
+            "Maximum length for Job names.  Default 50 = 63 – 13-char controller suffix margin."
+        ),
+    )
+
+    @field_validator("prefix")
+    @classmethod
+    def _validate_prefix(cls, v: str) -> str:
+        """Reject non-DNS-1123 prefixes and enforce a max length of 20 chars."""
+        if not v:
+            raise ValueError("naming.prefix must be a non-empty string")
+        if len(v) > 20:
+            raise ValueError(
+                f"naming.prefix {v!r} is too long ({len(v)} chars); max 20 to leave "
+                "room for the uuid segment within the tightest kind budget."
+            )
+        if not _DNS_1123_LABEL_RE.match(v):
+            raise ValueError(
+                f"naming.prefix {v!r} is not a valid DNS-1123 label.  "
+                "Must consist of lowercase alphanumeric characters and hyphens, "
+                "start and end with an alphanumeric character."
+            )
+        return v
+
+    @model_validator(mode="after")
+    def _validate_budget(self) -> "K8sNamingConfig":
+        """Ensure prefix+uuid_chars fit within every per-kind length budget.
+
+        Deployment is almost always the tightest constraint because its
+        pod names have the longest controller-appended suffix.  The validator
+        checks all four kinds so operators get a single, clear error message
+        naming the offending kind rather than a confusing runtime truncation.
+        """
+        # <prefix>-<uuid_chars> for controller kinds
+        controller_len = len(self.prefix) + 1 + self.uuid_chars
+        # <prefix>-<uuid_chars>-<seq:04d> for pod (seq = 4 digits + 1 hyphen)
+        pod_len = controller_len + 5
+
+        failures: list[str] = []
+        if pod_len > self.max_pod_name_len:
+            failures.append(
+                f"Pod: {pod_len} > max_pod_name_len={self.max_pod_name_len} "
+                f"(prefix={self.prefix!r} + uuid_chars={self.uuid_chars} + seq-suffix=5)"
+            )
+        if controller_len > self.max_deployment_name_len:
+            failures.append(
+                f"Deployment: {controller_len} > max_deployment_name_len="
+                f"{self.max_deployment_name_len} "
+                f"(prefix={self.prefix!r} + uuid_chars={self.uuid_chars})"
+            )
+        if controller_len > self.max_statefulset_name_len:
+            failures.append(
+                f"StatefulSet: {controller_len} > max_statefulset_name_len="
+                f"{self.max_statefulset_name_len} "
+                f"(prefix={self.prefix!r} + uuid_chars={self.uuid_chars})"
+            )
+        if controller_len > self.max_job_name_len:
+            failures.append(
+                f"Job: {controller_len} > max_job_name_len={self.max_job_name_len} "
+                f"(prefix={self.prefix!r} + uuid_chars={self.uuid_chars})"
+            )
+        if failures:
+            raise ValueError(
+                "K8sNamingConfig: prefix + uuid_chars overflow the per-kind name budget.  "
+                "Reduce prefix length or uuid_chars:\n  " + "\n  ".join(failures)
+            )
+        return self
 
 
 class K8sProviderConfig(BaseSettings, BaseProviderConfig):  # type: ignore[misc]
@@ -389,6 +539,20 @@ class K8sProviderConfig(BaseSettings, BaseProviderConfig):  # type: ignore[misc]
             "Maximum delay in seconds between retry attempts.  The exponential "
             "backoff is capped at this value.  Default 30.0 — matches the "
             "K8sHandlerBase hardcoded value."
+        ),
+    )
+
+    # Resource naming policy
+    naming: K8sNamingConfig = Field(
+        default_factory=K8sNamingConfig,  # type: ignore[call-arg]
+        description=(
+            "Configurable resource-naming policy.  The generated name is "
+            "``<prefix>-<uuid_segment>`` for controller kinds (Deployment, "
+            "StatefulSet, Job) and ``<prefix>-<uuid_segment>-<seq:04d>`` for "
+            "Pods.  ``uuid_segment`` is the first ``uuid_chars`` hex chars of "
+            "the hyphen-stripped request UUID.  Defaults produce the same names "
+            "as before this config was added, so existing resources are "
+            "unaffected on upgrade."
         ),
     )
 

@@ -2,14 +2,14 @@
   "apiVersion": "apps/v1",
   "kind": "StatefulSet",
   "metadata": {
-    "name": "orb-{{ request_id[:8] }}",
+    "name": "{{ resource_name }}",
     "namespace": "{{ namespace }}",
     "labels": {{ labels | tojson }}{% if has_annotations %},
     "annotations": {{ annotations | tojson }}{% endif %}
   },
   "spec": {
     "replicas": {{ replicas }},
-    "serviceName": "orb-{{ request_id[:8] }}",
+    "serviceName": "{{ resource_name }}",
     "selector": {
       "matchLabels": {
         "{{ label_prefix }}/request-id": "{{ request_id }}",

@@ -2,7 +2,7 @@
   "apiVersion": "batch/v1",
   "kind": "Job",
   "metadata": {
-    "name": "orb-{{ request_id[:8] }}",
+    "name": "{{ resource_name }}",
     "namespace": "{{ namespace }}",
     "labels": {{ labels | tojson }}{% if has_annotations %},
     "annotations": {{ annotations | tojson }}{% endif %}

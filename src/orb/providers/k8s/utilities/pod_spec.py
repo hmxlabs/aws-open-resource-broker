@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, Any, Optional
 from orb.domain.request.aggregate import Request
 from orb.domain.template.template_aggregate import Template
 from orb.infrastructure.utilities.common.deep_merge import deep_merge
-from orb.providers.k8s.configuration.config import K8sProviderConfig
+from orb.providers.k8s.configuration.config import K8sNamingConfig, K8sProviderConfig
 from orb.providers.k8s.domain.template.k8s_template_aggregate import (
     K8sProbe,
     K8sSecurityContext,
@@ -49,22 +49,37 @@ LEGACY_REQUEST_ID_LABEL = "symphony/open-resource-broker-reqid"
 # comfortably inside the 63-char budget.
 _POD_NAME_MAX_LEN = 63
 
+# Default naming parameters kept for backward-compatible callers that do
+# not pass a K8sNamingConfig.  These reproduce the pre-naming-config behaviour.
+_DEFAULT_PREFIX = "orb"
+_DEFAULT_UUID_CHARS = 20  # original pod_spec used [:20]; we preserve that default
 
-def make_pod_name(request_id: str, seq: int) -> str:
+
+def make_pod_name(
+    request_id: str,
+    seq: int,
+    naming: Optional[K8sNamingConfig] = None,
+) -> str:
     """Build a deterministic pod name for a single ORB unit.
 
-    Pattern: ``orb-{uuid_no_hyphens[:20]}-{seq:04d}`` where
-    ``uuid_no_hyphens`` is the request_id with hyphens stripped.  Taking
-    20 hex digits gives ~2^80 distinct prefixes — a negligible collision
-    probability even with thousands of concurrent requests sharing the same
-    namespace.  The resulting name is 31 chars, well under the 63-char
-    DNS-1123 label limit.
+    Pattern: ``<prefix>-<uuid_segment>-<seq:04d>`` where
+    ``uuid_segment`` is the first ``uuid_chars`` hex chars of the
+    hyphen-stripped request UUID.  When *naming* is ``None`` the defaults
+    reproduce the historical ``orb-{uuid[:20]}-{seq:04d}`` pattern.
     """
+    if naming is not None:
+        pfx = naming.prefix
+        n_chars = naming.uuid_chars
+        max_len = naming.max_pod_name_len
+    else:
+        pfx = _DEFAULT_PREFIX
+        n_chars = _DEFAULT_UUID_CHARS
+        max_len = _POD_NAME_MAX_LEN
     safe = (request_id or "unknown").replace("-", "")
-    prefix = safe[:20] if safe else "unknown"
-    name = f"orb-{prefix}-{seq:04d}"
-    if len(name) > _POD_NAME_MAX_LEN:  # pragma: no cover — defensive
-        name = name[:_POD_NAME_MAX_LEN]
+    uuid_seg = safe[:n_chars] if safe else "unknown"
+    name = f"{pfx}-{uuid_seg}-{seq:04d}"
+    if len(name) > max_len:  # pragma: no cover — defensive
+        name = name[:max_len]
     return name
 
 
