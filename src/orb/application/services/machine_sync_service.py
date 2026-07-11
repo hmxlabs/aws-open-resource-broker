@@ -208,6 +208,7 @@ class MachineSyncService:
             image_id=processed_data.get("image_id", "unknown"),
             price_type=processed_data.get("price_type"),
             status=MachineStatus(processed_data.get("status", "pending")),
+            status_reason=processed_data.get("status_reason"),
             private_ip=processed_data.get("private_ip"),
             public_ip=processed_data.get("public_ip"),
             private_dns_name=processed_data.get("private_dns_name"),
