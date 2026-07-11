@@ -167,6 +167,19 @@ class TestMakePodName:
         n2 = make_pod_name("bbbbbbbb-0000-0000-0000-000000000001", 0, naming=cfg)
         assert n1 != n2
 
+    def test_req_prefix_stripped_before_uuid_segment(self) -> None:
+        """A leading req- / req_ prefix is stripped so the uuid segment is pure hex."""
+        cfg = K8sNamingConfig(prefix="orb", uuid_chars=8)
+        # "req-550e8400..." → strip "req-" → "550e8400..." → same result as bare UUID
+        name_with_prefix = make_pod_name(f"req-{REQUEST_ID}", 0, naming=cfg)
+        name_bare = make_pod_name(REQUEST_ID, 0, naming=cfg)
+        assert name_with_prefix == name_bare
+        # req_ variant
+        name_underscore = make_pod_name(f"req_{REQUEST_ID}", 0, naming=cfg)
+        assert name_underscore == name_bare
+        # Pure hex result, not "req5617..."
+        assert "req" not in name_with_prefix
+
 
 # ---------------------------------------------------------------------------
 # make_deployment_name honours K8sNamingConfig

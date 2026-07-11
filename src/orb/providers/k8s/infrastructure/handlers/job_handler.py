@@ -134,7 +134,7 @@ class K8sJobHandler(K8sHandlerBase):
         """
         namespace = self.resolve_namespace(template)
         parallelism = max(int(request.requested_count), 1)
-        job_name = make_job_name(str(request.request_id))
+        job_name = make_job_name(str(request.request_id), naming=self._config.naming)
 
         self._record_acquire(namespace=namespace, spec_kind=self.PROVIDER_API)
         self._logger.info(
@@ -340,7 +340,9 @@ class K8sJobHandler(K8sHandlerBase):
         name = provider_data.get("job_name")
         if isinstance(name, str) and name:
             return name
-        return make_job_name(str(provider_data.get("request_id", "unknown")))
+        return make_job_name(
+            str(provider_data.get("request_id", "unknown")), naming=self._config.naming
+        )
 
     def _resolve_job_name(self, request: Request) -> str:
         """Thin wrapper for status resolvers that hold the full Request aggregate."""
@@ -349,7 +351,7 @@ class K8sJobHandler(K8sHandlerBase):
         name = pd.get("job_name")
         if isinstance(name, str) and name:
             return name
-        return make_job_name(str(request.request_id))
+        return make_job_name(str(request.request_id), naming=self._config.naming)
 
     # ------------------------------------------------------------------
     # Examples
@@ -369,11 +371,13 @@ class K8sJobHandler(K8sHandlerBase):
                 name="Kubernetes Job example",
                 description="Submit a run-to-completion Job via the kubernetes provider.",
                 provider_api="Job",
-                image_id="busybox:latest",
+                image_id="registry.k8s.io/pause:3.9",
                 max_instances=3,
                 resource_requests=K8sResourceQuantities(cpu="100m", memory="128Mi"),
                 resource_limits=K8sResourceQuantities(cpu="500m", memory="256Mi"),
-                command=["sh", "-c", "echo done"],
+                # pause never exits on its own; a Job needs run-to-completion
+                # semantics, so override with a command that exits 0 immediately.
+                command=["sh", "-c", "exit 0"],
             ),
         ]
 

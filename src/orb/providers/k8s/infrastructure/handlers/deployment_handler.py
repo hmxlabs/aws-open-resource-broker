@@ -166,7 +166,7 @@ class K8sDeploymentHandler(K8sHandlerBase):
         """
         namespace = self.resolve_namespace(template)
         replicas = max(int(request.requested_count), 1)
-        deployment_name = make_deployment_name(str(request.request_id))
+        deployment_name = make_deployment_name(str(request.request_id), naming=self._config.naming)
 
         self._record_acquire(namespace=namespace, spec_kind=self.PROVIDER_API)
         self._logger.info(
@@ -565,7 +565,9 @@ class K8sDeploymentHandler(K8sHandlerBase):
         name = provider_data.get("deployment_name")
         if isinstance(name, str) and name:
             return name
-        return make_deployment_name(str(provider_data.get("request_id", "unknown")))
+        return make_deployment_name(
+            str(provider_data.get("request_id", "unknown")), naming=self._config.naming
+        )
 
     def _resolve_deployment_name(self, request: Request) -> str:
         """Thin wrapper for status resolvers that hold the full Request aggregate."""
@@ -575,7 +577,7 @@ class K8sDeploymentHandler(K8sHandlerBase):
         name = pd.get("deployment_name")
         if isinstance(name, str) and name:
             return name
-        return make_deployment_name(str(request.request_id))
+        return make_deployment_name(str(request.request_id), naming=self._config.naming)
 
     # ------------------------------------------------------------------
     # Examples
@@ -595,11 +597,10 @@ class K8sDeploymentHandler(K8sHandlerBase):
                 name="Kubernetes Deployment example",
                 description="Submit a Deployment-managed pod set via the kubernetes provider.",
                 provider_api="Deployment",
-                image_id="busybox:latest",
+                image_id="registry.k8s.io/pause:3.9",
                 max_instances=3,
                 resource_requests=K8sResourceQuantities(cpu="100m", memory="128Mi"),
                 resource_limits=K8sResourceQuantities(cpu="500m", memory="256Mi"),
-                command=["sh", "-c", "sleep 3600"],
             ),
         ]
 

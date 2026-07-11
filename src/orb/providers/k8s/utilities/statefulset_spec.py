@@ -70,7 +70,11 @@ def make_statefulset_name(
         pfx = "orb"
         n_chars = _DEFAULT_STATEFULSET_UUID_CHARS
         max_len = _STATEFULSET_NAME_MAX_LEN
-    safe = (request_id or "unknown").replace("-", "")
+    rid = request_id or "unknown"
+    # Strip a leading req- / req_ prefix so the uuid segment is pure hex.
+    if rid.startswith(("req-", "req_")):
+        rid = rid[4:]
+    safe = rid.replace("-", "")
     uuid_seg = safe[:n_chars] if safe else "unknown"
     name = f"{pfx}-{uuid_seg}"
     if len(name) > max_len:  # pragma: no cover — defensive

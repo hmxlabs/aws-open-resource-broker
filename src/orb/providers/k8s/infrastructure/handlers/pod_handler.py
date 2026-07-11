@@ -157,7 +157,7 @@ class K8sPodHandler(K8sHandlerBase):
         pods_to_create: list[tuple[str, Any]] = []
         _audited = False
         for seq in range(count):
-            pod_name = make_pod_name(str(request.request_id), seq)
+            pod_name = make_pod_name(str(request.request_id), seq, naming=self._config.naming)
             if native_pod_body is not None:
                 pod_body: Any = self._stamp_native_pod_body(
                     native_pod_body,
@@ -450,11 +450,10 @@ class K8sPodHandler(K8sHandlerBase):
                 name="Kubernetes Pod example",
                 description="Submit a single pod via the kubernetes provider.",
                 provider_api="Pod",
-                image_id="busybox:latest",
+                image_id="registry.k8s.io/pause:3.9",
                 max_instances=1,
                 resource_requests=K8sResourceQuantities(cpu="100m", memory="128Mi"),
                 resource_limits=K8sResourceQuantities(cpu="500m", memory="256Mi"),
-                command=["sh", "-c", "sleep 3600"],
             ),
         ]
 
