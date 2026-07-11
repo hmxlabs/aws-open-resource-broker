@@ -105,6 +105,17 @@ class K8sTemplateDTOConfig(BaseModel):
         None, description="``terminationGracePeriodSeconds`` applied to pods."
     )
 
+    # Pod restart policy
+    restart_policy: Optional[str] = Field(
+        None,
+        description=(
+            "``restartPolicy`` applied to pods.  One of 'Always' / 'OnFailure' / "
+            "'Never'.  Per-kind constraints apply at build time: "
+            "Deployment/StatefulSet always use 'Always'; Job accepts only "
+            "'Never'/'OnFailure'; bare Pod accepts any."
+        ),
+    )
+
     # Container health probes
     readiness_probe: Optional[dict[str, Any]] = Field(
         None, description="Readiness probe applied to the container."

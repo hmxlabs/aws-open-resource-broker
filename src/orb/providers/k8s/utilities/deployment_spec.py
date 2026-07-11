@@ -22,6 +22,7 @@ confined to the provider tree (enforced by the
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING, Any, Optional
 
 from orb.domain.request.aggregate import Request
@@ -45,6 +46,8 @@ from orb.providers.k8s.utilities.pod_spec import (
 
 if TYPE_CHECKING:  # pragma: no cover — type-checking only
     from kubernetes.client import V1Deployment
+
+_logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -173,6 +176,17 @@ def build_deployment_spec(
     volumes = build_pod_volumes(k8s_template)
     security_context = build_pod_security_context(k8s_template.security_context)
 
+    # Deployment pods MUST use restartPolicy=Always — the Kubernetes API server
+    # rejects any other value in a Deployment pod template.  If an operator set a
+    # different value on the template, warn and ignore it rather than produce a
+    # spec the apiserver will reject.
+    if k8s_template.restart_policy not in (None, "Always"):
+        _logger.warning(
+            "restart_policy=%r on template %r is ignored for Deployment workloads; "
+            "the Kubernetes API requires 'Always' for Deployment pod templates.",
+            k8s_template.restart_policy,
+            k8s_template.template_id,
+        )
     pod_spec_kwargs: dict[str, Any] = {
         "containers": [container],
         "restart_policy": "Always",
@@ -208,7 +222,9 @@ def build_deployment_spec(
 
     if k8s_template.pod_spec_override:
         transient = V1Pod(spec=pod_template.spec)
-        merged = apply_pod_spec_override(transient, k8s_template.pod_spec_override)
+        merged = apply_pod_spec_override(
+            transient, k8s_template.pod_spec_override, expected_restart_policy="Always"
+        )
         pod_template.spec = merged.spec
 
     deployment_spec = V1DeploymentSpec(

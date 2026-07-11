@@ -49,6 +49,7 @@ from orb.providers.k8s.utilities.pod_spec import (
     build_pod_volumes,
     resolve_image_pull_secret_name,
     resolve_node_selector,
+    resolve_restart_policy,
 )
 
 if TYPE_CHECKING:  # pragma: no cover — type-checking only
@@ -172,9 +173,15 @@ def build_job_spec(
     volumes = build_pod_volumes(k8s_template)
     security_context = build_pod_security_context(k8s_template.security_context)
 
+    restart_policy = resolve_restart_policy(
+        k8s_template,
+        config=config,
+        kind_default="Never",
+        allowed_values=frozenset({"Never", "OnFailure"}),
+    )
     pod_spec_kwargs: dict[str, Any] = {
         "containers": [container],
-        "restart_policy": "Never",
+        "restart_policy": restart_policy,
     }
     if node_selector is not None:
         pod_spec_kwargs["node_selector"] = node_selector
@@ -207,7 +214,9 @@ def build_job_spec(
 
     if k8s_template.pod_spec_override:
         transient = V1Pod(spec=pod_template.spec)
-        merged = apply_pod_spec_override(transient, k8s_template.pod_spec_override)
+        merged = apply_pod_spec_override(
+            transient, k8s_template.pod_spec_override, expected_restart_policy=restart_policy
+        )
         pod_template.spec = merged.spec
 
     effective_parallelism = (

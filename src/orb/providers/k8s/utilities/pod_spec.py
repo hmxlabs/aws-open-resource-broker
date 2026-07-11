@@ -134,13 +134,22 @@ def request_id_label_selector(
 # ---------------------------------------------------------------------------
 
 
-def apply_pod_spec_override(pod: V1Pod, override: Optional[dict[str, Any]]) -> V1Pod:
+def apply_pod_spec_override(
+    pod: V1Pod,
+    override: Optional[dict[str, Any]],
+    *,
+    expected_restart_policy: str = "Never",
+) -> V1Pod:
     """Deep-merge ``override`` onto the pod's ``spec`` payload.
 
-    The ``restartPolicy: Never`` invariant is mandatory: ORB relies on pods
-    not self-restarting so that a pod deletion is always a clean release.
-    Any override that tries to change this is rejected before and after the
-    merge so the error message points at the offending key.
+    The pod's resolved ``restartPolicy`` is an invariant the override must not
+    change: ORB relies on a known restart policy so its release/GC model stays
+    consistent (for bare Pods and Jobs the default is ``Never`` so pod deletion
+    is a clean release; for Deployment/StatefulSet pods the policy is ``Always``
+    as the Kubernetes API mandates).  ``expected_restart_policy`` is the value
+    the spec builder already set; any override that tries to change it away from
+    that value is rejected before and after the merge so the error message
+    points at the offending key.
     """
     if not override:
         return pod
@@ -155,12 +164,13 @@ def apply_pod_spec_override(pod: V1Pod, override: Optional[dict[str, Any]]) -> V
     # the error points directly at the override the operator supplied.
     restart_override_keys = ("restart_policy", "restartPolicy")
     for key in restart_override_keys:
-        if key in override and override[key] != "Never":
+        if key in override and override[key] != expected_restart_policy:
             raise K8sError(
                 f"pod_spec_override contains '{key}: {override[key]!r}' which would "
-                "overwrite the mandatory restartPolicy=Never invariant. "
-                "ORB requires restartPolicy=Never so that pod deletion is always a "
-                "clean release. Remove the offending key from pod_spec_override."
+                f"overwrite the resolved restartPolicy={expected_restart_policy!r} "
+                "invariant. ORB requires a consistent restartPolicy so its "
+                "release/GC model stays correct. Remove the offending key from "
+                "pod_spec_override (set the template restart_policy field instead)."
             )
 
     # Normalise operator-supplied override: the kubernetes Python SDK uses
@@ -177,11 +187,11 @@ def apply_pod_spec_override(pod: V1Pod, override: Optional[dict[str, Any]]) -> V
 
     # Post-merge assertion: the deep-merge must not have silently clobbered
     # restart_policy through a nested path we did not anticipate.
-    if pod.spec.restart_policy != "Never":
+    if pod.spec.restart_policy != expected_restart_policy:
         raise K8sError(
             f"pod_spec_override silently changed restartPolicy to "
             f"{pod.spec.restart_policy!r} after deep-merge. "
-            "The mandatory restartPolicy=Never invariant must be preserved."
+            f"The resolved restartPolicy={expected_restart_policy!r} must be preserved."
         )
 
     return pod
@@ -364,6 +374,44 @@ def resolve_image_pull_secret_name(
     return None
 
 
+def resolve_restart_policy(
+    k8s_template: K8sTemplate,
+    *,
+    config: Optional[K8sProviderConfig],
+    kind_default: str,
+    allowed_values: frozenset[str],
+) -> str:
+    """Resolve a pod's ``restartPolicy`` from template, config, or kind default.
+
+    Resolution order:
+
+    1. ``k8s_template.restart_policy`` — explicit per-template override.
+    2. ``config.default_restart_policy`` — provider-level default.
+    3. ``kind_default`` — the built-in default for this workload kind.
+
+    The resolved value is validated against ``allowed_values`` for the calling
+    kind (e.g. Job permits only ``Never``/``OnFailure``).  Deployment and
+    StatefulSet builders do not call this helper — their policy is always
+    ``Always`` as the Kubernetes API mandates.
+
+    Raises:
+        K8sError: when the resolved value is outside ``allowed_values``.
+    """
+    from orb.providers.k8s.exceptions.k8s_exceptions import K8sError
+
+    candidate = getattr(k8s_template, "restart_policy", None)
+    if candidate is None and config is not None:
+        candidate = getattr(config, "default_restart_policy", None)
+    if candidate is None:
+        return kind_default
+    if candidate not in allowed_values:
+        raise K8sError(
+            f"restart_policy {candidate!r} is not valid for this workload kind. "
+            f"Allowed values: {sorted(allowed_values)!r}."
+        )
+    return candidate
+
+
 # ---------------------------------------------------------------------------
 # Pod-spec assembly
 # ---------------------------------------------------------------------------
@@ -441,9 +489,15 @@ def build_pod_spec(
     volumes = build_pod_volumes(k8s_template)
     security_context = build_pod_security_context(k8s_template.security_context)
 
+    restart_policy = resolve_restart_policy(
+        k8s_template,
+        config=config,
+        kind_default="Never",
+        allowed_values=frozenset({"Always", "OnFailure", "Never"}),
+    )
     pod_spec_kwargs: dict[str, Any] = {
         "containers": [container],
-        "restart_policy": "Never",
+        "restart_policy": restart_policy,
     }
     if node_selector is not None:
         pod_spec_kwargs["node_selector"] = node_selector
@@ -479,7 +533,9 @@ def build_pod_spec(
         metadata=pod_metadata,
         spec=V1PodSpec(**pod_spec_kwargs),
     )
-    return apply_pod_spec_override(pod, k8s_template.pod_spec_override)
+    return apply_pod_spec_override(
+        pod, k8s_template.pod_spec_override, expected_restart_policy=restart_policy
+    )
 
 
 __all__ = [
@@ -498,4 +554,5 @@ __all__ = [
     "request_id_label_selector",
     "resolve_image_pull_secret_name",
     "resolve_node_selector",
+    "resolve_restart_policy",
 ]

@@ -63,6 +63,8 @@ class K8sFieldMapping:
         "priorityClassName": "priority_class_name",
         # Pod termination
         "terminationGracePeriodSeconds": "termination_grace_period_seconds",
+        # Pod restart policy
+        "restartPolicy": "restart_policy",
         # Container health probes
         "readinessProbe": "readiness_probe",
         "livenessProbe": "liveness_probe",

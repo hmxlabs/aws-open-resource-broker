@@ -338,6 +338,15 @@ class K8sProviderConfig(BaseSettings, BaseProviderConfig):  # type: ignore[misc]
     default_image_pull_secret: Optional[str] = Field(
         None, description="Default image pull secret name applied to every managed pod."
     )
+    default_restart_policy: Optional[str] = Field(
+        None,
+        description=(
+            "Default ``restartPolicy`` for pods when a template does not set one. "
+            "Per-kind constraints apply: Deployment/StatefulSet always use "
+            "'Always'; Job accepts only 'Never'/'OnFailure'; bare Pod accepts any. "
+            "None means each handler uses its built-in default (Pod/Job='Never')."
+        ),
+    )
 
     # Timing
     pod_timeout_seconds: int = Field(

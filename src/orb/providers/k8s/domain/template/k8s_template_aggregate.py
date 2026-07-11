@@ -386,6 +386,12 @@ class K8sTemplate(Template):
     # Pod termination
     termination_grace_period_seconds: Optional[int] = None
 
+    # Pod restart policy override.  When set the value must be one of the
+    # Kubernetes-accepted values ("Always" / "OnFailure" / "Never").  Per-kind
+    # validity (Deployment/StatefulSet require "Always", Job accepts only
+    # "Never"/"OnFailure") is enforced at spec-build time, not here.
+    restart_policy: Optional[str] = None
+
     # Container health probes
     readiness_probe: Optional[K8sProbe] = None
     liveness_probe: Optional[K8sProbe] = None
@@ -504,6 +510,22 @@ class K8sTemplate(Template):
             raise ValueError("completions / parallelism must be positive integers")
         return value
 
+    @field_validator("restart_policy")
+    @classmethod
+    def _validate_restart_policy(cls, value: Optional[str]) -> Optional[str]:
+        """Reject restart_policy values outside the Kubernetes-accepted set.
+
+        Per-kind validity (Deployment/StatefulSet require "Always"; Job accepts
+        only "Never"/"OnFailure") is enforced at spec-build time — this validator
+        only guards the universally-legal set.
+        """
+        if value is not None and value not in ("Always", "OnFailure", "Never"):
+            raise ValueError(
+                f"restart_policy {value!r} is not a valid Kubernetes restartPolicy. "
+                "Allowed values: 'Always', 'OnFailure', 'Never'."
+            )
+        return value
+
     # ------------------------------------------------------------------
     # Extension-config promotion + service-account fallback
     # ------------------------------------------------------------------
@@ -542,6 +564,7 @@ class K8sTemplate(Template):
             self._promote_field(pc, "parallelism")
             self._promote_field(pc, "priority_class_name")
             self._promote_field(pc, "termination_grace_period_seconds")
+            self._promote_field(pc, "restart_policy")
             self._promote_field(pc, "ttl_seconds_after_finished")
             self._promote_field(pc, "active_deadline_seconds")
             self._promote_field(pc, "pod_spec_override")
