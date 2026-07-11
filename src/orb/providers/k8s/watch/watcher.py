@@ -8,15 +8,21 @@ upserts it into the supplied cache.
 
 Resilience contract:
 
-* **410 Gone**          — drop the in-flight ``resource_version`` and
+* **410 Gone**          -- drop the in-flight ``resource_version`` and
   restart the stream from ``None`` (the apiserver picks the latest).
   The retry budget is reset because a 410 is expected and not a fault.
-* **Other ApiException** — exponential backoff (1s, 2s, 4s … capped
+* **Other ApiException** -- exponential backoff (1s, 2s, 4s ... capped
   at ``max_backoff_seconds``) and retry.
-* **Generic exceptions** — same exponential backoff.
-* **Cancellation**       — :meth:`stop` flips a flag and cancels the
+* **Generic exceptions** -- same exponential backoff.
+* **Cancellation**       -- :meth:`stop` flips a flag and cancels the
   worker task; the inner stream is closed via :meth:`Watch.stop` so
   the blocking ``readline()`` returns promptly.
+* **Periodic resync**    -- when ``periodic_resync_interval_seconds > 0``
+  a second asyncio task fires every N seconds and performs a full LIST
+  to reconcile cache drift independent of 410-Gone.  Mirrors the legacy
+  ``RefreshPodsTask`` (``hfcron.py``) which ran every ~180 s as a
+  correctness backstop against slow-drift apiservers.  Default 0
+  (disabled) -- opt in to avoid extra apiserver load.
 
 The watcher is single-namespace; the multi-namespace fan-out lives in
 :mod:`~orb.providers.k8s.watch.multi_namespace`.
@@ -135,6 +141,7 @@ class K8sWatcher:
         max_backoff_seconds: float = _DEFAULT_MAX_BACKOFF_SECONDS,
         watch_factory: WatchFactory = _default_watch_factory,
         metrics: Any = None,
+        periodic_resync_interval_seconds: int = 0,
     ) -> None:
         self._client = kubernetes_client
         self._cache = cache
@@ -148,8 +155,11 @@ class K8sWatcher:
         self._max_backoff_seconds = max_backoff_seconds
         self._watch_factory = watch_factory
         self._metrics = metrics
+        # Periodic full-LIST backstop (0 = disabled).
+        self._periodic_resync_interval_seconds = periodic_resync_interval_seconds
 
         self._task: Optional[asyncio.Task[None]] = None
+        self._resync_task: Optional[asyncio.Task[None]] = None
         self._stop_event = asyncio.Event()
         # threading.Event mirrors _stop_event and is safe to read from the
         # worker thread spawned by asyncio.to_thread.  asyncio.Event is bound
@@ -193,8 +203,12 @@ class K8sWatcher:
     def start(self) -> None:
         """Spawn the watch task on the current event loop.
 
-        Idempotent — subsequent calls while the task is running are
+        Idempotent -- subsequent calls while the task is running are
         ignored.  After :meth:`stop` the watcher can be re-started.
+
+        When ``periodic_resync_interval_seconds > 0``, a second asyncio
+        task is also started that performs a full LIST every N seconds
+        as a correctness backstop against slow-drift apiservers.
         """
         if self.is_running():
             return
@@ -209,25 +223,52 @@ class K8sWatcher:
                 else "k8s-watcher[cluster]"
             ),
         )
+        if self._periodic_resync_interval_seconds > 0:
+            self._resync_task = asyncio.create_task(
+                self._run_periodic_resync(),
+                name=(
+                    f"k8s-resync[{self._namespace}]"
+                    if self._namespace is not None
+                    else "k8s-resync[cluster]"
+                ),
+            )
+            self._logger.info(
+                "Kubernetes pod watcher: periodic resync enabled (namespace=%s, interval=%ss)",
+                self._namespace,
+                self._periodic_resync_interval_seconds,
+            )
 
     async def stop(self) -> None:
-        """Stop the watch task and wait for it to settle.
+        """Stop the watch task (and resync task) and wait for them to settle.
 
         Safe to call multiple times.  Closes the inner ``Watch`` so the
-        blocking stream returns promptly, then awaits the task.
+        blocking stream returns promptly, then awaits the tasks.
         """
         self._stop_event.set()
         self._stop_thread_event.set()
         watch = self._active_watch
         if watch is not None:
             try:
-                # ``Watch.stop`` does its own socket shutdown — protect
+                # ``Watch.stop`` does its own socket shutdown -- protect
                 # against the unlikely case where the SDK raises.
                 stop_fn = getattr(watch, "stop", None)
                 if callable(stop_fn):
                     stop_fn()
-            except Exception as exc:  # pragma: no cover — defensive
+            except Exception as exc:  # pragma: no cover -- defensive
                 self._logger.debug("Watch.stop raised (ignored): %s", exc, exc_info=True)
+
+        # Stop the periodic resync task first (it waits on _stop_event too).
+        resync_task = self._resync_task
+        if resync_task is not None and not resync_task.done():
+            try:
+                await asyncio.wait_for(resync_task, timeout=5.0)
+            except asyncio.TimeoutError:
+                resync_task.cancel()
+                try:
+                    await resync_task
+                except (asyncio.CancelledError, Exception):  # pragma: no cover
+                    pass
+        self._resync_task = None
 
         task = self._task
         if task is None:
@@ -315,6 +356,61 @@ class K8sWatcher:
                     break
                 continue
         self._logger.debug("Kubernetes watch loop exited (namespace=%s)", self._namespace)
+
+    async def _run_periodic_resync(self) -> None:
+        """Periodically perform a full LIST and reconcile the pod cache.
+
+        Runs as a sibling asyncio task to the main watch loop.  Fires
+        every ``periodic_resync_interval_seconds`` seconds (measured
+        from the previous resync completion, not the start time) and
+        calls :meth:`_relist_snapshot` -- the same full-LIST path used
+        on 410-Gone recovery -- to reconcile any cache drift that
+        accumulated while the watch was healthy.
+
+        This mirrors the legacy ``RefreshPodsTask`` (``hfcron.py``)
+        which ran every ~180 s as a backstop against slow-drift
+        apiservers past ``stale_cache_timeout_seconds``.
+
+        Errors during resync are logged as warnings and do not propagate
+        -- the watch task continues serving from the existing cache.
+        The task exits cleanly when :attr:`_stop_event` is set.
+        """
+        interval = self._periodic_resync_interval_seconds
+        if interval <= 0:
+            return  # Disabled -- should not be spawned, but guard defensively.
+        self._logger.debug(
+            "Kubernetes pod watcher periodic resync task started (namespace=%s, interval=%ss)",
+            self._namespace,
+            interval,
+        )
+        while not self._stop_event.is_set():
+            # Wait the full interval (or until stop is requested).
+            if await self._sleep_or_stop(float(interval)):
+                break  # Stop requested.
+            if self._stop_event.is_set():
+                break
+            try:
+                self._logger.debug(
+                    "Kubernetes pod watcher: starting periodic resync (namespace=%s)",
+                    self._namespace,
+                )
+                await asyncio.to_thread(self._relist_snapshot)
+                self._logger.debug(
+                    "Kubernetes pod watcher: periodic resync complete (namespace=%s)",
+                    self._namespace,
+                )
+            except asyncio.CancelledError:  # pragma: no cover
+                raise
+            except Exception as exc:
+                self._logger.warning(
+                    "Kubernetes pod watcher periodic resync failed (namespace=%s): %s",
+                    self._namespace,
+                    exc,
+                )
+        self._logger.debug(
+            "Kubernetes pod watcher periodic resync task exited (namespace=%s)",
+            self._namespace,
+        )
 
     def _record_reconnect(self, reason: str) -> None:
         """Increment ``orb_k8s_watch_reconnects_total`` when metrics are wired."""

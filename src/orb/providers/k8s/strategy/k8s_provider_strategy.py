@@ -58,6 +58,7 @@ from orb.providers.k8s.services.instance_operation_service import (
 )
 from orb.providers.k8s.strategy.handler_registry import K8sHandlerRegistry
 from orb.providers.k8s.value_objects import KubernetesProviderApi
+from orb.providers.k8s.watch.events_watcher import K8sEventsWatcher, K8sNodeEventsCache
 from orb.providers.k8s.watch.multi_namespace import MultiNamespaceWatcher
 from orb.providers.k8s.watch.node_state_cache import K8sNodeStateCache
 from orb.providers.k8s.watch.node_watcher import K8sNodeWatcher
@@ -157,6 +158,8 @@ class K8sProviderStrategy(ProviderStrategy):
         orphan_gc: Optional[OrphanGarbageCollector] = None,
         node_watcher: Optional[K8sNodeWatcher] = None,
         node_state_cache: Optional[K8sNodeStateCache] = None,
+        events_watcher: Optional[K8sEventsWatcher] = None,
+        node_events_cache: Optional[K8sNodeEventsCache] = None,
         native_spec_service: Optional[Any] = None,
     ) -> None:
         if not isinstance(config, K8sProviderConfig):
@@ -191,6 +194,12 @@ class K8sProviderStrategy(ProviderStrategy):
         # Tests inject both via the constructor kwargs to avoid real threads.
         self._node_state_cache: K8sNodeStateCache = node_state_cache or K8sNodeStateCache()
         self._node_watcher: Optional[K8sNodeWatcher] = node_watcher
+        # Events API watching.  When ``events_watch_enabled=True`` (opt-in via
+        # K8sProviderConfig) the strategy starts a K8sEventsWatcher on a
+        # background thread and populates K8sNodeEventsCache with Karpenter
+        # node-disruption events.  Tests inject both via constructor kwargs.
+        self._node_events_cache: K8sNodeEventsCache = node_events_cache or K8sNodeEventsCache()
+        self._events_watcher: Optional[K8sEventsWatcher] = events_watcher
         # Native-spec escape hatch.  Resolved lazily on first handler
         # construction.  ``None`` after resolution means the service is
         # unavailable (jinja2 missing, injected service not provided, etc.)
@@ -331,6 +340,7 @@ class K8sProviderStrategy(ProviderStrategy):
         self._maybe_start_watch_manager()
         self._maybe_start_orphan_gc()
         self._maybe_start_node_watcher()
+        self._maybe_start_events_watcher()
         self._daemon_services_started = True
 
     def cleanup(self) -> None:
@@ -366,6 +376,15 @@ class K8sProviderStrategy(ProviderStrategy):
         except Exception as exc:
             self._logger.warning(
                 "Failed to stop Kubernetes node watcher during cleanup: %s", exc, exc_info=True
+            )
+
+        try:
+            if self._events_watcher is not None:
+                self._events_watcher.stop()
+                self._events_watcher = None
+        except Exception as exc:
+            self._logger.warning(
+                "Failed to stop Kubernetes events watcher during cleanup: %s", exc, exc_info=True
             )
 
         # Stage 4: client cleanup.  Only clear ``_initialized`` when the
@@ -706,6 +725,48 @@ class K8sProviderStrategy(ProviderStrategy):
             self._logger.info("Kubernetes node watcher started (node_watch_enabled=True)")
         except Exception as exc:
             self._logger.warning("Failed to start Kubernetes node watcher: %s", exc, exc_info=True)
+
+    # ------------------------------------------------------------------
+    # Events watcher lifecycle
+    # ------------------------------------------------------------------
+
+    @property
+    def node_events_cache(self) -> K8sNodeEventsCache:
+        """The shared node-events cache populated by the Events API watcher.
+
+        Always present (never ``None``) -- when ``events_watch_enabled`` is
+        ``False`` it is simply an empty cache that returns ``None`` for
+        every lookup.
+        """
+        return self._node_events_cache
+
+    def _maybe_start_events_watcher(self) -> None:
+        """Start the Events API watcher when enabled by config.
+
+        Like the node watcher, the events watcher runs on a plain
+        background daemon thread (not in the asyncio event loop) so it
+        can start from both synchronous (CLI bootstrap) and async
+        (daemon) contexts.
+
+        Requires the operator to have granted the ``events: get/list/watch``
+        RBAC verb on the core API group -- see
+        ``docs/root/providers/k8s/rbac.yaml``.
+        """
+        if not self._k8s_config.events_watch_enabled:
+            return
+        if self._events_watcher is None:
+            self._events_watcher = K8sEventsWatcher(
+                kubernetes_client=self.kubernetes_client,
+                cache=self._node_events_cache,
+                logger=self._logger,
+            )
+        try:
+            self._events_watcher.start()
+            self._logger.info("Kubernetes events watcher started (events_watch_enabled=True)")
+        except Exception as exc:
+            self._logger.warning(
+                "Failed to start Kubernetes events watcher: %s", exc, exc_info=True
+            )
 
     # ------------------------------------------------------------------
     # Operation dispatch

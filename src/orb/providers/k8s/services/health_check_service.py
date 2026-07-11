@@ -135,18 +135,10 @@ class K8sHealthCheckService:
         health_check: "HealthCheck",
         kubernetes_client: "K8sClient",
     ) -> None:
-        """Register Kubernetes-specific health checks if the client is reachable."""
-        try:
-            client = kubernetes_client
-        except Exception as exc:
-            self._logger.debug(
-                "Skipping Kubernetes health-check registration: %s", exc, exc_info=True
-            )
-            return
-
+        """Register Kubernetes-specific health checks."""
         from orb.providers.k8s.health import register_k8s_health_checks
 
-        register_k8s_health_checks(health_check, client)
+        register_k8s_health_checks(health_check, kubernetes_client)
 
 
 __all__ = ["K8sHealthCheckService"]

@@ -447,6 +447,38 @@ class K8sProviderConfig(BaseSettings, BaseProviderConfig):  # type: ignore[misc]
         ),
     )
 
+    # Events API watching (node-disruption visibility)
+    events_watch_enabled: bool = Field(
+        False,
+        description=(
+            "Opt-in flag for the k8s Events API watch background task.  When True, ORB "
+            "starts a K8sEventsWatcher that streams ``CoreV1Api.list_event_for_all_namespaces`` "
+            "filtered to ``involvedObject.kind=Node`` and caches Karpenter node-disruption "
+            "events (e.g. 'Disrupting Node: Underutilized/Delete', 'Disrupting Node: "
+            "Empty/Delete').  The cached disruption reason is available for surfacing in "
+            "status responses.  Default ``False`` because the events watcher requires "
+            "an additional RBAC grant (``events: get/list/watch`` on the core API group) "
+            "that may not exist in every cluster -- see "
+            "``docs/root/providers/k8s/rbac.yaml`` for the required rule."
+        ),
+    )
+
+    # Periodic full-LIST backstop for the pod watcher
+    periodic_resync_interval_seconds: int = Field(
+        0,
+        description=(
+            "Interval in seconds at which the pod watcher performs a full LIST of all "
+            "managed pods and reconciles the in-process cache, independent of 410-Gone "
+            "responses.  Mirrors the legacy RefreshPodsTask (hfcron.py) which ran every "
+            "~180 s as a correctness backstop against slow-drift apiservers.  "
+            "Default 0 (disabled) to avoid extra apiserver load -- opt in by setting a "
+            "positive value (e.g. 180).  When >0, a background asyncio task wakes every "
+            "``periodic_resync_interval_seconds`` and calls the same _relist_snapshot "
+            "path used on 410-Gone recovery, reconciling any cache drift that "
+            "accumulated during a healthy watch session."
+        ),
+    )
+
     # Controller-status cache
     controller_status_cache_ttl_seconds: float = Field(
         5.0,
