@@ -8,7 +8,6 @@ integrates with the configuration loader and the provider settings registry.
 from __future__ import annotations
 
 import contextlib
-import re
 from pathlib import Path
 from typing import Any, Optional
 
@@ -17,12 +16,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from orb.infrastructure.interfaces.provider import BaseProviderConfig
 from orb.infrastructure.logging.logger import get_logger
+from orb.providers.k8s.utilities.dns_names import DNS_1123_SUBDOMAIN_REGEX as _DNS_SUBDOMAIN_RE
 
 _SA_NAMESPACE_FILE = Path("/var/run/secrets/kubernetes.io/serviceaccount/namespace")
-
-# RFC 1123 DNS subdomain: one or more labels separated by dots where each
-# label starts and ends with [a-z0-9] and may contain hyphens in the middle.
-_DNS_SUBDOMAIN_RE = re.compile(r"^[a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*$")
 
 # Symphony-era field names that were renamed when the k8s provider was
 # introduced.  Keys are the legacy names; values are the canonical names.

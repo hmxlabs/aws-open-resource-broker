@@ -171,13 +171,19 @@ class K8sJobHandler(K8sHandlerBase):
 
         self._audit_spec_body(body)
 
-        await asyncio.to_thread(
-            self.with_retry,
-            self.client.batch_v1.create_namespaced_job,
-            namespace=namespace,
-            body=body,
-            operation_name="create_namespaced_job",
-        )
+        try:
+            with self._timed_api_call("create_namespaced_job"):
+                await asyncio.to_thread(
+                    self.with_retry,
+                    self.client.batch_v1.create_namespaced_job,
+                    namespace=namespace,
+                    body=body,
+                    operation_name="create_namespaced_job",
+                )
+        except Exception as exc:
+            raise self._classify_and_record_api_exception(
+                exc, operation="create_namespaced_job"
+            ) from exc
 
         return {
             "success": True,
@@ -274,12 +280,13 @@ class K8sJobHandler(K8sHandlerBase):
         best-effort — a Job that already evaporated is fine.
         """
         try:
-            await asyncio.to_thread(
-                self.client.batch_v1.delete_namespaced_job,
-                name=job_name,
-                namespace=namespace,
-                propagation_policy="Background",
-            )
+            with self._timed_api_call("delete_namespaced_job"):
+                await asyncio.to_thread(
+                    self.client.batch_v1.delete_namespaced_job,
+                    name=job_name,
+                    namespace=namespace,
+                    propagation_policy="Background",
+                )
             return
         except Exception as exc:
             if self.is_not_found(exc):
@@ -297,14 +304,15 @@ class K8sJobHandler(K8sHandlerBase):
             )
 
         try:
-            await asyncio.to_thread(
-                self.with_retry,
-                self.client.batch_v1.delete_namespaced_job,
-                name=job_name,
-                namespace=namespace,
-                propagation_policy="Background",
-                operation_name="delete_namespaced_job",
-            )
+            with self._timed_api_call("delete_namespaced_job"):
+                await asyncio.to_thread(
+                    self.with_retry,
+                    self.client.batch_v1.delete_namespaced_job,
+                    name=job_name,
+                    namespace=namespace,
+                    propagation_policy="Background",
+                    operation_name="delete_namespaced_job",
+                )
         except Exception as exc:
             if self.is_not_found(exc):
                 return
@@ -314,7 +322,9 @@ class K8sJobHandler(K8sHandlerBase):
                 namespace,
                 exc,
             )
-            raise
+            raise self._classify_and_record_api_exception(
+                exc, operation="delete_namespaced_job"
+            ) from exc
 
     # ------------------------------------------------------------------
     # Helpers

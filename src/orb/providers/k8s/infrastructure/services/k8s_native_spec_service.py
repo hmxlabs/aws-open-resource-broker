@@ -306,6 +306,11 @@ class K8sNativeSpecService:
         merged_labels: dict[str, str] = dict(operator_labels)
         merged_labels.update(system_labels)
 
+        env_list = k8s_template.resolve_env_api_list() or []
+        volume_mounts = list(k8s_template.volume_mounts or [])
+        volumes_list = k8s_template.resolve_volumes_api_list() or []
+        tolerations_list = k8s_template.resolve_tolerations_api_list() or []
+
         return {
             "request_id": str(request.request_id),
             "requested_count": replicas,
@@ -326,8 +331,16 @@ class K8sNativeSpecService:
             "resource_limits": resource_limits,
             "command": list(k8s_template.command or []),
             "args": list(k8s_template.args or []),
+            "env": env_list,
+            "volume_mounts": volume_mounts,
+            "volumes": volumes_list,
+            "tolerations": tolerations_list,
             "has_command": bool(k8s_template.command),
             "has_args": bool(k8s_template.args),
+            "has_env": bool(env_list),
+            "has_volume_mounts": bool(volume_mounts),
+            "has_volumes": bool(volumes_list),
+            "has_tolerations": bool(tolerations_list),
             "has_resource_requests": bool(resource_requests),
             "has_resource_limits": bool(resource_limits),
             "has_node_selector": bool(k8s_template.node_selector),

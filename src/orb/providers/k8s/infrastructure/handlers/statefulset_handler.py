@@ -192,13 +192,19 @@ class K8sStatefulSetHandler(K8sHandlerBase):
 
         self._audit_spec_body(body)
 
-        await asyncio.to_thread(
-            self.with_retry,
-            self.client.apps_v1.create_namespaced_stateful_set,
-            namespace=namespace,
-            body=body,
-            operation_name="create_namespaced_stateful_set",
-        )
+        try:
+            with self._timed_api_call("create_namespaced_stateful_set"):
+                await asyncio.to_thread(
+                    self.with_retry,
+                    self.client.apps_v1.create_namespaced_stateful_set,
+                    namespace=namespace,
+                    body=body,
+                    operation_name="create_namespaced_stateful_set",
+                )
+        except Exception as exc:
+            raise self._classify_and_record_api_exception(
+                exc, operation="create_namespaced_stateful_set"
+            ) from exc
 
         return {
             "success": True,
@@ -363,14 +369,15 @@ class K8sStatefulSetHandler(K8sHandlerBase):
         """Patch the StatefulSet's ``spec.replicas`` to ``target``."""
         body = {"spec": {"replicas": target}}
         try:
-            await asyncio.to_thread(
-                self.with_retry,
-                self.client.apps_v1.patch_namespaced_stateful_set_scale,
-                name=statefulset_name,
-                namespace=namespace,
-                body=body,
-                operation_name="patch_namespaced_stateful_set_scale",
-            )
+            with self._timed_api_call("patch_namespaced_stateful_set_scale"):
+                await asyncio.to_thread(
+                    self.with_retry,
+                    self.client.apps_v1.patch_namespaced_stateful_set_scale,
+                    name=statefulset_name,
+                    namespace=namespace,
+                    body=body,
+                    operation_name="patch_namespaced_stateful_set_scale",
+                )
         except Exception as exc:
             if self.is_not_found(exc):
                 self._logger.debug(
@@ -379,16 +386,19 @@ class K8sStatefulSetHandler(K8sHandlerBase):
                     namespace,
                 )
                 return
-            raise
+            raise self._classify_and_record_api_exception(
+                exc, operation="patch_namespaced_stateful_set_scale"
+            ) from exc
 
     async def _delete_statefulset(self, namespace: str, statefulset_name: str) -> None:
         """Delete the StatefulSet after scaling to zero (full-release path)."""
         try:
-            await asyncio.to_thread(
-                self.client.apps_v1.delete_namespaced_stateful_set,
-                name=statefulset_name,
-                namespace=namespace,
-            )
+            with self._timed_api_call("delete_namespaced_stateful_set"):
+                await asyncio.to_thread(
+                    self.client.apps_v1.delete_namespaced_stateful_set,
+                    name=statefulset_name,
+                    namespace=namespace,
+                )
             return
         except Exception as exc:
             if self.is_not_found(exc):
@@ -406,13 +416,14 @@ class K8sStatefulSetHandler(K8sHandlerBase):
             )
 
         try:
-            await asyncio.to_thread(
-                self.with_retry,
-                self.client.apps_v1.delete_namespaced_stateful_set,
-                name=statefulset_name,
-                namespace=namespace,
-                operation_name="delete_namespaced_stateful_set",
-            )
+            with self._timed_api_call("delete_namespaced_stateful_set"):
+                await asyncio.to_thread(
+                    self.with_retry,
+                    self.client.apps_v1.delete_namespaced_stateful_set,
+                    name=statefulset_name,
+                    namespace=namespace,
+                    operation_name="delete_namespaced_stateful_set",
+                )
         except Exception as exc:
             if self.is_not_found(exc):
                 return
@@ -422,7 +433,9 @@ class K8sStatefulSetHandler(K8sHandlerBase):
                 namespace,
                 exc,
             )
-            raise
+            raise self._classify_and_record_api_exception(
+                exc, operation="delete_namespaced_stateful_set"
+            ) from exc
 
     def _read_statefulset_spec_replicas(
         self,
@@ -437,16 +450,19 @@ class K8sStatefulSetHandler(K8sHandlerBase):
         that case so the caller's ``full_release`` decision still works.
         """
         try:
-            statefulset = self.with_retry(
-                self.client.apps_v1.read_namespaced_stateful_set,
-                name=statefulset_name,
-                namespace=namespace,
-                operation_name="read_namespaced_stateful_set",
-            )
+            with self._timed_api_call("read_namespaced_stateful_set"):
+                statefulset = self.with_retry(
+                    self.client.apps_v1.read_namespaced_stateful_set,
+                    name=statefulset_name,
+                    namespace=namespace,
+                    operation_name="read_namespaced_stateful_set",
+                )
         except Exception as exc:
             if self.is_not_found(exc):
                 return None, 0
-            raise
+            raise self._classify_and_record_api_exception(
+                exc, operation="read_namespaced_stateful_set"
+            ) from exc
 
         spec = getattr(statefulset, "spec", None)
         replicas = getattr(spec, "replicas", None) if spec is not None else None

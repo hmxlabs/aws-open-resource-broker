@@ -522,3 +522,119 @@ class TestNativeSpecSafetyHoles:
         assert result is not None
         assert result.get("apiVersion") == "v1"
         assert result.get("kind") == "Pod"
+
+
+# ---------------------------------------------------------------------------
+# Regression: env, volumes, tolerations survive the native-spec merge path
+# ---------------------------------------------------------------------------
+
+
+class TestEnvVolumesTolerationsMergePath:
+    """A request whose spec carries env + volumes + tolerations must produce
+    a rendered default spec that CONTAINS all three — the native-spec context
+    builder must export them and the default templates must conditionally
+    render them.
+    """
+
+    def _make_rich_template(self) -> K8sTemplate:
+        return K8sTemplate(
+            template_id="tpl-rich",
+            image_id="busybox:latest",
+            namespace="orb-test",
+            max_instances=2,
+            env=[{"name": "FOO", "value": "bar"}, {"name": "BAZ", "value": "qux"}],
+            volume_mounts=[{"name": "data", "mountPath": "/data"}],
+            volumes=[{"name": "data", "emptyDir": {}}],
+            tolerations=[{"key": "dedicated", "operator": "Equal", "value": "orb"}],
+        )
+
+    @pytest.mark.parametrize("api_type", ["pod", "deployment", "statefulset", "job"])
+    def test_default_spec_contains_env(self, api_type: str) -> None:
+        service = _make_service()
+        template = self._make_rich_template()
+        request = _make_request(
+            api_type.capitalize() if api_type != "statefulset" else "StatefulSet"
+        )
+        ctx = service._build_k8s_context(template, request, namespace="orb-test")
+
+        assert ctx["has_env"] is True, "context must flag has_env=True"
+        assert len(ctx["env"]) == 2
+        assert ctx["env"][0]["name"] == "FOO"
+
+        out = service.render_default_spec(api_type, ctx)
+        # Locate the container spec — Pod is at spec.containers; others are at
+        # spec.template.spec.containers.
+        if api_type == "pod":
+            containers = out["spec"]["containers"]
+        else:
+            containers = out["spec"]["template"]["spec"]["containers"]
+        assert "env" in containers[0], f"{api_type}: env missing from rendered container spec"
+        assert containers[0]["env"] == [
+            {"name": "FOO", "value": "bar"},
+            {"name": "BAZ", "value": "qux"},
+        ]
+
+    @pytest.mark.parametrize("api_type", ["pod", "deployment", "statefulset", "job"])
+    def test_default_spec_contains_volumes(self, api_type: str) -> None:
+        service = _make_service()
+        template = self._make_rich_template()
+        request = _make_request(
+            api_type.capitalize() if api_type != "statefulset" else "StatefulSet"
+        )
+        ctx = service._build_k8s_context(template, request, namespace="orb-test")
+
+        assert ctx["has_volumes"] is True
+        assert ctx["has_volume_mounts"] is True
+
+        out = service.render_default_spec(api_type, ctx)
+        if api_type == "pod":
+            pod_spec = out["spec"]
+            containers = pod_spec["containers"]
+        else:
+            pod_spec = out["spec"]["template"]["spec"]
+            containers = pod_spec["containers"]
+        assert "volumes" in pod_spec, f"{api_type}: volumes missing from pod spec"
+        assert pod_spec["volumes"] == [{"name": "data", "emptyDir": {}}]
+        assert "volumeMounts" in containers[0], f"{api_type}: volumeMounts missing from container"
+        assert containers[0]["volumeMounts"] == [{"name": "data", "mountPath": "/data"}]
+
+    @pytest.mark.parametrize("api_type", ["pod", "deployment", "statefulset", "job"])
+    def test_default_spec_contains_tolerations(self, api_type: str) -> None:
+        service = _make_service()
+        template = self._make_rich_template()
+        request = _make_request(
+            api_type.capitalize() if api_type != "statefulset" else "StatefulSet"
+        )
+        ctx = service._build_k8s_context(template, request, namespace="orb-test")
+
+        assert ctx["has_tolerations"] is True
+
+        out = service.render_default_spec(api_type, ctx)
+        if api_type == "pod":
+            pod_spec = out["spec"]
+        else:
+            pod_spec = out["spec"]["template"]["spec"]
+        assert "tolerations" in pod_spec, f"{api_type}: tolerations missing from pod spec"
+        assert pod_spec["tolerations"] == [
+            {"key": "dedicated", "operator": "Equal", "value": "orb"}
+        ]
+
+    def test_absent_fields_do_not_appear_in_default_spec(self) -> None:
+        """When env/volumes/tolerations are not set, the rendered spec must not
+        contain those keys — conditional rendering must suppress them."""
+        service = _make_service()
+        template = _make_template()  # no env/volumes/tolerations
+        request = _make_request("Pod")
+        ctx = service._build_k8s_context(template, request, namespace="orb-test")
+
+        assert ctx["has_env"] is False
+        assert ctx["has_volumes"] is False
+        assert ctx["has_volume_mounts"] is False
+        assert ctx["has_tolerations"] is False
+
+        out = service.render_default_spec("pod", ctx)
+        container = out["spec"]["containers"][0]
+        assert "env" not in container, "env must be absent when not set"
+        assert "volumeMounts" not in container, "volumeMounts must be absent when not set"
+        assert "volumes" not in out["spec"], "volumes must be absent when not set"
+        assert "tolerations" not in out["spec"], "tolerations must be absent when not set"

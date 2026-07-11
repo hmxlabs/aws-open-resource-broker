@@ -39,6 +39,8 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
+from orb.providers.k8s.utilities.dns_names import DNS_1123_LABEL_REGEX as _DNS_1123_LABEL
+
 # ---------------------------------------------------------------------------
 # Internal constants — mirrors the consts in template_adapter.py but kept
 # local so this module has no hard import dependency on the adapter.
@@ -46,14 +48,6 @@ from typing import Any, Optional
 
 #: kubernetes resource-API types recognised by the v1 provider.
 _SUPPORTED_PROVIDER_APIS: frozenset[str] = frozenset({"Pod", "Deployment", "StatefulSet", "Job"})
-
-#: DNS-1123 label pattern (namespace / service-account names).
-#:
-#: Rules:
-#: * must start and end with ``[a-z0-9]``
-#: * interior characters may be ``[a-z0-9-]``
-#: * maximum length is 63 characters (Kubernetes restriction)
-_DNS_1123_LABEL = re.compile(r"^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$")
 
 #: Kubernetes resource-quantity pattern (CPU / memory / storage).
 #: Mirrors the regex in :mod:`template_adapter`.
@@ -176,7 +170,7 @@ class K8sTemplateValidator:
         if namespace is None:
             return []
         ns_str = str(namespace)
-        if not _DNS_1123_LABEL.match(ns_str):
+        if len(ns_str) > 63 or not _DNS_1123_LABEL.match(ns_str):
             return [
                 f"namespace {namespace!r} is not a valid DNS-1123 label "
                 "(must be lowercase alphanumeric, may contain hyphens, "
@@ -190,7 +184,7 @@ class K8sTemplateValidator:
         if sa is None:
             return []
         sa_str = str(sa)
-        if not _DNS_1123_LABEL.match(sa_str):
+        if len(sa_str) > 63 or not _DNS_1123_LABEL.match(sa_str):
             return [
                 f"service_account {sa!r} is not a valid DNS-1123 label "
                 "(must be lowercase alphanumeric, may contain hyphens, "

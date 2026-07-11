@@ -147,6 +147,13 @@ def instance_dict_for_pod(
 
     restart_count: int = sum(int(getattr(cs, "restart_count", 0) or 0) for cs in container_statuses)
 
+    # Resolve node-level enrichment when a node cache is available.
+    resolved_instance_type: Optional[str] = None
+    resolved_price_type: Optional[str] = None
+    node_state = None
+    if node_name and node_state_cache is not None:
+        node_state = node_state_cache.get(node_name)
+
     provider_data: dict[str, Any] = {
         "namespace": namespace,
         "node_name": node_name,
@@ -159,12 +166,16 @@ def instance_dict_for_pod(
         "disrupted_reason": disrupted_reason,
         "disrupted_message": disrupted_message,
     }
-    if node_name and node_state_cache is not None:
-        node_state = node_state_cache.get(node_name)
-        if node_state is not None:
-            provider_data["node_instance_type"] = node_state.instance_type
-            provider_data["node_zone"] = node_state.zone
-            provider_data["node_capacity_type"] = node_state.capacity_type
+    if node_state is not None:
+        resolved_instance_type = node_state.instance_type or None
+        resolved_price_type = node_state.capacity_type or None
+        # Diagnostics / UI columns — keep raw node fields for tooling.
+        provider_data["node_instance_type"] = node_state.instance_type
+        provider_data["node_capacity_type"] = node_state.capacity_type
+        provider_data["node_region"] = node_state.region
+        # Parity with AWS provider_data shape.
+        provider_data["availability_zone"] = node_state.zone
+        provider_data["region"] = node_state.region
 
     return {
         "instance_id": name,
@@ -177,13 +188,15 @@ def instance_dict_for_pod(
         # IP and is available in provider_data["host_ip"] above.
         "public_ip": None,
         "launch_time": _to_iso8601(start_time),
-        "instance_type": f"k8s/{provider_api}",
+        "instance_type": resolved_instance_type
+        if resolved_instance_type
+        else f"k8s/{provider_api}",
         "image_id": image_id,
         "subnet_id": None,
         "security_group_ids": [],
         "vpc_id": None,
         "tags": labels,
-        "price_type": None,
+        "price_type": resolved_price_type,
         "provider_api": provider_api,
         "provider_data": provider_data,
         "metadata": {},
@@ -215,6 +228,13 @@ def instance_dict_for_state(
     # function compatible with any older PodState instances that lack it.
     image_id: Optional[str] = getattr(state, "image_id", None) or None
 
+    # Resolve node-level enrichment when a node cache is available.
+    resolved_instance_type: Optional[str] = None
+    resolved_price_type: Optional[str] = None
+    node_state = None
+    if state.node_name and node_state_cache is not None:
+        node_state = node_state_cache.get(state.node_name)
+
     provider_data: dict[str, Any] = {
         "namespace": state.namespace,
         "node_name": state.node_name,
@@ -227,12 +247,16 @@ def instance_dict_for_state(
         "disrupted_reason": state.disrupted_reason,
         "disrupted_message": state.disrupted_message,
     }
-    if state.node_name and node_state_cache is not None:
-        node_state = node_state_cache.get(state.node_name)
-        if node_state is not None:
-            provider_data["node_instance_type"] = node_state.instance_type
-            provider_data["node_zone"] = node_state.zone
-            provider_data["node_capacity_type"] = node_state.capacity_type
+    if node_state is not None:
+        resolved_instance_type = node_state.instance_type or None
+        resolved_price_type = node_state.capacity_type or None
+        # Diagnostics / UI columns — keep raw node fields for tooling.
+        provider_data["node_instance_type"] = node_state.instance_type
+        provider_data["node_capacity_type"] = node_state.capacity_type
+        provider_data["node_region"] = node_state.region
+        # Parity with AWS provider_data shape.
+        provider_data["availability_zone"] = node_state.zone
+        provider_data["region"] = node_state.region
 
     return {
         "instance_id": state.pod_name,
@@ -245,13 +269,15 @@ def instance_dict_for_state(
         # IP and is available in provider_data["host_ip"] above.
         "public_ip": None,
         "launch_time": _to_iso8601(state.start_time),
-        "instance_type": f"k8s/{provider_api}",
+        "instance_type": resolved_instance_type
+        if resolved_instance_type
+        else f"k8s/{provider_api}",
         "image_id": image_id,
         "subnet_id": None,
         "security_group_ids": [],
         "vpc_id": None,
         "tags": dict(state.labels),
-        "price_type": None,
+        "price_type": resolved_price_type,
         "provider_api": provider_api,
         "provider_data": provider_data,
         "metadata": {},

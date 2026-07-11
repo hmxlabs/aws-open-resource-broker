@@ -207,13 +207,19 @@ class K8sDeploymentHandler(K8sHandlerBase):
 
         self._audit_spec_body(body)
 
-        await asyncio.to_thread(
-            self.with_retry,
-            self.client.apps_v1.create_namespaced_deployment,
-            namespace=namespace,
-            body=body,
-            operation_name="create_namespaced_deployment",
-        )
+        try:
+            with self._timed_api_call("create_namespaced_deployment"):
+                await asyncio.to_thread(
+                    self.with_retry,
+                    self.client.apps_v1.create_namespaced_deployment,
+                    namespace=namespace,
+                    body=body,
+                    operation_name="create_namespaced_deployment",
+                )
+        except Exception as exc:
+            raise self._classify_and_record_api_exception(
+                exc, operation="create_namespaced_deployment"
+            ) from exc
 
         return {
             "success": True,
@@ -390,12 +396,13 @@ class K8sDeploymentHandler(K8sHandlerBase):
         }
         async with sem:
             try:
-                await asyncio.to_thread(
-                    self.client.core_v1.patch_namespaced_pod,
-                    name=pod_name,
-                    namespace=namespace,
-                    body=body,
-                )
+                with self._timed_api_call("patch_namespaced_pod"):
+                    await asyncio.to_thread(
+                        self.client.core_v1.patch_namespaced_pod,
+                        name=pod_name,
+                        namespace=namespace,
+                        body=body,
+                    )
                 return
             except Exception as exc:
                 if self.is_not_found(exc):
@@ -413,14 +420,15 @@ class K8sDeploymentHandler(K8sHandlerBase):
                 )
 
             try:
-                await asyncio.to_thread(
-                    self.with_retry,
-                    self.client.core_v1.patch_namespaced_pod,
-                    name=pod_name,
-                    namespace=namespace,
-                    body=body,
-                    operation_name="patch_namespaced_pod",
-                )
+                with self._timed_api_call("patch_namespaced_pod"):
+                    await asyncio.to_thread(
+                        self.with_retry,
+                        self.client.core_v1.patch_namespaced_pod,
+                        name=pod_name,
+                        namespace=namespace,
+                        body=body,
+                        operation_name="patch_namespaced_pod",
+                    )
             except Exception as exc:
                 if self.is_not_found(exc):
                     return
@@ -430,7 +438,9 @@ class K8sDeploymentHandler(K8sHandlerBase):
                     namespace,
                     exc,
                 )
-                raise
+                raise self._classify_and_record_api_exception(
+                    exc, operation="patch_namespaced_pod"
+                ) from exc
 
     async def _patch_replicas(
         self,
@@ -442,14 +452,15 @@ class K8sDeploymentHandler(K8sHandlerBase):
         """Patch the Deployment's ``spec.replicas`` to ``target``."""
         body = {"spec": {"replicas": target}}
         try:
-            await asyncio.to_thread(
-                self.with_retry,
-                self.client.apps_v1.patch_namespaced_deployment_scale,
-                name=deployment_name,
-                namespace=namespace,
-                body=body,
-                operation_name="patch_namespaced_deployment_scale",
-            )
+            with self._timed_api_call("patch_namespaced_deployment_scale"):
+                await asyncio.to_thread(
+                    self.with_retry,
+                    self.client.apps_v1.patch_namespaced_deployment_scale,
+                    name=deployment_name,
+                    namespace=namespace,
+                    body=body,
+                    operation_name="patch_namespaced_deployment_scale",
+                )
         except Exception as exc:
             if self.is_not_found(exc):
                 self._logger.debug(
@@ -458,16 +469,19 @@ class K8sDeploymentHandler(K8sHandlerBase):
                     namespace,
                 )
                 return
-            raise
+            raise self._classify_and_record_api_exception(
+                exc, operation="patch_namespaced_deployment_scale"
+            ) from exc
 
     async def _delete_deployment(self, namespace: str, deployment_name: str) -> None:
         """Delete the Deployment after scaling to zero (full-release path)."""
         try:
-            await asyncio.to_thread(
-                self.client.apps_v1.delete_namespaced_deployment,
-                name=deployment_name,
-                namespace=namespace,
-            )
+            with self._timed_api_call("delete_namespaced_deployment"):
+                await asyncio.to_thread(
+                    self.client.apps_v1.delete_namespaced_deployment,
+                    name=deployment_name,
+                    namespace=namespace,
+                )
             return
         except Exception as exc:
             if self.is_not_found(exc):
@@ -485,13 +499,14 @@ class K8sDeploymentHandler(K8sHandlerBase):
             )
 
         try:
-            await asyncio.to_thread(
-                self.with_retry,
-                self.client.apps_v1.delete_namespaced_deployment,
-                name=deployment_name,
-                namespace=namespace,
-                operation_name="delete_namespaced_deployment",
-            )
+            with self._timed_api_call("delete_namespaced_deployment"):
+                await asyncio.to_thread(
+                    self.with_retry,
+                    self.client.apps_v1.delete_namespaced_deployment,
+                    name=deployment_name,
+                    namespace=namespace,
+                    operation_name="delete_namespaced_deployment",
+                )
         except Exception as exc:
             if self.is_not_found(exc):
                 return
@@ -501,7 +516,9 @@ class K8sDeploymentHandler(K8sHandlerBase):
                 namespace,
                 exc,
             )
-            raise
+            raise self._classify_and_record_api_exception(
+                exc, operation="delete_namespaced_deployment"
+            ) from exc
 
     def _read_deployment_spec_replicas(
         self,
@@ -516,16 +533,19 @@ class K8sDeploymentHandler(K8sHandlerBase):
         case so the caller's ``full_release`` decision still works.
         """
         try:
-            deployment = self.with_retry(
-                self.client.apps_v1.read_namespaced_deployment,
-                name=deployment_name,
-                namespace=namespace,
-                operation_name="read_namespaced_deployment",
-            )
+            with self._timed_api_call("read_namespaced_deployment"):
+                deployment = self.with_retry(
+                    self.client.apps_v1.read_namespaced_deployment,
+                    name=deployment_name,
+                    namespace=namespace,
+                    operation_name="read_namespaced_deployment",
+                )
         except Exception as exc:
             if self.is_not_found(exc):
                 return None, 0
-            raise
+            raise self._classify_and_record_api_exception(
+                exc, operation="read_namespaced_deployment"
+            ) from exc
 
         spec = getattr(deployment, "spec", None)
         replicas = getattr(spec, "replicas", None) if spec is not None else None

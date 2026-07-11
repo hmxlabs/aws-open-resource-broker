@@ -271,13 +271,19 @@ class K8sPodHandler(K8sHandlerBase):
     ) -> str:
         """Submit a single ``create_namespaced_pod`` call under the semaphore."""
         async with sem:
-            await asyncio.to_thread(
-                self.with_retry,
-                self.client.core_v1.create_namespaced_pod,
-                namespace=namespace,
-                body=body,
-                operation_name="create_namespaced_pod",
-            )
+            try:
+                with self._timed_api_call("create_namespaced_pod"):
+                    await asyncio.to_thread(
+                        self.with_retry,
+                        self.client.core_v1.create_namespaced_pod,
+                        namespace=namespace,
+                        body=body,
+                        operation_name="create_namespaced_pod",
+                    )
+            except Exception as exc:
+                raise self._classify_and_record_api_exception(
+                    exc, operation="create_namespaced_pod"
+                ) from exc
         return pod_name
 
     # ------------------------------------------------------------------
@@ -399,11 +405,12 @@ class K8sPodHandler(K8sHandlerBase):
 
         async with sem:
             try:
-                await asyncio.to_thread(
-                    self.with_retry,
-                    _delete_pod_or_skip,
-                    operation_name="delete_namespaced_pod",
-                )
+                with self._timed_api_call("delete_namespaced_pod"):
+                    await asyncio.to_thread(
+                        self.with_retry,
+                        _delete_pod_or_skip,
+                        operation_name="delete_namespaced_pod",
+                    )
             except Exception as exc:
                 if self.is_not_found(exc):
                     # Defensive: with_retry may re-raise after max attempts;
@@ -420,7 +427,10 @@ class K8sPodHandler(K8sHandlerBase):
                     namespace,
                     exc,
                 )
-                raise
+                typed = self._classify_and_record_api_exception(
+                    exc, operation="delete_namespaced_pod"
+                )
+                raise typed from exc
 
     # ------------------------------------------------------------------
     # Examples
