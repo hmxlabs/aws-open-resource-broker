@@ -41,6 +41,7 @@ from orb.infrastructure.di.injectable import injectable
 from orb.providers.k8s.infrastructure.k8s_client import K8sClient
 from orb.providers.k8s.utilities.pod_state import (
     extract_status_reason,
+    is_crash_loop_or_repeated_failure,
     is_pod_ready,
     pod_status_string,
 )
@@ -695,6 +696,17 @@ class K8sWatcher:
                 pod_provider_api or "unknown",
                 name,
             )
+
+        # Escalate crash-looping containers to "failed" regardless of their
+        # current oscillation phase.  Mirrors the same logic in
+        # pod_state_translator.instance_dict_for_pod so the watcher cache
+        # and the on-demand list paths agree.
+        if status_str in ("running", "starting", "pending") and is_crash_loop_or_repeated_failure(
+            container_statuses
+        ):
+            status_str = "failed"
+            if reason is None:
+                reason = "CrashLoopBackOff"
 
         # DisruptionTarget condition — Karpenter preemption signal.
         disrupted_reason: Optional[str] = None

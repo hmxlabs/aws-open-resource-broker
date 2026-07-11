@@ -4,7 +4,7 @@
     {
       "templateId": "k8s-pod-example",
       "maxNumber": 1,
-      "imageId": "busybox:latest",
+      "imageId": "registry.k8s.io/pause:3.9",
       "priceType": "ondemand",
       "allocationStrategy": "lowestPrice",
       "name": "Kubernetes Pod example",
@@ -15,7 +15,7 @@
     {
       "templateId": "k8s-deployment-example",
       "maxNumber": 3,
-      "imageId": "busybox:latest",
+      "imageId": "registry.k8s.io/pause:3.9",
       "priceType": "ondemand",
       "allocationStrategy": "lowestPrice",
       "name": "Kubernetes Deployment example",
@@ -26,7 +26,7 @@
     {
       "templateId": "k8s-statefulset-example",
       "maxNumber": 3,
-      "imageId": "busybox:latest",
+      "imageId": "registry.k8s.io/pause:3.9",
       "priceType": "ondemand",
       "allocationStrategy": "lowestPrice",
       "name": "Kubernetes StatefulSet example",
@@ -37,12 +37,13 @@
     {
       "templateId": "k8s-job-example",
       "maxNumber": 3,
-      "imageId": "busybox:latest",
+      "imageId": "registry.k8s.io/pause:3.9",
       "priceType": "ondemand",
       "allocationStrategy": "lowestPrice",
       "name": "Kubernetes Job example",
       "providerApi": "Job",
       "providerType": "k8s",
+      "command": ["sh", "-c", "exit 0"],
       "createdAt": "2026-07-06T22:07:11.808487"
     }
   ]

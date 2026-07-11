@@ -126,9 +126,68 @@ def is_fatal_waiting_reason(reason: Optional[str]) -> bool:
     return bool(reason) and reason in FATAL_WAITING_REASONS
 
 
+# Minimum restart count before a pod is considered to be in a persistent
+# failure loop.  A single restart can be an innocuous transient event
+# (e.g. OOMKilled from a one-off spike); two or more restarts with a
+# non-zero exit code indicate a recurring crash.
+_CRASH_RESTART_THRESHOLD = 2
+
+
+def is_crash_loop_or_repeated_failure(
+    container_statuses: list[Any],
+    *,
+    restart_threshold: int = _CRASH_RESTART_THRESHOLD,
+) -> bool:
+    """Return ``True`` when a container shows repeated crash-loop behaviour.
+
+    Detects two patterns that can both cause perpetual ``in_progress``
+    status when a container briefly cycles back to ``Running`` between
+    crash iterations:
+
+    1. The current container state is ``Waiting`` with ``CrashLoopBackOff``
+       (covered by :func:`is_fatal_waiting_reason`, but repeated here for
+       completeness of this helper).
+    2. ``restart_count`` has reached *restart_threshold* AND
+       ``last_state.terminated.exit_code`` is non-zero — meaning the
+       container exited abnormally at least twice.  This fires even during
+       the brief ``Running`` window between crashes when
+       ``CrashLoopBackOff`` is not yet showing in the current state.
+
+    Returns ``False`` for pods with ``restartPolicy: Never`` (Jobs / bare
+    Pods) that have not yet been rescheduled — a single failure there is
+    already caught by the ``Failed`` phase path.
+    """
+    for cs in container_statuses:
+        restart_count = int(getattr(cs, "restart_count", 0) or 0)
+
+        # Fast path: current state is already CrashLoopBackOff.
+        state = getattr(cs, "state", None)
+        if state is not None:
+            waiting = getattr(state, "waiting", None)
+            if waiting is not None:
+                reason = getattr(waiting, "reason", None)
+                if reason == "CrashLoopBackOff":
+                    return True
+
+        # Detect crash loop during the brief Running window between restarts:
+        # check last_state.terminated for a non-zero exit code combined with
+        # an accumulated restart count at or above the threshold.
+        if restart_count >= restart_threshold:
+            last_state = getattr(cs, "last_state", None)
+            if last_state is not None:
+                last_terminated = getattr(last_state, "terminated", None)
+                if last_terminated is not None:
+                    exit_code = getattr(last_terminated, "exit_code", None)
+                    if isinstance(exit_code, int) and exit_code != 0:
+                        return True
+
+    return False
+
+
 __all__ = [
     "FATAL_WAITING_REASONS",
     "extract_status_reason",
+    "is_crash_loop_or_repeated_failure",
     "is_fatal_waiting_reason",
     "is_pod_ready",
     "pod_status_string",

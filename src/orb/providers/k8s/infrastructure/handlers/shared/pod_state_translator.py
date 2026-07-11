@@ -35,6 +35,7 @@ from typing import Any, Optional
 
 from orb.providers.k8s.utilities.pod_state import (
     extract_status_reason,
+    is_crash_loop_or_repeated_failure,
     is_fatal_waiting_reason,
     is_pod_ready,
     pod_status_string,
@@ -117,9 +118,22 @@ def instance_dict_for_pod(
     status_str = pod_status_string(phase, ready, provider_api=provider_api)
     status_reason = extract_status_reason(container_statuses, conditions)
 
-    # Escalate Pending pods with a fatal waiting reason to "failed".
+    # Escalate Pending/Starting pods with a fatal waiting reason to "failed".
     if status_str in ("pending", "starting") and is_fatal_waiting_reason(status_reason):
         status_str = "failed"
+
+    # Escalate crash-looping containers to "failed" regardless of their current
+    # oscillation phase.  A container in CrashLoopBackOff briefly re-enters
+    # Running between crashes, causing status to flicker back to "running" /
+    # "starting" and masking the failure.  Inspecting restart_count +
+    # last_state.terminated catches the window where the container is Running
+    # but has already crashed repeatedly.
+    if status_str in ("running", "starting", "pending") and is_crash_loop_or_repeated_failure(
+        container_statuses
+    ):
+        status_str = "failed"
+        if status_reason is None:
+            status_reason = "CrashLoopBackOff"
 
     if phase == "Succeeded":
         if status_str == "running":
