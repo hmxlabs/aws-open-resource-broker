@@ -69,7 +69,9 @@ def _classify_pod_create_error(exc: BaseException) -> str:
 class K8sPodHandler(K8sHandlerBase):
     """Handler for the ``Pod`` provider-API key.
 
-    One ORB capacity unit equals one ``v1/Pod`` with ``restartPolicy: Never``.
+    One ORB capacity unit equals one ``v1/Pod``.  The pod's ``restartPolicy``
+    defaults to ``Never`` but can be set to ``OnFailure`` or ``Always`` via the
+    template ``restart_policy`` field or the provider ``default_restart_policy``.
     """
 
     PROVIDER_API: str = "Pod"

@@ -137,6 +137,7 @@ def is_crash_loop_or_repeated_failure(
     container_statuses: list[Any],
     *,
     restart_threshold: int = _CRASH_RESTART_THRESHOLD,
+    restart_policy: Optional[str] = None,
 ) -> bool:
     """Return ``True`` when a container shows repeated crash-loop behaviour.
 
@@ -144,23 +145,27 @@ def is_crash_loop_or_repeated_failure(
     status when a container briefly cycles back to ``Running`` between
     crash iterations:
 
-    1. The current container state is ``Waiting`` with ``CrashLoopBackOff``
-       (covered by :func:`is_fatal_waiting_reason`, but repeated here for
-       completeness of this helper).
+    1. The current container state is ``Waiting`` with ``CrashLoopBackOff``.
+       This is Kubernetes' own back-off signal that the container keeps
+       failing; it is always treated as fatal regardless of restart policy.
     2. ``restart_count`` has reached *restart_threshold* AND
        ``last_state.terminated.exit_code`` is non-zero — meaning the
        container exited abnormally at least twice.  This fires even during
        the brief ``Running`` window between crashes when
        ``CrashLoopBackOff`` is not yet showing in the current state.
 
-    Returns ``False`` for pods with ``restartPolicy: Never`` (Jobs / bare
-    Pods) that have not yet been rescheduled — a single failure there is
-    already caught by the ``Failed`` phase path.
+    The restart-count heuristic (pattern 2) is skipped when
+    ``restart_policy == "OnFailure"``: there, repeated restarts with a
+    non-zero exit code are the operator's intended retry semantics, not a
+    crash loop, so only Kubernetes' own ``CrashLoopBackOff`` signal (pattern
+    1) is treated as fatal.  For ``Always`` / ``Never`` (the ORB defaults for
+    controller-backed and bare/Job pods) both patterns apply.
     """
+    skip_restart_count = restart_policy == "OnFailure"
     for cs in container_statuses:
         restart_count = int(getattr(cs, "restart_count", 0) or 0)
 
-        # Fast path: current state is already CrashLoopBackOff.
+        # Fast path: current state is already CrashLoopBackOff.  Always fatal.
         state = getattr(cs, "state", None)
         if state is not None:
             waiting = getattr(state, "waiting", None)
@@ -171,8 +176,9 @@ def is_crash_loop_or_repeated_failure(
 
         # Detect crash loop during the brief Running window between restarts:
         # check last_state.terminated for a non-zero exit code combined with
-        # an accumulated restart count at or above the threshold.
-        if restart_count >= restart_threshold:
+        # an accumulated restart count at or above the threshold.  Skipped for
+        # OnFailure pods, where such restarts are the intended retry behaviour.
+        if not skip_restart_count and restart_count >= restart_threshold:
             last_state = getattr(cs, "last_state", None)
             if last_state is not None:
                 last_terminated = getattr(last_state, "terminated", None)

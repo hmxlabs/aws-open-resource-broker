@@ -637,6 +637,23 @@ class K8sProviderConfig(BaseSettings, BaseProviderConfig):  # type: ignore[misc]
                     updated.pop(legacy)
         return updated
 
+    @field_validator("default_restart_policy")
+    @classmethod
+    def _validate_default_restart_policy(cls, v: Optional[str]) -> Optional[str]:
+        """Reject a ``default_restart_policy`` outside the Kubernetes-accepted set.
+
+        Validated at config-construction time so an operator typo (e.g.
+        ``'always'``) fails fast on load rather than as an opaque error at the
+        first pod acquire.  Per-kind validity (Job rejecting ``Always``, etc.)
+        is still enforced at spec-build time.
+        """
+        if v is not None and v not in ("Always", "OnFailure", "Never"):
+            raise ValueError(
+                f"default_restart_policy {v!r} is not a valid Kubernetes restartPolicy. "
+                "Allowed values: 'Always', 'OnFailure', 'Never'."
+            )
+        return v
+
     @field_validator("namespace")
     @classmethod
     def _validate_namespace_format(cls, v: Optional[str]) -> Optional[str]:

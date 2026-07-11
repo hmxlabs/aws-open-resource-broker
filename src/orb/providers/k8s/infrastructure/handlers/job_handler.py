@@ -371,12 +371,14 @@ class K8sJobHandler(K8sHandlerBase):
                 name="Kubernetes Job example",
                 description="Submit a run-to-completion Job via the kubernetes provider.",
                 provider_api="Job",
-                image_id="registry.k8s.io/pause:3.9",
+                # A Job needs run-to-completion semantics, so it uses a minimal
+                # image that has a shell and a command that exits 0 immediately.
+                # The pause image (used by the long-running kinds) has no shell,
+                # so it cannot run a command and is unsuitable for a Job.
+                image_id="busybox:1.37",
                 max_instances=3,
                 resource_requests=K8sResourceQuantities(cpu="100m", memory="128Mi"),
                 resource_limits=K8sResourceQuantities(cpu="500m", memory="256Mi"),
-                # pause never exits on its own; a Job needs run-to-completion
-                # semantics, so override with a command that exits 0 immediately.
                 command=["sh", "-c", "exit 0"],
             ),
         ]

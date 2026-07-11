@@ -42,6 +42,7 @@ from orb.providers.k8s.infrastructure.k8s_client import K8sClient
 from orb.providers.k8s.utilities.pod_state import (
     extract_status_reason,
     is_crash_loop_or_repeated_failure,
+    is_fatal_waiting_reason,
     is_pod_ready,
     pod_status_string,
 )
@@ -677,6 +678,10 @@ class K8sWatcher:
         raw_image = getattr(containers[0], "image", None) if containers else None
         image_id: Optional[str] = str(raw_image) if raw_image else None
 
+        # The pod's restartPolicy governs whether repeated restarts are a crash
+        # loop (Always/Never) or intended retry semantics (OnFailure).
+        restart_policy = getattr(spec, "restart_policy", None) if spec is not None else None
+
         # Read the provider-API type from the pod label so the Succeeded
         # phase mapping can apply the correct semantics per workload kind.
         pod_provider_api: Optional[str] = labels.get(self._provider_api_label)
@@ -697,12 +702,19 @@ class K8sWatcher:
                 name,
             )
 
+        # Escalate a fatal waiting reason (ImagePullBackOff, ErrImagePull, ...)
+        # to "failed" so a pod that can never start is not reported as pending
+        # forever.  Mirrors pod_state_translator.instance_dict_for_pod so the
+        # watcher cache and the on-demand list paths agree.
+        if status_str in ("pending", "starting") and is_fatal_waiting_reason(reason):
+            status_str = "failed"
+
         # Escalate crash-looping containers to "failed" regardless of their
         # current oscillation phase.  Mirrors the same logic in
         # pod_state_translator.instance_dict_for_pod so the watcher cache
         # and the on-demand list paths agree.
         if status_str in ("running", "starting", "pending") and is_crash_loop_or_repeated_failure(
-            container_statuses
+            container_statuses, restart_policy=restart_policy
         ):
             status_str = "failed"
             if reason is None:

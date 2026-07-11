@@ -114,6 +114,10 @@ def instance_dict_for_pod(
         raw_image = getattr(containers[0], "image", None)
         image_id = str(raw_image) if raw_image else None
 
+    # The pod's restartPolicy governs whether repeated restarts are a crash
+    # loop (Always/Never) or intended retry semantics (OnFailure).
+    restart_policy = getattr(spec, "restart_policy", None) if spec is not None else None
+
     ready = is_pod_ready(conditions)
     status_str = pod_status_string(phase, ready, provider_api=provider_api)
     status_reason = extract_status_reason(container_statuses, conditions)
@@ -129,7 +133,7 @@ def instance_dict_for_pod(
     # last_state.terminated catches the window where the container is Running
     # but has already crashed repeatedly.
     if status_str in ("running", "starting", "pending") and is_crash_loop_or_repeated_failure(
-        container_statuses
+        container_statuses, restart_policy=restart_policy
     ):
         status_str = "failed"
         if status_reason is None:

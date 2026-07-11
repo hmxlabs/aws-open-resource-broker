@@ -114,3 +114,22 @@ class TestIsCrashLoopOrRepeatedFailure:
         """High restart count but no last_state.terminated — can't confirm crash."""
         cs = _cs(restart_count=5)
         assert is_crash_loop_or_repeated_failure([cs]) is False
+
+    def test_onfailure_skips_restart_count_heuristic(self) -> None:
+        """A restartPolicy=OnFailure pod that retries is NOT condemned by restart count.
+
+        Repeated restarts with a non-zero exit are the intended retry semantics
+        for OnFailure, so the restart-count heuristic must not fire.
+        """
+        cs = _cs(restart_count=3, last_terminated_exit_code=1)
+        assert is_crash_loop_or_repeated_failure([cs], restart_policy="OnFailure") is False
+
+    def test_onfailure_still_fatal_on_crashloopbackoff(self) -> None:
+        """OnFailure does not mask Kubernetes' own CrashLoopBackOff signal."""
+        cs = _cs(waiting_reason="CrashLoopBackOff", restart_count=5)
+        assert is_crash_loop_or_repeated_failure([cs], restart_policy="OnFailure") is True
+
+    def test_always_still_uses_restart_count_heuristic(self) -> None:
+        """Always/Never pods keep the restart-count crash-loop heuristic."""
+        cs = _cs(restart_count=2, last_terminated_exit_code=1)
+        assert is_crash_loop_or_repeated_failure([cs], restart_policy="Always") is True

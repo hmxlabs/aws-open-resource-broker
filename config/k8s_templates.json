@@ -37,7 +37,7 @@
     {
       "templateId": "k8s-job-example",
       "maxNumber": 3,
-      "imageId": "registry.k8s.io/pause:3.9",
+      "imageId": "busybox:1.37",
       "priceType": "ondemand",
       "allocationStrategy": "lowestPrice",
       "name": "Kubernetes Job example",

@@ -151,6 +151,26 @@ def test_job_allows_onfailure() -> None:
     assert job.spec.template.spec.restart_policy == "OnFailure"
 
 
+def test_job_rejects_config_default_always() -> None:
+    """A config-level default_restart_policy=Always must still be rejected for Jobs."""
+    cfg = K8sProviderConfig(default_restart_policy="Always")
+    with pytest.raises(K8sError):
+        build_job_spec(
+            _template(provider_api="Job"),
+            _request(),
+            job_name="j-0",
+            namespace="default",
+            parallelism=1,
+            config=cfg,
+        )
+
+
+def test_config_rejects_bogus_default_restart_policy() -> None:
+    """K8sProviderConfig rejects an invalid default_restart_policy at load time."""
+    with pytest.raises(Exception):
+        K8sProviderConfig(default_restart_policy="sometimes")
+
+
 # ---------------------------------------------------------------------------
 # Deployment / StatefulSet always use Always (template value ignored w/ warning)
 # ---------------------------------------------------------------------------
