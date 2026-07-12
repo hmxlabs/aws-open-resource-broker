@@ -935,7 +935,26 @@ class K8sProviderStrategy(ProviderStrategy):
             or operation.parameters.get("machine_ids")
             or []
         )
-        outcome = await self.return_machines(machine_ids, request)
+        # A return request carries its own request_id and no controller name, so
+        # the controller-backed handlers (Deployment/StatefulSet/Job) would
+        # otherwise resolve the wrong resource name and no-op.  The deprovisioning
+        # operation supplies the acquire-time controller name (resource_id) and
+        # the origin request_id — thread both into provider_data so release
+        # targets the resource that was actually created.  The name key is set
+        # for every controller kind; each handler reads only its own key, and the
+        # Pod handler ignores all of them (it deletes by machine_ids).
+        overrides: dict[str, Any] = {}
+        resource_id = operation.parameters.get("resource_id")
+        if resource_id:
+            overrides["deployment_name"] = resource_id
+            overrides["statefulset_name"] = resource_id
+            overrides["job_name"] = resource_id
+        origin_request_id = operation.parameters.get("request_id")
+        if origin_request_id:
+            overrides["request_id"] = str(origin_request_id)
+        outcome = await self.return_machines(
+            machine_ids, request, provider_data_overrides=overrides or None
+        )
         return _outcome_to_provider_result(outcome, fallback_operation="terminate_instances")
 
     async def _handle_get_instance_status(self, operation: ProviderOperation) -> ProviderResult:
@@ -1452,9 +1471,16 @@ class K8sProviderStrategy(ProviderStrategy):
         """Submit an acquisition request to Kubernetes via the per-API handler."""
         return await self._handler_registry.acquire(request)
 
-    async def return_machines(self, machine_ids: list[str], request: Request) -> OperationOutcome:
-        """Delete the named pods via the per-API handler."""
-        return await self._handler_registry.return_machines(machine_ids, request)
+    async def return_machines(
+        self,
+        machine_ids: list[str],
+        request: Request,
+        provider_data_overrides: Optional[dict[str, Any]] = None,
+    ) -> OperationOutcome:
+        """Delete the named resources via the per-API handler."""
+        return await self._handler_registry.return_machines(
+            machine_ids, request, provider_data_overrides=provider_data_overrides
+        )
 
     async def get_status(self, resource_ids: list[str], request: Request) -> OperationOutcome:
         """Poll the per-API handler's ``check_hosts_status`` for a verdict."""

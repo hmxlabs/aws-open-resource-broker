@@ -250,13 +250,31 @@ class K8sHandlerRegistry:
             self._logger.error("Kubernetes acquire failed: %s", exc, exc_info=True)
             return Failed(error=str(exc), recoverable=False)
 
-    async def return_machines(self, machine_ids: list[str], request: Request) -> OperationOutcome:
-        """Delete the named pods via the per-API handler."""
+    async def return_machines(
+        self,
+        machine_ids: list[str],
+        request: Request,
+        provider_data_overrides: Optional[dict[str, Any]] = None,
+    ) -> OperationOutcome:
+        """Delete the named resources via the per-API handler.
+
+        ``provider_data_overrides`` lets the caller supply the acquire-time
+        controller name and origin request id, which the controller-backed
+        handlers (Deployment/StatefulSet/Job) need to resolve the correct
+        resource to delete.  A return request carries its own (different)
+        ``request_id`` and no ``deployment_name``/etc., so without the override
+        those handlers would derive a wrong name and no-op on a 404, leaking the
+        controller.  The Pod handler is unaffected (it deletes by ``machine_ids``).
+        """
         try:
             provider_api = self.resolve_provider_api(request)
             handler = self.get_handler(provider_api)
             provider_data: dict[str, Any] = dict(getattr(request, "provider_data", None) or {})
             provider_data.setdefault("request_id", str(request.request_id))
+            # Overrides win: they carry the acquire-time resource name + origin id.
+            for key, value in (provider_data_overrides or {}).items():
+                if value:
+                    provider_data[key] = value
             release_result = await handler.release_hosts(list(machine_ids), provider_data)
             # release_hosts returns a dict with ``deleted`` and
             # ``failed_deletes`` when partial failure occurred.  The caller
