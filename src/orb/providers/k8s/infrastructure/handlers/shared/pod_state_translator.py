@@ -88,17 +88,24 @@ def _cpu_quantity_to_vcpus(cpu: Any) -> Optional[int]:
         return None
 
 
-def _pod_private_dns_name(pod_name: str, namespace: str) -> Optional[str]:
-    """Return the pod's in-cluster DNS name, or ``None`` when unknown.
+def _pod_private_dns_name(pod_ip: Optional[str], namespace: str) -> Optional[str]:
+    """Return the resolvable in-cluster DNS name for a pod, or ``None``.
 
-    Pods are addressable at ``<pod-name>.<namespace>.pod.cluster.local`` via
-    the cluster DNS service.  This mirrors the AWS provider's
-    ``private_dns_name`` field so consumers that resolve machines by hostname
-    have a value for the kubernetes provider too.
+    CoreDNS keys bare-pod A records on the *dashed IP form*:
+    ``<ip-with-dashes>.<namespace>.pod.cluster.local`` (e.g.
+    ``10-0-0-5.default.pod.cluster.local``).  The name-based form
+    (``<pod-name>.<namespace>.pod.cluster.local``) only resolves when
+    ``hostname`` + ``subdomain`` are set in the pod spec, which ORB does
+    not set.
+
+    Returns ``None`` when the pod IP is not yet assigned (pod still
+    pending scheduling) so callers receive an honest ``None`` rather than
+    an NXDOMAIN address.
     """
-    if not pod_name or not namespace:
+    if not pod_ip or not namespace:
         return None
-    return f"{pod_name}.{namespace}.pod.cluster.local"
+    dashed_ip = pod_ip.replace(".", "-")
+    return f"{dashed_ip}.{namespace}.pod.cluster.local"
 
 
 def instance_dict_for_pod(
@@ -141,6 +148,9 @@ def instance_dict_for_pod(
     container_statuses = (
         list(getattr(status, "container_statuses", None) or []) if status is not None else []
     )
+    init_container_statuses = (
+        list(getattr(status, "init_container_statuses", None) or []) if status is not None else []
+    )
 
     # Derive image_id from the first (primary) container in the pod spec.
     # Falls back to None when the spec is absent or containers is empty.
@@ -156,7 +166,7 @@ def instance_dict_for_pod(
 
     ready = is_pod_ready(conditions)
     status_str = pod_status_string(phase, ready, provider_api=provider_api)
-    status_reason = extract_status_reason(container_statuses, conditions)
+    status_reason = extract_status_reason(container_statuses, conditions, init_container_statuses)
 
     # Escalate Pending/Starting pods with a fatal waiting reason to "failed".
     if status_str in ("pending", "starting") and is_fatal_waiting_reason(status_reason):
@@ -208,7 +218,9 @@ def instance_dict_for_pod(
     if node_name and node_state_cache is not None:
         node_state = node_state_cache.get(node_name)
 
-    private_dns_name = _pod_private_dns_name(name, namespace)
+    # Use the dashed-IP form (resolvable via CoreDNS bare-pod A records).
+    # Returns None when pod_ip is not yet assigned (pending scheduling).
+    private_dns_name = _pod_private_dns_name(pod_ip, namespace)
     provider_data: dict[str, Any] = {
         "namespace": namespace,
         "node_name": node_name,
@@ -301,7 +313,9 @@ def instance_dict_for_state(
     if state.node_name and node_state_cache is not None:
         node_state = node_state_cache.get(state.node_name)
 
-    private_dns_name = _pod_private_dns_name(state.pod_name, state.namespace)
+    # Use the dashed-IP form (resolvable via CoreDNS bare-pod A records).
+    # Returns None when pod_ip is not yet assigned (pending scheduling).
+    private_dns_name = _pod_private_dns_name(state.pod_ip, state.namespace)
     provider_data: dict[str, Any] = {
         "namespace": state.namespace,
         "node_name": state.node_name,

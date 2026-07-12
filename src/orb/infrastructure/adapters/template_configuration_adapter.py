@@ -51,7 +51,15 @@ class TemplateConfigurationAdapter(TemplateConfigurationPort):
             errors.append("Template ID is required")
 
         provider_api = config.get("providerApi") or config.get("provider_api")
-        if not provider_api:
+        provider_type = (
+            config.get("providerType")
+            or config.get("provider_type")
+            or self._PROVIDER_API_TO_TYPE.get(str(provider_api or ""))
+        )
+        # provider_api is required for non-k8s providers.  For k8s the
+        # runtime defaults provider_api to "Pod" when it is absent, so a
+        # missing provider_api is not an error on that path.
+        if not provider_api and provider_type != "k8s":
             errors.append("Provider API is required")
 
         image_id = config.get("imageId") or config.get("image_id")
@@ -60,30 +68,13 @@ class TemplateConfigurationAdapter(TemplateConfigurationPort):
 
         # Delegate to the active provider's registered validator so
         # provider-specific rules apply (e.g. the k8s validator rejects an
-        # unknown provider_api or a bad namespace).  This runs on top of the
-        # generic checks above; when no provider validator is available the
-        # generic checks are the whole verdict.
+        # unknown provider_api, a bad namespace, or a per-kind-invalid restart
+        # policy).  The raw config dict is passed straight through — the
+        # provider validator coerces it to its own typed template internally,
+        # so this infrastructure adapter imports no provider package.  When no
+        # provider validator is available the generic checks are the verdict.
         try:
-            from orb.domain.template.template_aggregate import Template
-
-            domain_template = Template(
-                template_id=template_id or "temp",
-                image_id=image_id or "",
-                instance_type=config.get("instanceType") or config.get("instance_type", ""),
-                subnet_ids=config.get("subnetIds") or config.get("subnet_ids", []),
-                security_group_ids=config.get("securityGroupIds")
-                or config.get("security_group_ids", []),
-                price_type=config.get("priceType") or config.get("price_type", "ondemand"),
-                provider_api=provider_api or "",
-                provider_data=config.get("provider_data") or {},
-                metadata=config.get("metadata", {}),
-            )
-            provider_type = (
-                config.get("providerType")
-                or config.get("provider_type")
-                or self._PROVIDER_API_TO_TYPE.get(str(provider_api or ""))
-            )
-            errors.extend(self._provider_validation_errors(provider_type, domain_template))
+            errors.extend(self._provider_validation_errors(provider_type, config))
         except Exception as e:
             self._logger.warning("Template validation failed: %s", e)
             errors.append(f"Template validation error: {e!s}")

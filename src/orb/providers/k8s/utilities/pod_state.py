@@ -92,11 +92,18 @@ def pod_status_string(
 def extract_status_reason(
     container_statuses: list[Any],
     conditions: list[Any],
+    init_container_statuses: Optional[list[Any]] = None,
 ) -> Optional[str]:
     """Best-effort extraction of a human-readable status reason.
 
-    Order of preference: terminated container reason, waiting container
-    reason, ``PodScheduled=False`` condition reason.
+    Order of preference:
+    1. Terminated container reason (main containers).
+    2. Waiting container reason (main containers) — catches CrashLoopBackOff,
+       ImagePullBackOff, etc.
+    3. Fatal waiting reason from init containers — catches
+       ``Init:ImagePullBackOff``, ``Init:ErrImagePull``, etc. that keep the
+       pod stuck in Pending with no visible reason on the main containers.
+    4. ``PodScheduled=False`` condition reason.
     """
     for cs in container_statuses:
         state = getattr(cs, "state", None)
@@ -111,6 +118,18 @@ def extract_status_reason(
         if waiting is not None:
             reason = getattr(waiting, "reason", None)
             if reason:
+                return str(reason)
+    # Inspect init-container statuses for fatal waiting reasons.  These
+    # surface as ``Init:<reason>`` in kubectl but the raw waiting reason is
+    # available on the init container status directly.
+    for ics in init_container_statuses or []:
+        state = getattr(ics, "state", None)
+        if state is None:
+            continue
+        waiting = getattr(state, "waiting", None)
+        if waiting is not None:
+            reason = getattr(waiting, "reason", None)
+            if reason and reason in FATAL_WAITING_REASONS:
                 return str(reason)
     for cond in conditions:
         ctype = getattr(cond, "type", None)
