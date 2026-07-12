@@ -460,3 +460,205 @@ async def test_strategy_execute_operation_routes_stop_to_service() -> None:
     )
     await strategy.execute_operation(op)
     mock_service.stop_instances.assert_called_once_with(op)
+
+
+# ---------------------------------------------------------------------------
+# Regression: per-machine coordinates (Fix 1 — START/STOP was DOA)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_stop_with_machine_coordinates_patches_correct_controller() -> None:
+    """STOP with machine_coordinates uses each machine's own provider_data.
+
+    Without Fix 1, the orchestrator passed only instance_ids and no
+    provider_data, so K8sStartStopService fell back to machine_ids[0] as the
+    workload name (a pod name, not the controller) and defaulted namespace to
+    'default' — causing a 404 on every real cluster.
+    """
+    service, mock_apps_v1 = _make_service()
+
+    op = ProviderOperation(
+        operation_type=ProviderOperationType.STOP_INSTANCES,
+        parameters={
+            "instance_ids": ["orb-dep1-0000"],
+            "machine_coordinates": {
+                "orb-dep1-0000": {
+                    "provider_data": {
+                        "namespace": "prod-ns",
+                        "deployment_name": "orb-dep1",
+                        "replicas": 5,
+                    },
+                    "provider_api": "Deployment",
+                    "resource_id": "orb-dep1",
+                    "request_id": "req-abc",
+                },
+            },
+        },
+    )
+    result = await service.stop_instances(op)
+
+    assert result.success is True
+    call_kw = mock_apps_v1.patch_namespaced_deployment_scale.call_args.kwargs
+    # Must target the controller name, NOT the pod name.
+    assert call_kw["name"] == "orb-dep1", (
+        "Expected controller name 'orb-dep1', got pod-name or wrong target"
+    )
+    assert call_kw["namespace"] == "prod-ns"
+    assert call_kw["body"].spec.replicas == 0
+
+
+@pytest.mark.asyncio
+async def test_start_with_machine_coordinates_patches_correct_controller() -> None:
+    """START with machine_coordinates restores replicas on the right controller."""
+    service, mock_apps_v1 = _make_service()
+
+    op = ProviderOperation(
+        operation_type=ProviderOperationType.START_INSTANCES,
+        parameters={
+            "instance_ids": ["orb-dep1-0000"],
+            "machine_coordinates": {
+                "orb-dep1-0000": {
+                    "provider_data": {
+                        "namespace": "prod-ns",
+                        "deployment_name": "orb-dep1",
+                        "replicas": 3,
+                        "replicas_before_stop": 3,
+                    },
+                    "provider_api": "Deployment",
+                    "resource_id": "orb-dep1",
+                    "request_id": "req-abc",
+                },
+            },
+        },
+    )
+    result = await service.start_instances(op)
+
+    assert result.success is True
+    call_kw = mock_apps_v1.patch_namespaced_deployment_scale.call_args.kwargs
+    assert call_kw["name"] == "orb-dep1"
+    assert call_kw["namespace"] == "prod-ns"
+    assert call_kw["body"].spec.replicas == 3
+
+
+@pytest.mark.asyncio
+async def test_stop_machine_coordinates_multiple_machines_all_patched() -> None:
+    """STOP with multiple machines in machine_coordinates patches each controller once."""
+    service, mock_apps_v1 = _make_service()
+
+    op = ProviderOperation(
+        operation_type=ProviderOperationType.STOP_INSTANCES,
+        parameters={
+            "instance_ids": ["orb-dep1-0000", "orb-dep2-0000"],
+            "machine_coordinates": {
+                "orb-dep1-0000": {
+                    "provider_data": {
+                        "namespace": "ns-a",
+                        "deployment_name": "orb-dep1",
+                        "replicas": 2,
+                    },
+                    "provider_api": "Deployment",
+                    "resource_id": "orb-dep1",
+                    "request_id": "req-1",
+                },
+                "orb-dep2-0000": {
+                    "provider_data": {
+                        "namespace": "ns-b",
+                        "deployment_name": "orb-dep2",
+                        "replicas": 4,
+                    },
+                    "provider_api": "Deployment",
+                    "resource_id": "orb-dep2",
+                    "request_id": "req-2",
+                },
+            },
+        },
+    )
+    result = await service.stop_instances(op)
+
+    assert result.success is True
+    assert result.data["results"] == {"orb-dep1-0000": True, "orb-dep2-0000": True}
+    # Both controllers must have been patched.
+    assert mock_apps_v1.patch_namespaced_deployment_scale.call_count == 2
+
+
+# ---------------------------------------------------------------------------
+# Regression: replicas_before_stop persistence (Fix 2)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_stop_machine_coordinates_returns_replicas_before_stop_per_machine() -> None:
+    """STOP returns replicas_before_stop_per_machine so the orchestrator can persist it.
+
+    Without Fix 2, StopMachinesOrchestrator discarded the returned replica count
+    and start would always fall back to the acquire-time 'replicas' value —
+    restoring the wrong count after a manual scale.
+    """
+    service, _ = _make_service()
+
+    op = ProviderOperation(
+        operation_type=ProviderOperationType.STOP_INSTANCES,
+        parameters={
+            "instance_ids": ["orb-dep1-0000"],
+            "machine_coordinates": {
+                "orb-dep1-0000": {
+                    "provider_data": {
+                        "namespace": "ns",
+                        "deployment_name": "orb-dep1",
+                        "replicas": 7,
+                    },
+                    "provider_api": "Deployment",
+                    "resource_id": "orb-dep1",
+                    "request_id": "req-abc",
+                },
+            },
+        },
+    )
+    result = await service.stop_instances(op)
+
+    assert result.success is True
+    per_machine = result.data.get("replicas_before_stop_per_machine", {})
+    assert per_machine.get("orb-dep1-0000") == 7, (
+        "replicas_before_stop_per_machine must carry the pre-stop count per machine_id"
+    )
+
+
+@pytest.mark.asyncio
+async def test_start_machine_coordinates_prefers_replicas_before_stop_over_replicas() -> None:
+    """START prefers replicas_before_stop over replicas when both are in provider_data.
+
+    This verifies that once StopMachinesOrchestrator persists replicas_before_stop
+    into the machine's provider_data, start correctly restores that archived count
+    rather than the original acquire-time count.
+    """
+    service, mock_apps_v1 = _make_service()
+
+    # Simulate: acquired with replicas=3, but operator scaled to 10 before stop;
+    # stop persists replicas_before_stop=10; start should restore to 10, not 3.
+    op = ProviderOperation(
+        operation_type=ProviderOperationType.START_INSTANCES,
+        parameters={
+            "instance_ids": ["orb-dep1-0000"],
+            "machine_coordinates": {
+                "orb-dep1-0000": {
+                    "provider_data": {
+                        "namespace": "ns",
+                        "deployment_name": "orb-dep1",
+                        "replicas": 3,  # acquire-time (stale)
+                        "replicas_before_stop": 10,  # persisted at stop time
+                    },
+                    "provider_api": "Deployment",
+                    "resource_id": "orb-dep1",
+                    "request_id": "req-abc",
+                },
+            },
+        },
+    )
+    result = await service.start_instances(op)
+
+    assert result.success is True
+    call_kw = mock_apps_v1.patch_namespaced_deployment_scale.call_args.kwargs
+    assert call_kw["body"].spec.replicas == 10, (
+        "START must restore replicas_before_stop (10), not acquire-time replicas (3)"
+    )

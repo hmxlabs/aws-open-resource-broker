@@ -13,29 +13,33 @@ depends on the workload kind:
 * **Deployment / StatefulSet** — the workload is controlled by a
   replica-count reconciler.  Stopping = patching ``spec.replicas`` to
   ``0`` (all pods are terminated); starting = patching back to the
-  original replica count that was stored at acquire time.  The original
-  count is read from ``request.provider_data["replicas"]`` (stamped by
-  ``DeploymentHandler.acquire_hosts`` and
-  ``StatefulSetHandler.acquire_hosts``).
+  original replica count that was stored at acquire time.
 
 * **Pod / Job** — pods and jobs cannot be stopped and restarted
-  meaningfully.  A Pod that is deleted is gone; a Job that completes is
-  final.  These kinds return a clear ``UNSUPPORTED_OPERATION_FOR_KIND``
+  meaningfully.  These kinds return a clear ``UNSUPPORTED_OPERATION_FOR_KIND``
   result so the caller knows the failure is by design, not a bug.
 
-Original replica count preservation
-=====================================
+Workload coordinate threading
+==============================
 
-The deployment and statefulset handlers stamp ``provider_data["replicas"]``
-at acquire time (the number of replicas requested by the caller).  The
-stop path archives this value under ``provider_data["replicas_before_stop"]``
-via ``request.merge_provider_data(...)`` so the start path can restore it
-without re-querying the cluster.  If no archived count is found the start
-path falls back to ``provider_data["replicas"]`` (initial count).
+The orchestrators pass per-machine coordinates in
+``operation.parameters["machine_coordinates"]`` — a dict keyed by
+machine_id.  Each entry holds:
 
-The patching is done via ``apps/v1`` ``patch_namespaced_deployment_scale``
-and ``patch_namespaced_stateful_set_scale`` which are lighter-weight than
-a full PATCH on the resource body.
+  ``provider_data`` — the machine's stored provider_data dict
+    (contains ``namespace``, ``deployment_name``/``statefulset_name``,
+    ``replicas``, ``replicas_before_stop`` etc.)
+  ``provider_api``  — the originating provider_api ("Deployment", "StatefulSet", ...)
+  ``resource_id``   — the acquire-time controller name (fallback name source)
+
+When ``machine_coordinates`` is absent the service falls back to the
+top-level ``provider_data`` / ``provider_api`` keys for backwards
+compatibility with non-orchestrator callers (e.g. direct unit tests).
+
+STOP returns ``replicas_before_stop_per_machine`` in its result data so
+the orchestrator can persist the count per machine, enabling START to
+restore the correct value even after a manual scale event between the
+two operations.
 
 RBAC requirements
 =================
@@ -91,29 +95,109 @@ class K8sStartStopService:
     # ------------------------------------------------------------------
 
     async def start_instances(self, operation: ProviderOperation) -> ProviderResult:
-        """Scale a Deployment or StatefulSet back to its original replica count.
+        """Scale Deployment or StatefulSet workloads back to their original replica count.
 
-        Reads the workload coordinates from ``operation.parameters``.  The
-        ``request`` object's ``provider_data`` carries the namespace,
-        workload name, and the replica counts:
+        When ``operation.parameters["machine_coordinates"]`` is present (populated
+        by :class:`StartMachinesOrchestrator`) each machine's own ``provider_data``
+        is used to resolve namespace, workload name, provider_api, and the
+        archived ``replicas_before_stop`` count.  When absent the method falls
+        back to the top-level ``provider_data`` / ``provider_api`` keys for
+        backwards-compatible single-machine callers.
 
-        * ``provider_data["namespace"]`` — namespace (required)
-        * ``provider_data["deployment_name"]`` or
-          ``provider_data["statefulset_name"]`` — workload name (required)
-        * ``provider_data["replicas_before_stop"]`` — archived count from the
-          preceding STOP call (preferred)
-        * ``provider_data["replicas"]`` — acquire-time count (fallback)
-
-        For Pod and Job ``provider_api`` values the operation returns
+        For Pod and Job ``provider_api`` values the call returns
         ``UNSUPPORTED_OPERATION_FOR_KIND`` immediately.
 
         Args:
-            operation: Provider operation carrying ``provider_api``,
-                ``namespace``, workload name, and replica-count fields.
+            operation: Provider operation carrying per-machine coordinates
+                in ``parameters["machine_coordinates"]`` or top-level
+                ``provider_data`` / ``provider_api`` keys.
 
         Returns:
-            :class:`ProviderResult` indicating success (replicas patched) or
-            an appropriate error code.
+            :class:`ProviderResult` indicating success or an appropriate error code.
+        """
+        machine_coordinates: dict[str, Any] = operation.parameters.get("machine_coordinates") or {}
+
+        # Legacy single-machine path: no machine_coordinates key.
+        if not machine_coordinates:
+            return await self._start_single_legacy(operation)
+
+        # Per-machine path from the orchestrator.
+        results: dict[str, bool] = {}
+
+        for machine_id, coords in machine_coordinates.items():
+            provider_data: dict[str, Any] = coords.get("provider_data") or {}
+            provider_api: str = coords.get("provider_api") or ""
+
+            if provider_api in _SCALE_UNSUPPORTED_APIS:
+                self._logger.warning(
+                    "Kubernetes START: skipping machine %s — provider_api=%r cannot be "
+                    "started via replica scaling (Pod/Job)",
+                    machine_id,
+                    provider_api,
+                )
+                results[machine_id] = False
+                continue
+
+            try:
+                namespace, workload_name, resolved_api = self._extract_workload_coords_from_data(
+                    provider_data=provider_data,
+                    provider_api=provider_api,
+                    resource_id=coords.get("resource_id") or "",
+                )
+            except ValueError as exc:
+                self._logger.error(
+                    "Kubernetes START: cannot resolve workload for machine %s: %s",
+                    machine_id,
+                    exc,
+                )
+                results[machine_id] = False
+                continue
+
+            # Prefer the archived pre-stop count; fall back to acquire-time count.
+            target_replicas: int = int(
+                provider_data.get("replicas_before_stop") or provider_data.get("replicas") or 1
+            )
+
+            self._logger.info(
+                "Kubernetes START: scaling %s %s/%s → %d replicas (machine=%s)",
+                resolved_api,
+                namespace,
+                workload_name,
+                target_replicas,
+                machine_id,
+            )
+
+            try:
+                await asyncio.to_thread(
+                    self._patch_scale,
+                    provider_api=resolved_api,
+                    namespace=namespace,
+                    name=workload_name,
+                    replicas=target_replicas,
+                )
+                results[machine_id] = True
+            except Exception as exc:
+                self._logger.error(
+                    "Kubernetes START failed for %s %s/%s (machine=%s): %s",
+                    resolved_api,
+                    namespace,
+                    workload_name,
+                    machine_id,
+                    exc,
+                    exc_info=True,
+                )
+                results[machine_id] = False
+
+        return ProviderResult.success_result(
+            {"results": results},
+            {"operation": "start_instances"},
+        )
+
+    async def _start_single_legacy(self, operation: ProviderOperation) -> ProviderResult:
+        """Handle the original single-machine call shape (no machine_coordinates).
+
+        Used by direct unit tests and any caller that builds the operation
+        without per-machine coordinate dicts.
         """
         provider_api = operation.parameters.get("provider_api", "")
         if provider_api in _SCALE_UNSUPPORTED_APIS:
@@ -133,9 +217,6 @@ class K8sStartStopService:
             return ProviderResult.error_result(str(exc), "MISSING_WORKLOAD_COORDINATES")
 
         provider_data: dict[str, Any] = operation.parameters.get("provider_data") or {}
-
-        # Determine target replica count: prefer the archived pre-stop count,
-        # fall back to the initial acquire-time count.
         target_replicas: int = int(
             provider_data.get("replicas_before_stop") or provider_data.get("replicas") or 1
         )
@@ -177,22 +258,113 @@ class K8sStartStopService:
         )
 
     async def stop_instances(self, operation: ProviderOperation) -> ProviderResult:
-        """Scale a Deployment or StatefulSet to 0 replicas.
+        """Scale Deployment or StatefulSet workloads to 0 replicas.
 
-        Archives the current replica count under
-        ``provider_data["replicas_before_stop"]`` in the operation's request
-        so :meth:`start_instances` can restore it.
+        When ``operation.parameters["machine_coordinates"]`` is present (populated
+        by :class:`StopMachinesOrchestrator`) each machine's own ``provider_data``
+        is used to resolve namespace and workload name.  The per-stop replica
+        count is returned under ``data["replicas_before_stop_per_machine"]`` so
+        the orchestrator can persist it per machine.  When absent the method
+        falls back to the top-level ``provider_data`` / ``provider_api`` keys.
 
-        For Pod and Job ``provider_api`` values the operation returns
+        For Pod and Job ``provider_api`` values the call returns
         ``UNSUPPORTED_OPERATION_FOR_KIND`` immediately.
 
         Args:
-            operation: Provider operation carrying ``provider_api``,
-                ``namespace``, and workload name.
+            operation: Provider operation carrying per-machine coordinates
+                in ``parameters["machine_coordinates"]`` or top-level keys.
 
         Returns:
-            :class:`ProviderResult` indicating success (replicas patched to 0)
-            or an appropriate error code.
+            :class:`ProviderResult` indicating success or an appropriate error code.
+            On success, ``data["replicas_before_stop_per_machine"]`` maps each
+            machine_id to its replica count before the scale-to-zero.
+        """
+        machine_coordinates: dict[str, Any] = operation.parameters.get("machine_coordinates") or {}
+
+        # Legacy single-machine path: no machine_coordinates key.
+        if not machine_coordinates:
+            return await self._stop_single_legacy(operation)
+
+        # Per-machine path from the orchestrator.
+        results: dict[str, bool] = {}
+        replicas_before_stop_per_machine: dict[str, int] = {}
+
+        for machine_id, coords in machine_coordinates.items():
+            provider_data: dict[str, Any] = coords.get("provider_data") or {}
+            provider_api: str = coords.get("provider_api") or ""
+
+            if provider_api in _SCALE_UNSUPPORTED_APIS:
+                self._logger.warning(
+                    "Kubernetes STOP: skipping machine %s — provider_api=%r cannot be "
+                    "stopped via replica scaling (Pod/Job)",
+                    machine_id,
+                    provider_api,
+                )
+                results[machine_id] = False
+                continue
+
+            try:
+                namespace, workload_name, resolved_api = self._extract_workload_coords_from_data(
+                    provider_data=provider_data,
+                    provider_api=provider_api,
+                    resource_id=coords.get("resource_id") or "",
+                )
+            except ValueError as exc:
+                self._logger.error(
+                    "Kubernetes STOP: cannot resolve workload for machine %s: %s",
+                    machine_id,
+                    exc,
+                )
+                results[machine_id] = False
+                continue
+
+            current_replicas: int = int(provider_data.get("replicas") or 1)
+
+            self._logger.info(
+                "Kubernetes STOP: scaling %s %s/%s → 0 replicas (was %d, machine=%s)",
+                resolved_api,
+                namespace,
+                workload_name,
+                current_replicas,
+                machine_id,
+            )
+
+            try:
+                await asyncio.to_thread(
+                    self._patch_scale,
+                    provider_api=resolved_api,
+                    namespace=namespace,
+                    name=workload_name,
+                    replicas=0,
+                )
+                results[machine_id] = True
+                replicas_before_stop_per_machine[machine_id] = current_replicas
+            except Exception as exc:
+                self._logger.error(
+                    "Kubernetes STOP failed for %s %s/%s (machine=%s): %s",
+                    resolved_api,
+                    namespace,
+                    workload_name,
+                    machine_id,
+                    exc,
+                    exc_info=True,
+                )
+                results[machine_id] = False
+
+        return ProviderResult.success_result(
+            {
+                "results": results,
+                "replicas_before_stop_per_machine": replicas_before_stop_per_machine,
+            },
+            {"operation": "stop_instances"},
+        )
+
+    async def _stop_single_legacy(self, operation: ProviderOperation) -> ProviderResult:
+        """Handle the original single-machine call shape (no machine_coordinates).
+
+        Used by direct unit tests and any caller that builds the operation
+        without per-machine coordinate dicts.  Returns the single-machine
+        ``replicas_before_stop`` key in data for compatibility.
         """
         provider_api = operation.parameters.get("provider_api", "")
         if provider_api in _SCALE_UNSUPPORTED_APIS:
@@ -212,8 +384,6 @@ class K8sStartStopService:
             return ProviderResult.error_result(str(exc), "MISSING_WORKLOAD_COORDINATES")
 
         provider_data: dict[str, Any] = operation.parameters.get("provider_data") or {}
-
-        # Archive the current replica count before zeroing, so start can restore it.
         current_replicas: int = int(provider_data.get("replicas") or 1)
 
         self._logger.info(
@@ -259,17 +429,70 @@ class K8sStartStopService:
     # Internal helpers
     # ------------------------------------------------------------------
 
+    def _extract_workload_coords_from_data(
+        self,
+        *,
+        provider_data: dict[str, Any],
+        provider_api: str,
+        resource_id: str,
+    ) -> tuple[str, str, str]:
+        """Extract namespace, workload name, and canonical provider_api from provider_data.
+
+        Resolution order for workload name:
+        1. ``provider_data["deployment_name"]`` (Deployment) or
+           ``provider_data["statefulset_name"]`` (StatefulSet)
+        2. ``resource_id`` — the acquire-time controller name stamped by the handler
+
+        Args:
+            provider_data: The machine's stored provider_data dict.
+            provider_api: The originating provider_api string.
+            resource_id: The acquire-time controller name (fallback).
+
+        Returns:
+            Tuple of ``(namespace, workload_name, resolved_provider_api)``.
+
+        Raises:
+            ValueError: When the workload name cannot be determined.
+        """
+        namespace: str = str(provider_data.get("namespace") or "default")
+
+        resolved_api = provider_api
+        if resolved_api not in _SCALE_SUPPORTED_APIS:
+            resolved_api = "Deployment"
+
+        if resolved_api == "Deployment":
+            workload_name: Optional[str] = (
+                str(provider_data["deployment_name"])
+                if provider_data.get("deployment_name")
+                else None
+            )
+        else:
+            workload_name = (
+                str(provider_data["statefulset_name"])
+                if provider_data.get("statefulset_name")
+                else None
+            )
+
+        if not workload_name and resource_id:
+            workload_name = resource_id
+
+        if not workload_name:
+            raise ValueError(
+                f"Cannot determine workload name for {resolved_api} START/STOP.  "
+                "Supply provider_data['deployment_name'] / provider_data['statefulset_name'] "
+                "or resource_id."
+            )
+
+        return namespace, workload_name, resolved_api
+
     def _extract_workload_coords(
         self, operation: ProviderOperation, provider_api: str
     ) -> tuple[str, str, str]:
         """Extract namespace, workload name, and canonical provider_api from the operation.
 
-        For Deployment provider_api the workload name is read from
-        ``provider_data["deployment_name"]`` or ``resource_ids[0]``.
-        For StatefulSet it is ``provider_data["statefulset_name"]`` or
-        ``resource_ids[0]``.  For unknown (or empty) provider_api the
-        operation ``resource_ids`` are consulted and ``provider_api``
-        defaults to ``"Deployment"``.
+        Legacy helper for the single-machine fallback paths.  Reads from the
+        top-level ``provider_data`` and ``resource_ids``/``instance_ids`` keys
+        in ``operation.parameters``.
 
         Returns:
             Tuple of ``(namespace, workload_name, resolved_provider_api)``.
@@ -286,21 +509,19 @@ class K8sStartStopService:
             or []
         )
 
-        # Resolve provider_api to Deployment or StatefulSet.
         resolved_api = provider_api
         if resolved_api not in _SCALE_SUPPORTED_APIS:
-            # Default to Deployment when provider_api is absent or unknown.
             resolved_api = "Deployment"
 
         if resolved_api == "Deployment":
             workload_name: Optional[str] = (
-                str(provider_data.get("deployment_name"))
+                str(provider_data["deployment_name"])
                 if provider_data.get("deployment_name")
                 else None
             )
         else:
             workload_name = (
-                str(provider_data.get("statefulset_name"))
+                str(provider_data["statefulset_name"])
                 if provider_data.get("statefulset_name")
                 else None
             )

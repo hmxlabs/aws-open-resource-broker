@@ -837,6 +837,15 @@ class K8sProviderStrategy(ProviderStrategy):
                 )
             elif operation.operation_type == ProviderOperationType.CREATE_INSTANCES:
                 result = await self._handle_create_instances(operation)
+            elif operation.operation_type == ProviderOperationType.TERMINATE_INSTANCES and (
+                operation.context or {}
+            ).get("cancel_mode"):
+                # cancel_mode: in-flight cancel before pods exist — delete
+                # workloads by orb.io/request-id label rather than by pod name.
+                # This branch must precede the plain TERMINATE_INSTANCES branch
+                # so that cancel-path operations are not silently routed to the
+                # normal deprovisioning handler.
+                result = await self._handle_cancel_resource(operation)
             elif operation.operation_type == ProviderOperationType.TERMINATE_INSTANCES:
                 result = await self._handle_terminate_instances(operation)
             elif operation.operation_type == ProviderOperationType.GET_INSTANCE_STATUS:
@@ -849,12 +858,6 @@ class K8sProviderStrategy(ProviderStrategy):
                 result = await self._get_start_stop_service().start_instances(operation)
             elif operation.operation_type == ProviderOperationType.STOP_INSTANCES:
                 result = await self._get_start_stop_service().stop_instances(operation)
-            elif operation.operation_type == ProviderOperationType.TERMINATE_INSTANCES and (
-                operation.context or {}
-            ).get("cancel_mode"):
-                # cancel_mode flag: called from CancelRequestOrchestrator when no
-                # machines have been allocated yet — delete workloads by label.
-                result = await self._handle_cancel_resource(operation)
             else:
                 result = ProviderResult.error_result(
                     f"Operation {operation.operation_type} is not supported by the "
