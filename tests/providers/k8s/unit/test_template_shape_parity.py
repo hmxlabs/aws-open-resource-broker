@@ -49,8 +49,9 @@ _SCHEDULING_LIST = frozenset({"namespaces"})  # multi-namespace; not in DTO pipe
 _DOMAIN_K8S_OPERATOR = _DOMAIN_K8S_ALL - _INTERNAL_ONLY - _NO_HF_KEY - _SCHEDULING_LIST
 
 # Fields S3 (ExtensionConfig) intentionally omits: low-level overrides that
-# don't make sense as provider-level defaults.
-_S3_INTENTIONAL_OMISSIONS = frozenset({"args", "command", "pod_spec_override"})
+# don't make sense as provider-level defaults.  service_name is a per-template
+# StatefulSet governing-Service name, not a provider-wide default.
+_S3_INTENTIONAL_OMISSIONS = frozenset({"args", "command", "pod_spec_override", "service_name"})
 
 
 # ---------------------------------------------------------------------------

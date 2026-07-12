@@ -38,6 +38,7 @@ class K8sFieldMapping:
         "nodeSelector": "node_selector",
         "tolerations": "tolerations",
         "serviceAccount": "service_account",
+        "serviceName": "service_name",
         # Resource requests / limits
         "resourceRequests": "resource_requests",
         "resourceLimits": "resource_limits",
