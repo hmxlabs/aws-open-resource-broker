@@ -482,3 +482,113 @@ def test_from_auth_config_uses_di_logger_when_available() -> None:
         strategy = KubeAuthStrategy.from_auth_config(auth_config)
 
     assert isinstance(strategy, KubeAuthStrategy)
+
+
+# ---------------------------------------------------------------------------
+# Regression: empty/whitespace Bearer token rejected locally (Fix 5)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_authenticate_empty_token_returns_failed() -> None:
+    """An empty Bearer token must be rejected before reaching TokenReview."""
+    strategy = _make_strategy()
+    ctx = AuthContext(
+        method="GET",
+        path="/api/v1",
+        headers={"authorization": "Bearer "},
+        query_params={},
+    )
+    result = await strategy.authenticate(ctx)
+    assert result.status == AuthStatus.FAILED
+    assert result.error_message is not None
+    assert "empty" in result.error_message.lower() or "token" in result.error_message.lower()
+
+
+@pytest.mark.asyncio
+async def test_authenticate_whitespace_only_token_returns_failed() -> None:
+    """A whitespace-only Bearer token (e.g. 'Bearer    ') must be rejected locally."""
+    strategy = _make_strategy()
+    ctx = AuthContext(
+        method="GET",
+        path="/api/v1",
+        headers={"authorization": "Bearer    "},
+        query_params={},
+    )
+    result = await strategy.authenticate(ctx)
+    assert result.status == AuthStatus.FAILED
+
+
+@pytest.mark.asyncio
+async def test_empty_token_does_not_reach_token_review() -> None:
+    """validate_token must never be called with an empty token.
+
+    This verifies fail-closed behaviour: even if an empty string somehow
+    makes it through, the local guard fires before the TokenReview round-trip.
+    """
+    strategy = _make_strategy()
+
+    with patch.object(strategy, "validate_token") as mock_validate:
+        ctx = AuthContext(
+            method="GET",
+            path="/api/v1",
+            headers={"authorization": "Bearer "},
+            query_params={},
+        )
+        await strategy.authenticate(ctx)
+        mock_validate.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Regression: from_auth_config wires enabled from config (Fix 7)
+# ---------------------------------------------------------------------------
+
+
+def test_from_auth_config_respects_enabled_false_from_config() -> None:
+    """from_auth_config must wire enabled=False when k8s_auth_cfg.enabled is False."""
+    k8s_cfg = SimpleNamespace(
+        sa_role_mapping={},
+        audiences=None,
+        enabled=False,
+    )
+    provider_auth = SimpleNamespace(kubernetes=k8s_cfg)
+    auth_config = SimpleNamespace(provider_auth=provider_auth)
+
+    with patch(
+        "orb.infrastructure.di.container.get_container",
+        side_effect=Exception("no container"),
+    ):
+        strategy = KubeAuthStrategy.from_auth_config(auth_config)
+
+    assert strategy.is_enabled() is False, (
+        "from_auth_config must respect enabled=False from k8s_auth_cfg"
+    )
+
+
+def test_from_auth_config_defaults_enabled_true_when_no_config() -> None:
+    """When no k8s sub-config is present, enabled defaults to True."""
+    auth_config = SimpleNamespace(provider_auth=None)
+
+    with patch(
+        "orb.infrastructure.di.container.get_container",
+        side_effect=Exception("no container"),
+    ):
+        strategy = KubeAuthStrategy.from_auth_config(auth_config)
+
+    assert strategy.is_enabled() is True
+
+
+def test_from_auth_config_defaults_enabled_true_when_config_has_no_enabled_attr() -> None:
+    """When k8s_auth_cfg has no enabled attr, defaults to True."""
+    k8s_cfg = SimpleNamespace(sa_role_mapping={}, audiences=None)
+    # Deliberately do NOT set k8s_cfg.enabled
+    provider_auth = SimpleNamespace(kubernetes=k8s_cfg)
+    auth_config = SimpleNamespace(provider_auth=provider_auth)
+
+    with patch(
+        "orb.infrastructure.di.container.get_container",
+        side_effect=Exception("no container"),
+    ):
+        strategy = KubeAuthStrategy.from_auth_config(auth_config)
+
+    assert strategy.is_enabled() is True

@@ -225,3 +225,71 @@ def test_circuit_breaker_defaults_unchanged() -> None:
     assert cfg.max_retries == params["max_retries"].default
     assert cfg.retry_base_delay == params["base_delay"].default
     assert cfg.retry_max_delay == params["max_delay"].default
+
+
+# ---------------------------------------------------------------------------
+# Regression: circuit-breaker / retry knob lower bounds (Fix 6)
+# ---------------------------------------------------------------------------
+
+
+class TestResilienceKnobBounds:
+    """Invalid (zero or negative) resilience knob values must raise ValidationError."""
+
+    def test_circuit_breaker_failure_threshold_zero_rejected(self) -> None:
+        """threshold=0 would trip the breaker on the very first call."""
+        with pytest.raises(ValidationError):
+            K8sProviderConfig(circuit_breaker_failure_threshold=0)
+
+    def test_circuit_breaker_failure_threshold_negative_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            K8sProviderConfig(circuit_breaker_failure_threshold=-1)
+
+    def test_circuit_breaker_reset_timeout_zero_rejected(self) -> None:
+        """reset_timeout=0 would immediately half-open the breaker."""
+        with pytest.raises(ValidationError):
+            K8sProviderConfig(circuit_breaker_reset_timeout=0)
+
+    def test_circuit_breaker_reset_timeout_negative_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            K8sProviderConfig(circuit_breaker_reset_timeout=-10)
+
+    def test_max_retries_zero_is_valid(self) -> None:
+        """max_retries=0 is a legitimate 'no retry' configuration."""
+        cfg = K8sProviderConfig(max_retries=0)
+        assert cfg.max_retries == 0
+
+    def test_max_retries_negative_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            K8sProviderConfig(max_retries=-1)
+
+    def test_retry_base_delay_zero_rejected(self) -> None:
+        """base_delay=0 would create a busy-loop on transient errors."""
+        with pytest.raises(ValidationError):
+            K8sProviderConfig(retry_base_delay=0.0)
+
+    def test_retry_base_delay_negative_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            K8sProviderConfig(retry_base_delay=-0.5)
+
+    def test_retry_max_delay_zero_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            K8sProviderConfig(retry_max_delay=0.0)
+
+    def test_retry_max_delay_negative_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            K8sProviderConfig(retry_max_delay=-1.0)
+
+    def test_valid_minimum_values_accepted(self) -> None:
+        """Minimum valid values for all bounded knobs must be accepted."""
+        cfg = K8sProviderConfig(
+            circuit_breaker_failure_threshold=1,
+            circuit_breaker_reset_timeout=1,
+            max_retries=0,
+            retry_base_delay=0.01,
+            retry_max_delay=0.01,
+        )
+        assert cfg.circuit_breaker_failure_threshold == 1
+        assert cfg.circuit_breaker_reset_timeout == 1
+        assert cfg.max_retries == 0
+        assert cfg.retry_base_delay == 0.01
+        assert cfg.retry_max_delay == 0.01

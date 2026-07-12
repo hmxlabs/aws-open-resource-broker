@@ -108,6 +108,21 @@ class K8sAuthError(K8sError):
     """
 
 
+class K8sAuthenticationError(K8sError):
+    """Raised when the Kubernetes apiserver returns 401 Unauthorized.
+
+    Indicates the caller's credentials were rejected — typically an expired
+    ServiceAccount token or a missing ``Authorization`` header.  This is
+    distinct from :class:`K8sAuthError` (client-side config loading failure)
+    and :class:`K8sAuthorizationError` (403 RBAC denial after authentication
+    succeeded).
+
+    A 401 is non-retryable: the same expired token will continue to be rejected
+    until it is refreshed.  The caller should refresh credentials and re-issue
+    rather than burning retry budget.
+    """
+
+
 class K8sHealthCheckError(K8sError):
     """Raised when the Kubernetes API server health check fails."""
 
@@ -241,6 +256,8 @@ def classify_api_exception(
     +---------+--------------------------------------+---------------------------+
     | Status  | Condition                            | Exception class           |
     +=========+======================================+===========================+
+    | 401     | —                                    | K8sAuthenticationError    |
+    +---------+--------------------------------------+---------------------------+
     | 404     | —                                    | K8sEntityNotFoundError    |
     +---------+--------------------------------------+---------------------------+
     | 409     | —                                    | K8sConflictError          |
@@ -275,10 +292,16 @@ def classify_api_exception(
 
     error_source: Optional[str] = f"kubernetes.{operation}" if operation else None
 
-    # Base message from the SDK exception; fall back to the parsed k8s_message.
-    base_message = str(exc)
-    if not base_message or base_message in ("None", ""):
+    # Build the base_message from the structured k8s_message when available so
+    # callers get a clean, bounded string.  Fall back to str(exc) but cap it at
+    # 512 chars: the SDK may embed the full apiserver Status / RBAC body which
+    # can be several kilobytes and often contains sensitive detail.
+    _raw_exc_str = str(exc)
+    if not _raw_exc_str or _raw_exc_str in ("None", ""):
         base_message = k8s_message or f"Kubernetes API error (HTTP {status})"
+    else:
+        # Prefer the structured k8s_message (already parsed, bounded) when present.
+        base_message = k8s_message or _raw_exc_str[:512]
 
     common_kwargs: dict[str, Any] = {
         "http_status": status or None,
@@ -299,6 +322,9 @@ def classify_api_exception(
 
     if status == 429:
         return K8sRateLimitError(base_message, **common_kwargs)
+
+    if status == 401:
+        return K8sAuthenticationError(base_message, **common_kwargs)
 
     if status == 403:
         body_str = str(getattr(exc, "body", "") or "")

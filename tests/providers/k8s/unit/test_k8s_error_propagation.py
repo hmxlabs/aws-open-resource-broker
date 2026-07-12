@@ -394,3 +394,97 @@ class TestModuleRelocation:
         assert "orb_k8s_api_errors_total" in names
         assert "orb_k8s_api_throttles_total" in names
         assert "orb_k8s_api_retries_total" in names
+
+
+# ---------------------------------------------------------------------------
+# Regression: 401 classified as K8sAuthenticationError (Fix 2)
+# ---------------------------------------------------------------------------
+
+
+class TestAuthenticationError:
+    """401 Unauthorized must map to K8sAuthenticationError, not base K8sError."""
+
+    def test_401_maps_to_authentication_error(self) -> None:
+        from orb.providers.k8s.exceptions.k8s_exceptions import K8sAuthenticationError
+
+        exc = _make_api_exception(401, reason="Unauthorized", message="token has expired")
+        typed = classify_api_exception(exc, operation="list_namespaced_pod")
+        assert isinstance(typed, K8sAuthenticationError), (
+            f"Expected K8sAuthenticationError, got {type(typed)}"
+        )
+
+    def test_401_http_status_set_correctly(self) -> None:
+        from orb.providers.k8s.exceptions.k8s_exceptions import K8sAuthenticationError
+
+        exc = _make_api_exception(401, reason="Unauthorized")
+        typed = classify_api_exception(exc)
+        assert isinstance(typed, K8sAuthenticationError)
+        assert typed.http_status == 401
+
+    def test_401_is_non_retryable_via_classifier(self) -> None:
+        """The retry classifier must treat 401 as non-retryable after Fix 2."""
+        from orb.providers.k8s.resilience.retry_classifier import K8sRetryClassifier
+
+        try:
+            from kubernetes.client.exceptions import ApiException
+        except ImportError:
+            pytest.skip("kubernetes extra not installed")
+
+        clf = K8sRetryClassifier()
+        exc = ApiException(status=401)
+        exc.status = 401
+        assert clf.is_non_retryable(exc) is True, (
+            "401 must be non-retryable to prevent wasting retry budget on expired tokens"
+        )
+
+    def test_k8s_authentication_error_in_hierarchy(self) -> None:
+        """K8sAuthenticationError must be a K8sError sub-class."""
+        from orb.providers.k8s.exceptions.k8s_exceptions import (
+            K8sAuthenticationError,
+            K8sError,
+        )
+
+        assert issubclass(K8sAuthenticationError, K8sError)
+
+
+# ---------------------------------------------------------------------------
+# Regression: base_message truncated at 512 chars (Fix 4)
+# ---------------------------------------------------------------------------
+
+
+class TestBaseMessageTruncation:
+    """A huge apiserver Status body must not produce a > 512-char base_message."""
+
+    def test_large_exc_str_is_truncated_to_512_chars(self) -> None:
+        try:
+            from kubernetes.client.exceptions import ApiException
+        except ImportError:
+            pytest.skip("kubernetes extra not installed")
+
+        # Build a very large exception body (> 1 KB) without a k8s_message,
+        # so base_message falls back to str(exc).
+        big_body = "x" * 2000
+        exc = ApiException(status=500)
+        exc.status = 500
+        # Use a non-JSON body so k8s_message is None and str(exc) path is taken.
+        exc.body = big_body
+        exc.headers = {}
+
+        typed = classify_api_exception(exc, operation="list_namespaced_pod")
+        # base_message is used as the first positional arg to the exception constructor.
+        # The classified exception's message must not carry more than 512 chars from
+        # str(exc) which embeds the body.
+        assert len(typed.message) <= 520, (  # small slack for "HTTP 500" fallback
+            f"base_message too long: {len(typed.message)} chars"
+        )
+
+    def test_k8s_message_preferred_over_str_exc(self) -> None:
+        """When a structured k8s_message is available it should be used as base_message."""
+        exc = _make_api_exception(
+            403,
+            reason="Forbidden",
+            message="RBAC: User cannot create pods",
+        )
+        typed = classify_api_exception(exc, operation="create_namespaced_pod")
+        # The structured message must be present somewhere in the exception's message.
+        assert "RBAC" in typed.message or typed.k8s_message == "RBAC: User cannot create pods"

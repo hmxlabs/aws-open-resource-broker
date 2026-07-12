@@ -133,6 +133,15 @@ class KubeAuthStrategy(AuthPort):
             )
 
         token = auth_header[7:]  # Strip "Bearer " prefix
+        # Fail-closed: reject empty or whitespace-only tokens locally to avoid
+        # issuing a TokenReview for a clearly invalid credential.  The API server
+        # would reject such a request too, but catching it here avoids a round-trip
+        # and prevents accidentally logging an empty token in downstream error paths.
+        if not token or not token.strip():
+            return AuthResult(
+                status=AuthStatus.FAILED,
+                error_message="Bearer token is empty; authentication rejected",
+            )
         return await self.validate_token(token)
 
     async def validate_token(self, token: str) -> AuthResult:
@@ -241,12 +250,17 @@ class KubeAuthStrategy(AuthPort):
         except Exception:
             pass  # type: ignore[return]
 
+        # Respect the per-instance enabled flag from config rather than hardcoding
+        # True.  The registration-gate (inbound_auth_enabled=False → strategy never
+        # registered) is the primary control, but honouring the per-instance flag
+        # gives operators defense-in-depth and a consistent is_enabled() signal.
+        enabled: bool = getattr(k8s_auth_cfg, "enabled", True) if k8s_auth_cfg is not None else True
         return cls(
             logger=logger,
             kubernetes_client=kubernetes_client,
             sa_role_mapping=sa_role_mapping,
             audiences=audiences,
-            enabled=True,
+            enabled=enabled,
         )
 
     # ------------------------------------------------------------------

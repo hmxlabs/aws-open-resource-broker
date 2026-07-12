@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import os
 import time
+import urllib.parse
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
@@ -48,6 +49,30 @@ _IN_CLUSTER_SENTINEL = Path("/var/run/secrets/kubernetes.io")
 # at 80 % of their lifetime (which is 3600 s by default), so we refresh at
 # 55 minutes to give a generous margin before the old token is rejected.
 _DEFAULT_TOKEN_REFRESH_SECONDS: int = 55 * 60
+
+
+def _redact_proxy_url(url: str) -> str:
+    """Return *url* with the userinfo (user:password) component replaced by ``***``.
+
+    ``HTTPS_PROXY`` values often take the form ``http://user:pass@proxy:port``.
+    Logging the raw URL at DEBUG level would expose credentials in log files.
+    This helper strips the userinfo from the netloc so the host/port are still
+    visible for diagnostics without leaking secrets.
+    """
+    try:
+        parsed = urllib.parse.urlparse(url)
+        if parsed.username or parsed.password:
+            # Replace netloc so host:port stays visible, credentials do not.
+            redacted_netloc = parsed.hostname or ""
+            if parsed.port:
+                redacted_netloc = f"{redacted_netloc}:{parsed.port}"
+            redacted_netloc = f"***@{redacted_netloc}"
+            parsed = parsed._replace(netloc=redacted_netloc)
+            return urllib.parse.urlunparse(parsed)
+    except Exception:  # pragma: no cover — malformed URLs passed through
+        pass
+    return url
+
 
 # ---------------------------------------------------------------------------
 # HTTP proxy helpers
@@ -108,7 +133,7 @@ def _apply_proxy_to_default_configuration(logger: Optional[LoggingPort]) -> None
         if logger is not None:
             logger.debug(
                 "K8s in-cluster: applying HTTP proxy from environment: %s",
-                proxy_url,
+                _redact_proxy_url(proxy_url),
             )
     if no_proxy is not None:
         cfg.no_proxy = no_proxy  # type: ignore[attr-defined]

@@ -144,6 +144,33 @@ def _validate_label(name: str, value: str, allowed: frozenset[str]) -> str:
     return "unknown"
 
 
+def _safe_namespace(namespace: str) -> str:
+    """Normalise a raw namespace string to a bounded Prometheus label value.
+
+    Kubernetes namespace names are at most 63 characters (DNS-1123 labels).
+    The cluster-scoped wildcard ``'*'`` is replaced with the synthetic value
+    ``'_cluster_'`` so it is distinct from any real namespace but still
+    identifiable in dashboards.
+
+    Any namespace longer than 63 characters is truncated with a ``'...'`` suffix
+    so it remains readable while keeping Prometheus label cardinality bounded.
+    Empty strings are replaced with ``'unknown'``.
+
+    This does **not** validate the value against a configured namespace list — the
+    metrics layer has no access to config.  The cap is a pragmatic guard against
+    cardinality explosion when ``namespaces=['*']`` is active and callers pass
+    raw watch-event namespace strings.
+    """
+    if not namespace:
+        return "unknown"
+    if namespace == "*":
+        return "_cluster_"
+    # DNS-1123 label max is 63 chars; truncate silently to bound cardinality.
+    if len(namespace) > 63:
+        return namespace[:60] + "..."
+    return namespace
+
+
 # Canonical label sets for each metric — kept here as the single source of truth
 # so callers can introspect without importing any metrics library directly.
 _METRIC_SPECS: tuple[tuple[str, str, str, list[str]], ...] = (
@@ -361,11 +388,15 @@ class K8sMetrics:
 
     def record_acquire(self, *, namespace: str, spec_kind: str) -> None:
         """Increment ``orb_k8s_acquire_total`` for *namespace* and *spec_kind*."""
-        self._acquire_total.add(1, {"namespace": namespace, "spec_kind": spec_kind})
+        self._acquire_total.add(
+            1, {"namespace": _safe_namespace(namespace), "spec_kind": spec_kind}
+        )
 
     def record_release(self, *, namespace: str, spec_kind: str) -> None:
         """Increment ``orb_k8s_release_total`` for *namespace* and *spec_kind*."""
-        self._release_total.add(1, {"namespace": namespace, "spec_kind": spec_kind})
+        self._release_total.add(
+            1, {"namespace": _safe_namespace(namespace), "spec_kind": spec_kind}
+        )
 
     def record_watch_reconnect(self, *, namespace: str, reason: str) -> None:
         """Increment ``orb_k8s_watch_reconnects_total`` with an enum-checked reason."""
@@ -433,7 +464,7 @@ class K8sMetrics:
             prev = self._active_pods_state.get(namespace, 0)
             delta = count - prev
             self._active_pods_state[namespace] = count
-        self._active_pods.add(delta, {"namespace": namespace})
+        self._active_pods.add(delta, {"namespace": _safe_namespace(namespace)})
 
     def set_active_requests(self, *, namespace: str, count: int) -> None:
         """Set the ``orb_k8s_active_requests`` gauge for *namespace* to an absolute *count*."""
@@ -441,7 +472,7 @@ class K8sMetrics:
             prev = self._active_requests_state.get(namespace, 0)
             delta = count - prev
             self._active_requests_state[namespace] = count
-        self._active_requests.add(delta, {"namespace": namespace})
+        self._active_requests.add(delta, {"namespace": _safe_namespace(namespace)})
 
     def set_circuit_breaker_state(self, *, name: str, state: int) -> None:
         """Set the ``orb_k8s_circuit_breaker_state`` gauge.

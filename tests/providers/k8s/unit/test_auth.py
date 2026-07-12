@@ -564,3 +564,90 @@ def test_load_in_cluster_config_logs_proxy_at_debug(
     mock_logger.debug.assert_called()
     debug_calls = [str(c) for c in mock_logger.debug.call_args_list]
     assert any("proxy" in c.lower() for c in debug_calls)
+
+
+# ---------------------------------------------------------------------------
+# Regression: proxy URL credential redaction (Fix 1)
+# ---------------------------------------------------------------------------
+
+
+def test_redact_proxy_url_strips_credentials() -> None:
+    """_redact_proxy_url must replace user:pass@ with ***@ in the log string."""
+    from orb.providers.k8s.auth.in_cluster import _redact_proxy_url
+
+    raw = "https://user:secret@proxy.corp.example:3128"
+    redacted = _redact_proxy_url(raw)
+    assert "secret" not in redacted, "password must not appear in redacted URL"
+    assert "user" not in redacted, "username must not appear in redacted URL"
+    assert "proxy.corp.example" in redacted, "host must remain visible for diagnostics"
+    assert "3128" in redacted, "port must remain visible for diagnostics"
+    assert "***" in redacted, "redacted marker must be present"
+
+
+def test_redact_proxy_url_no_credentials_passes_through() -> None:
+    """A proxy URL without credentials must be returned unchanged."""
+    from orb.providers.k8s.auth.in_cluster import _redact_proxy_url
+
+    plain = "https://proxy.corp.example:3128"
+    assert _redact_proxy_url(plain) == plain
+
+
+def test_redact_proxy_url_kubeconfig_strips_credentials() -> None:
+    """kubeconfig._redact_proxy_url also redacts credentials."""
+    from orb.providers.k8s.auth.kubeconfig import _redact_proxy_url as kc_redact
+
+    raw = "http://admin:hunter2@proxy.internal:8080"
+    redacted = kc_redact(raw)
+    assert "hunter2" not in redacted
+    assert "admin" not in redacted
+    assert "proxy.internal" in redacted
+
+
+def test_in_cluster_debug_log_does_not_log_raw_proxy_creds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The DEBUG log emitted for proxy wiring must not contain the raw password."""
+    monkeypatch.setenv("HTTPS_PROXY", "https://user:supersecret@proxy.corp:3128")
+    for var in ("https_proxy", "HTTP_PROXY", "http_proxy", "NO_PROXY", "no_proxy"):
+        monkeypatch.delenv(var, raising=False)
+
+    _make_fake_kubernetes_for_in_cluster(monkeypatch)
+    mock_logger = MagicMock()
+
+    from orb.providers.k8s.auth.in_cluster import _apply_proxy_to_default_configuration
+
+    _apply_proxy_to_default_configuration(mock_logger)
+
+    # Collect all debug call args as strings
+    all_debug_text = " ".join(
+        str(arg) for call in mock_logger.debug.call_args_list for arg in call.args
+    )
+    assert "supersecret" not in all_debug_text, "Raw proxy password must not appear in debug log"
+    assert "proxy.corp" in all_debug_text, "Host should still be logged for diagnostics"
+
+
+def test_kubeconfig_debug_log_does_not_log_raw_proxy_creds(
+    tmp_path: "Path",
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The kubeconfig debug log must not emit the raw proxy password."""
+    monkeypatch.setenv("HTTPS_PROXY", "https://alice:topsecret@proxy.corp:3128")
+    for var in ("https_proxy", "HTTP_PROXY", "http_proxy", "NO_PROXY", "no_proxy"):
+        monkeypatch.delenv(var, raising=False)
+
+    kube_file = tmp_path / "config"
+    kube_file.write_text("apiVersion: v1\nkind: Config\n", encoding="utf-8")
+    _make_fake_kubernetes_with_configuration(monkeypatch, kube_file)
+    mock_logger = MagicMock()
+
+    from orb.providers.k8s.auth.kubeconfig import _apply_proxy_to_default_configuration
+
+    _apply_proxy_to_default_configuration(mock_logger)
+
+    all_debug_text = " ".join(
+        str(arg) for call in mock_logger.debug.call_args_list for arg in call.args
+    )
+    assert "topsecret" not in all_debug_text, (
+        "Raw proxy password must not appear in kubeconfig debug log"
+    )
+    assert "proxy.corp" in all_debug_text

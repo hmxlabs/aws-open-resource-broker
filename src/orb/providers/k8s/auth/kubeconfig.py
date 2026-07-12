@@ -32,6 +32,7 @@ so operators can confirm their environment is wired correctly.
 from __future__ import annotations
 
 import os
+import urllib.parse
 from typing import TYPE_CHECKING, Optional
 
 from orb.providers.k8s.exceptions.k8s_exceptions import K8sAuthError
@@ -52,6 +53,27 @@ _ALLOWED_EXEC_COMMANDS: frozenset[str] = frozenset(
 )
 
 _ENV_ALLOW_UNKNOWN = "ORB_K8S_ALLOW_UNKNOWN_EXEC_PLUGIN"
+
+
+def _redact_proxy_url(url: str) -> str:
+    """Return *url* with the userinfo (user:password) component replaced by ``***``.
+
+    ``HTTPS_PROXY`` values often take the form ``http://user:pass@proxy:port``.
+    Logging the raw URL at DEBUG level would expose credentials in log files.
+    """
+    try:
+        parsed = urllib.parse.urlparse(url)
+        if parsed.username or parsed.password:
+            redacted_netloc = parsed.hostname or ""
+            if parsed.port:
+                redacted_netloc = f"{redacted_netloc}:{parsed.port}"
+            redacted_netloc = f"***@{redacted_netloc}"
+            parsed = parsed._replace(netloc=redacted_netloc)
+            return urllib.parse.urlunparse(parsed)
+    except Exception:  # pragma: no cover — malformed URLs passed through
+        pass
+    return url
+
 
 # ---------------------------------------------------------------------------
 # HTTP proxy helpers
@@ -113,7 +135,7 @@ def _apply_proxy_to_default_configuration(logger: Optional[LoggingPort]) -> None
         if logger is not None:
             logger.debug(
                 "K8s kubeconfig: applying HTTP proxy from environment: %s",
-                proxy_url,
+                _redact_proxy_url(proxy_url),
             )
     if no_proxy is not None:
         cfg.no_proxy = no_proxy  # type: ignore[attr-defined]
@@ -220,6 +242,14 @@ def _check_exec_plugins(
 
         # Only the basename is checked — a full path like
         # /usr/local/bin/aws-iam-authenticator must still resolve.
+        # NOTE: this is a best-effort advisory guard, not a security
+        # boundary.  A malicious kubeconfig can set command to
+        # "/tmp/aws" (basename "aws") and bypass this check; the
+        # assumption is that the kubeconfig file itself is trusted
+        # (operator-supplied, not user-uploaded).  Operators who run
+        # ORB in a higher-trust context should set
+        # ORB_K8S_ALLOW_UNKNOWN_EXEC_PLUGIN=0 and restrict kubeconfig
+        # file ownership at the OS level.
         command_base = pathlib.Path(command).name
 
         if command_base not in _ALLOWED_EXEC_COMMANDS:

@@ -558,6 +558,7 @@ class K8sProviderConfig(BaseSettings, BaseProviderConfig):  # type: ignore[misc]
     # so this change is a no-op for existing deployments.
     circuit_breaker_failure_threshold: int = Field(
         5,
+        ge=1,  # 0 would trip the breaker on the very first call
         description=(
             "Number of consecutive apiserver failures that trips the per-handler "
             "circuit breaker.  Once open, calls fast-fail with "
@@ -567,6 +568,7 @@ class K8sProviderConfig(BaseSettings, BaseProviderConfig):  # type: ignore[misc]
     )
     circuit_breaker_reset_timeout: int = Field(
         60,
+        ge=1,  # 0 seconds would immediately half-open, effectively disabling the breaker
         description=(
             "Seconds after the circuit opens before the breaker transitions to "
             "half-open and allows a probe request through.  Default 60 — matches "
@@ -575,15 +577,17 @@ class K8sProviderConfig(BaseSettings, BaseProviderConfig):  # type: ignore[misc]
     )
     max_retries: int = Field(
         3,
+        ge=0,  # 0 = no retries (fail immediately); negative values are nonsensical
         description=(
             "Maximum number of retry attempts for transient apiserver errors "
             "(429 / 5xx) before giving up.  Non-recoverable status codes "
-            "(400 / 403 / 404 / 409 / 410 / 422) are never retried regardless "
+            "(400 / 401 / 403 / 404 / 409 / 410 / 422) are never retried regardless "
             "of this value.  Default 3 — matches the K8sHandlerBase hardcoded value."
         ),
     )
     retry_base_delay: float = Field(
         1.0,
+        ge=0.01,  # near-zero delay would create a tight busy-loop on transient errors
         description=(
             "Base delay in seconds for the exponential-backoff retry strategy.  "
             "The first retry waits this many seconds; subsequent retries double "
@@ -593,6 +597,7 @@ class K8sProviderConfig(BaseSettings, BaseProviderConfig):  # type: ignore[misc]
     )
     retry_max_delay: float = Field(
         30.0,
+        ge=0.01,  # must be positive; near-zero is effectively no cap on busy-loop risk
         description=(
             "Maximum delay in seconds between retry attempts.  The exponential "
             "backoff is capped at this value.  Default 30.0 — matches the "
