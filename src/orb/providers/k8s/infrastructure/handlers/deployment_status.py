@@ -275,26 +275,6 @@ class DeploymentStatusResolver:
                 pending_count=pending_count,
                 failed_count=failed_count,
             )
-        # No replica is ready yet but at least one pod has already been marked
-        # failed (a genuine crash loop or fatal waiting reason — the per-pod
-        # status is only "failed" after CrashLoopBackOff / restart_count>=2 /
-        # ImagePull).  A crash-looping Deployment controller keeps respawning
-        # pods, so the instance list stays a mix of failed + pending and would
-        # otherwise report in_progress forever.  Surface it as failed instead
-        # of masking it behind the still-pending replacement pods.
-        if failed_count > 0 and effective_ready == 0:
-            return ProviderFulfilment(
-                state="failed",
-                message=(
-                    f"Deployment not progressing: 0/{requested_count} ready, "
-                    f"{failed_count} failed, {pending_count} pending"
-                ),
-                target_units=requested_count,
-                fulfilled_units=0,
-                running_count=effective_ready,
-                pending_count=pending_count,
-                failed_count=failed_count,
-            )
         if pending_count > 0:
             return ProviderFulfilment(
                 state="in_progress",

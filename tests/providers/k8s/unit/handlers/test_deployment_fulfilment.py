@@ -22,12 +22,18 @@ def _inst(status: str) -> dict:
     return {"status": status}
 
 
-def test_mixed_failed_and_pending_with_no_ready_is_failed() -> None:
-    """failed + pending, nothing ready → failed (was perpetual in_progress)."""
+def test_mixed_failed_and_pending_stays_in_progress() -> None:
+    """failed + still-pending replacement → in_progress, matching AWS.
+
+    A single transient pod failure during scale-up must NOT permanently fail
+    the request while replacement pods are still pending — the controller may
+    recover.  AWS (fleet_fulfilment) only declares failed when pending_count is
+    also 0.  The request is bounded by the acquire timeout, not condemned early.
+    """
     resolver = _resolver()
     instances = [_inst("failed"), _inst("failed"), _inst("pending")]
     result = resolver.compute_fulfilment(instances, requested_count=3)
-    assert result.state == "failed"
+    assert result.state == "in_progress"
     assert result.failed_count == 2
     assert result.pending_count == 1
 
