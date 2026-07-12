@@ -402,7 +402,7 @@ class K8sWatcher:
                     "Kubernetes pod watcher: starting periodic resync (namespace=%s)",
                     self._namespace,
                 )
-                await asyncio.to_thread(self._relist_snapshot)
+                await asyncio.to_thread(self._relist_snapshot, evict_absent=True)
                 self._logger.debug(
                     "Kubernetes pod watcher: periodic resync complete (namespace=%s)",
                     self._namespace,
@@ -545,7 +545,7 @@ class K8sWatcher:
             return core_v1.list_pod_for_all_namespaces, kwargs
         return core_v1.list_namespaced_pod, {"namespace": self._namespace, **kwargs}
 
-    def _relist_snapshot(self) -> Optional[str]:
+    def _relist_snapshot(self, *, evict_absent: bool = False) -> Optional[str]:
         """Perform a full LIST and reconcile the cache from the response.
 
         Called after a 410-Gone response (or by the periodic resync task)
@@ -557,15 +557,41 @@ class K8sWatcher:
         ------------------------
         After upserting every pod from the LIST, pods that were in the
         cache for the scoped namespace/request but are absent from the
-        LIST are evicted.  The scope of eviction matches the scope of the
-        LIST:
+        LIST can optionally be evicted (controlled by ``evict_absent``).
+        The scope of eviction matches the scope of the LIST:
 
         * namespace-scoped LIST  → only evict entries in that namespace.
         * cluster-scoped LIST    → evict all entries absent from the LIST.
 
-        This prevents deleted pods from persisting in the cache until the
-        next watch DELETE event (which may not arrive if the stream was
-        disrupted).
+        This prevents deleted pods from persisting in the cache when the
+        watch stream has drifted (periodic resync path).
+
+        **Why eviction is opt-in (``evict_absent=False`` by default)**:
+
+        On 410-Gone recovery the watch stream was disrupted, but the
+        second watch session (resumed from the LIST's ``resourceVersion``)
+        will deliver DELETE events for any pods that were genuinely
+        removed during the gap.  Evicting eagerly here would discard pods
+        whose ADDED event arrived via the first watch session but whose
+        DELETE event has not been seen yet — pods that are still running
+        in the cluster.  Callers that *are* authoritative about absent
+        pods (the periodic resync task, where the watch stream is healthy
+        and has been running long enough to catch drift) must pass
+        ``evict_absent=True`` explicitly.
+
+        Eviction safety: two guards combine to prevent over-eviction:
+
+        (a) Only pods whose cache key existed **before the LIST started**
+            are candidates.  The pre-LIST key set is snapshotted while
+            holding the cache lock so pods added to the cache by the
+            concurrent watch stream during the LIST call are never
+            considered for eviction.
+
+        (b) Among those candidates, any pod whose ``last_updated``
+            timestamp is strictly greater than ``captured_before`` was
+            refreshed by a watch event that arrived after the snapshot was
+            taken — that newer event is authoritative and the pod is left
+            in place.
 
         To avoid overwriting a live watch-stream update that arrived
         *after* the LIST snapshot was taken, upserts use
@@ -581,6 +607,15 @@ class K8sWatcher:
         # can compare against existing cache entry timestamps and avoid
         # overwriting watch events that arrived after this LIST began.
         captured_before = time.monotonic()
+
+        # (a) Snapshot the set of keys currently in the cache BEFORE the
+        # LIST call.  Only pods present in this snapshot are candidates for
+        # eviction — pods added to the cache by the concurrent watch stream
+        # during the LIST are never considered.
+        pre_list_keys: set[tuple[str, str]] = set()
+        if evict_absent:
+            pre_list_keys = {(s.request_id, s.pod_name) for s in self._cache.all_states()}
+
         with self._timed_list("list_pods"):
             if self._namespace is None:
                 pod_list = core_v1.list_pod_for_all_namespaces(**kwargs)
@@ -610,34 +645,43 @@ class K8sWatcher:
         # from the results — these pods were deleted between the last
         # watch event and this LIST.
         #
-        # Scope: for a namespace-scoped LIST, only evict entries in the
-        # same namespace; for a cluster-scoped LIST evict all absent
-        # entries.  We never evict a pod that was written after
-        # ``captured_before`` (i.e. a pod created between the LIST start
-        # and now) because we only compare entries whose last_updated is
-        # at most ``captured_before``.
-        all_current = self._cache.all_states()
-        for cached_state in all_current:
-            if cached_state.deleted:
-                # Already being torn down by a concurrent watch DELETE.
-                continue
-            if (cached_state.request_id, cached_state.pod_name) in seen_keys:
-                continue
-            # Only evict within the scope the LIST covered.
-            if self._namespace is not None and cached_state.namespace != self._namespace:
-                continue
-            # Guard against evicting a pod that arrived in the cache
-            # after the LIST started (created concurrently with the LIST).
-            if cached_state.last_updated > captured_before:
-                continue
-            # Pod is absent from the LIST and within scope — evict.
-            self._logger.debug(
-                "Resync evicting pod absent from LIST (namespace=%s, pod=%s, request_id=%s)",
-                cached_state.namespace,
-                cached_state.pod_name,
-                cached_state.request_id,
-            )
-            self._cache.delete(cached_state.request_id, cached_state.pod_name)
+        # Only runs when evict_absent=True (periodic resync).  See the
+        # docstring for why eviction is suppressed on 410-recovery.
+        if evict_absent:
+            # Scope: for a namespace-scoped LIST, only evict entries in the
+            # same namespace; for a cluster-scoped LIST evict all absent
+            # entries.  We never evict a pod that was written after
+            # ``captured_before`` (i.e. a pod created between the LIST start
+            # and now) because we only compare entries whose last_updated is
+            # at most ``captured_before``.
+            all_current = self._cache.all_states()
+            for cached_state in all_current:
+                if cached_state.deleted:
+                    # Already being torn down by a concurrent watch DELETE.
+                    continue
+                if (cached_state.request_id, cached_state.pod_name) in seen_keys:
+                    continue
+                # Only evict within the scope the LIST covered.
+                if self._namespace is not None and cached_state.namespace != self._namespace:
+                    continue
+                # (a) Only evict pods that were in the cache when the LIST
+                # started — pods added by the watch stream during the LIST
+                # are not authoritative from this snapshot's perspective.
+                if (cached_state.request_id, cached_state.pod_name) not in pre_list_keys:
+                    continue
+                # (b) Guard against evicting a pod that was refreshed by a
+                # watch event after the LIST started.
+                if cached_state.last_updated > captured_before:
+                    continue
+                # Pod was present before the LIST, absent from the LIST, within
+                # scope, and not refreshed mid-flight — evict as deleted.
+                self._logger.debug(
+                    "Resync evicting pod absent from LIST (namespace=%s, pod=%s, request_id=%s)",
+                    cached_state.namespace,
+                    cached_state.pod_name,
+                    cached_state.request_id,
+                )
+                self._cache.delete(cached_state.request_id, cached_state.pod_name)
 
         list_metadata = getattr(pod_list, "metadata", None)
         resource_version = getattr(list_metadata, "resource_version", None)

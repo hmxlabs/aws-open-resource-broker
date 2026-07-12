@@ -197,9 +197,9 @@ async def test_resync_fires_after_interval() -> None:
 
     original = watcher._relist_snapshot
 
-    def counting_relist() -> Any:
+    def counting_relist(**kwargs: Any) -> Any:
         relist_calls.append(1)
-        return original()
+        return original(**kwargs)
 
     watcher._relist_snapshot = counting_relist  # type: ignore[method-assign]
 

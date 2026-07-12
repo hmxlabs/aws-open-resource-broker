@@ -291,6 +291,47 @@ async def test_release_hosts_empty_machine_ids_is_noop() -> None:
 
 
 @pytest.mark.asyncio
+async def test_release_hosts_resolves_parallelism_from_live_job_when_absent() -> None:
+    """Full release with absent parallelism resolves it via live read_namespaced_job.
+
+    Regression test: a return request that stamps only ``job_name`` (no
+    ``parallelism``) in provider_data must NOT be wrongly refused.  The
+    handler must read the live Job spec and use its ``spec.parallelism``
+    to confirm the caller is releasing the full Job.
+    """
+    from types import SimpleNamespace
+
+    batch_v1 = MagicMock()
+    # Mock the live read to return a Job with parallelism=2.
+    batch_v1.read_namespaced_job.return_value = SimpleNamespace(
+        spec=SimpleNamespace(parallelism=2, completions=2),
+        status=SimpleNamespace(active=0, succeeded=2, failed=0, conditions=[]),
+    )
+    batch_v1.delete_namespaced_job.return_value = SimpleNamespace()
+    client = _make_client(batch_v1=batch_v1)
+    handler = _make_handler(client=client)
+
+    # provider_data has job_name but NO parallelism — as a return request
+    # that only stamps the job identity, not the full acquire-time context.
+    provider_data = {
+        "request_id": "req-live-resolve",
+        "namespace": "orb-test",
+        "job_name": "orb-deadbeef",
+        # 'parallelism' intentionally absent
+    }
+
+    await handler.release_hosts(["pod-1", "pod-2"], provider_data)
+
+    # The live read was called to resolve parallelism.
+    batch_v1.read_namespaced_job.assert_called_once()
+    # The whole Job was deleted.
+    batch_v1.delete_namespaced_job.assert_called_once()
+    delete_kwargs = batch_v1.delete_namespaced_job.call_args.kwargs
+    assert delete_kwargs["name"] == "orb-deadbeef"
+    assert delete_kwargs["propagation_policy"] == "Background"
+
+
+@pytest.mark.asyncio
 async def test_release_hosts_job_already_gone_is_best_effort() -> None:
     """Full release of an already-gone Job is a no-op (404 is best-effort)."""
     from kubernetes.client.exceptions import ApiException

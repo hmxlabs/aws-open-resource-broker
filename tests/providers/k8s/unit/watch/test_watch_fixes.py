@@ -179,12 +179,57 @@ class TestFix1PeriodicResyncForwarded:
 
 
 class TestFix2ResyncEjectsDeletedPod:
-    """Resync (410-recovery and periodic) must evict cache entries absent from LIST."""
+    """Periodic resync must evict cache entries absent from LIST; 410-recovery must not."""
 
     @pytest.mark.asyncio
     @pytest.mark.timeout(10)
     async def test_resync_evicts_pod_absent_from_list(self) -> None:
-        """A pod in the cache before the resync that is not in the LIST must be removed."""
+        """A pod absent from the periodic-resync LIST must be evicted (evict_absent=True path).
+
+        410-recovery does NOT evict (it relies on the resumed watch stream to
+        deliver DELETE events); periodic resync is the path that calls
+        _relist_snapshot(evict_absent=True) and is authoritative about absent pods.
+        We exercise the eviction directly via _relist_snapshot(evict_absent=True)
+        to keep the test deterministic.
+        """
+        cache = PodStateCache()
+        # orb-deleted is in cache — absent from the LIST → must be evicted.
+        cache.upsert(
+            PodState(request_id="req-1", pod_name="orb-deleted", namespace="ns", status="running")
+        )
+        # orb-live is in the LIST → must survive.
+        client = _make_client(
+            pods=[_pod_ns(name="orb-live")],
+            rv="rv-200",
+        )
+
+        watcher = K8sWatcher(
+            kubernetes_client=client,
+            cache=cache,
+            logger=MagicMock(),
+            namespace="ns",
+            watch_factory=_noop_watch_factory,
+            watch_timeout_seconds=1,
+        )
+        # Periodic resync passes evict_absent=True — exercise that path directly.
+        watcher._relist_snapshot(evict_absent=True)
+
+        states = cache.get("req-1")
+        assert states is not None
+        pod_names = {s.pod_name for s in states}
+        assert "orb-live" in pod_names, "Pod in LIST must remain in cache"
+        assert "orb-deleted" not in pod_names, "Pod absent from LIST must be evicted by resync"
+
+    @pytest.mark.asyncio
+    @pytest.mark.timeout(10)
+    async def test_410_recovery_does_not_evict_watch_stream_pods(self) -> None:
+        """410-recovery relist must NOT evict pods added by the watch stream.
+
+        After a 410 the second watch session (resumed from the relist rv) will
+        deliver DELETE events for genuinely-deleted pods.  Eager eviction during
+        410 recovery would discard pods that are still running in the cluster
+        but happened to be absent from the cached LIST snapshot.
+        """
         from kubernetes.client.exceptions import ApiException
 
         cache = PodStateCache()
@@ -196,7 +241,7 @@ class TestFix2ResyncEjectsDeletedPod:
         stubs_iter = iter(
             [
                 _StubWatch(
-                    [{"type": "ADDED", "object": _pod_ns(name="orb-deleted")}],
+                    [{"type": "ADDED", "object": _pod_ns(name="orb-watch-pod")}],
                     raise_after=ApiException(status=410, reason="Gone"),
                 ),
                 _StubWatch([]),
@@ -229,8 +274,10 @@ class TestFix2ResyncEjectsDeletedPod:
         states = cache.get("req-1")
         assert states is not None
         pod_names = {s.pod_name for s in states}
-        assert "orb-live" in pod_names, "Pod in LIST must remain in cache"
-        assert "orb-deleted" not in pod_names, "Pod absent from LIST must be evicted by resync"
+        assert "orb-live" in pod_names, "Pod in LIST must remain in cache after 410 recovery"
+        assert "orb-watch-pod" in pod_names, (
+            "Pod added by watch stream must NOT be evicted by 410-recovery relist"
+        )
 
     @pytest.mark.asyncio
     @pytest.mark.timeout(10)
@@ -257,8 +304,8 @@ class TestFix2ResyncEjectsDeletedPod:
             watch_factory=_noop_watch_factory,
             watch_timeout_seconds=1,
         )
-        # Run the resync directly (synchronously) so we don't need async infra.
-        watcher._relist_snapshot()
+        # Run the resync with eviction enabled (periodic resync path).
+        watcher._relist_snapshot(evict_absent=True)
 
         # Pod in "other-ns" must survive — it was outside the LIST scope.
         states = cache.get("req-other")
@@ -292,9 +339,10 @@ class TestFix2ResyncEjectsDeletedPod:
             watch_factory=_noop_watch_factory,
             watch_timeout_seconds=1,
         )
-        watcher._relist_snapshot()
+        # Periodic resync path: eviction is enabled.
+        watcher._relist_snapshot(evict_absent=True)
 
-        # orb-gone must be evicted (in "ns", absent from LIST).
+        # orb-gone must be evicted (in "ns", absent from LIST, evict_absent=True).
         assert cache.get("req-1") is None, (
             "Pod in scoped namespace absent from LIST must be evicted"
         )
@@ -302,6 +350,64 @@ class TestFix2ResyncEjectsDeletedPod:
         states = cache.get("req-2")
         assert states is not None
         assert any(s.pod_name == "orb-other" for s in states)
+
+    def test_resync_evicts_only_pre_list_keys_not_concurrent_watch_adds(self) -> None:
+        """Eviction must only target pods that were in the cache BEFORE the LIST started.
+
+        Guard (a): pods added to the cache by a concurrent watch stream during the
+        LIST call are NOT in the pre-LIST key snapshot and must never be evicted,
+        even if they happen to be absent from the LIST results.
+        """
+        cache = PodStateCache()
+
+        # Pod present before the LIST — absent from LIST → must be evicted.
+        cache.upsert(
+            PodState(request_id="req-1", pod_name="orb-pre-list", namespace="ns", status="running")
+        )
+
+        # Simulate a pod that arrives in the cache AFTER the pre-LIST snapshot
+        # is taken but during (or just after) the LIST call.  We replicate this
+        # by injecting it directly into the cache with a timestamp in the future
+        # relative to captured_before.  The real-world scenario is a concurrent
+        # watch ADDED event that lands while the LIST is in-flight.
+        #
+        # We use a custom client that injects a cache side-effect mid-LIST to
+        # represent the concurrent watch upsert.
+        concurrent_pod_name = "orb-concurrent-watch"
+        concurrent_state = PodState(
+            request_id="req-1", pod_name=concurrent_pod_name, namespace="ns", status="running"
+        )
+
+        list_pod_list = _make_pod_list([], rv="rv-500")
+
+        def list_with_concurrent_upsert(**kwargs: Any) -> Any:
+            # Simulate: watch stream adds orb-concurrent-watch to cache DURING LIST.
+            cache.upsert(concurrent_state)
+            return list_pod_list
+
+        client = MagicMock()
+        client.core_v1.list_namespaced_pod = list_with_concurrent_upsert
+
+        watcher = K8sWatcher(
+            kubernetes_client=client,
+            cache=cache,
+            logger=MagicMock(),
+            namespace="ns",
+            watch_factory=_noop_watch_factory,
+            watch_timeout_seconds=1,
+        )
+        watcher._relist_snapshot(evict_absent=True)
+
+        # orb-pre-list must be evicted (present before LIST, absent from LIST).
+        pre_list_states = cache.get("req-1")
+        pod_names = {s.pod_name for s in (pre_list_states or [])}
+        assert "orb-pre-list" not in pod_names, (
+            "Pod present before LIST and absent from LIST must be evicted"
+        )
+        # orb-concurrent-watch must survive — it was NOT in the pre-LIST snapshot.
+        assert concurrent_pod_name in pod_names, (
+            "Pod added during LIST by concurrent watch stream must not be evicted"
+        )
 
 
 # ---------------------------------------------------------------------------

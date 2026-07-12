@@ -224,21 +224,30 @@ class K8sJobHandler(K8sHandlerBase):
         request rather than silently deleting workloads the caller did
         not ask to release.
 
+        When ``provider_data["parallelism"]`` is absent or zero (for
+        example, return callers that stamp only ``job_name`` and not
+        ``parallelism``), the handler resolves parallelism from the live
+        Job spec via ``read_namespaced_job`` before applying the
+        full/subset check.  This keeps the selective-release guard intact
+        while allowing legitimate full releases that omit parallelism in
+        ``provider_data``.
+
         Args:
             machine_ids: Pod names the caller wants to release.  Must
-                cover every pod of the Job (length ==
-                ``provider_data["parallelism"]``); a subset is rejected.
-                If ``provider_data["parallelism"]`` is absent or zero the
-                release is also refused — we cannot confirm the caller is
-                releasing the whole Job without knowing its parallelism.
+                cover every pod of the Job (length >=
+                ``resolved_parallelism``); a strict subset is rejected.
+                If the live Job cannot be read and parallelism is still
+                unknown, the release is refused — we cannot confirm the
+                caller is releasing the whole Job.
             provider_data: The ``provider_data`` dict stamped onto the
                 Request aggregate at acquire time.  Carries ``namespace``,
-                ``job_name`` and ``parallelism``.
+                ``job_name`` and optionally ``parallelism``.
 
         Raises:
             K8sError: When ``machine_ids`` covers fewer pods than the
-                Job was created with, or when ``parallelism`` is absent /
-                zero in ``provider_data``.
+                Job was created with, or when ``parallelism`` cannot be
+                determined (absent in ``provider_data`` and live Job
+                read fails).
         """
         request_id = provider_data.get("request_id", "unknown")
         if not machine_ids:
@@ -254,22 +263,31 @@ class K8sJobHandler(K8sHandlerBase):
 
         parallelism = int(provider_data.get("parallelism") or 0)
         if parallelism == 0:
-            # parallelism is absent or zero in provider_data — we cannot
-            # confirm whether machine_ids covers the full Job.  Deleting
-            # the Job would cascade-delete every pod, not just the ones
-            # the caller named.  Refuse to proceed rather than silently
-            # over-releasing.  Callers should ensure provider_data carries
-            # the parallelism written by acquire_hosts.
-            raise K8sError(
-                "Job release refused for "
-                f"request {request_id} (job={namespace}/{job_name}): "
-                f"provider_data is missing 'parallelism' so we cannot confirm "
-                f"that the {len(machine_ids)} machine_id(s) cover the full Job.  "
-                "Deleting the Job would cascade-delete all pods, not just the "
-                "requested subset.  Ensure provider_data['parallelism'] is set "
-                "(it is written by acquire_hosts).  requested_machine_ids="
-                f"{machine_ids}"
+            # parallelism is absent or zero in provider_data — resolve it
+            # from the live Job spec so that legitimate full releases that
+            # omit parallelism (e.g. return callers stamping only
+            # job_name) are not wrongly refused.
+            parallelism = await self._resolve_parallelism_from_live_job(
+                namespace, job_name, request_id
             )
+            if parallelism == 0:
+                # Live read failed or returned no usable parallelism —
+                # cannot confirm whether machine_ids covers the full Job.
+                # Deleting the Job would cascade-delete every pod, not
+                # just the ones the caller named.  Refuse rather than
+                # silently over-releasing.
+                raise K8sError(
+                    "Job release refused for "
+                    f"request {request_id} (job={namespace}/{job_name}): "
+                    f"provider_data is missing 'parallelism' and the live Job "
+                    f"spec could not be read, so we cannot confirm that the "
+                    f"{len(machine_ids)} machine_id(s) cover the full Job.  "
+                    "Deleting the Job would cascade-delete all pods, not just "
+                    "the requested subset.  Ensure provider_data['parallelism'] "
+                    "is set (it is written by acquire_hosts).  "
+                    f"requested_machine_ids={machine_ids}"
+                )
+
         if len(machine_ids) < parallelism:
             raise K8sError(
                 "Job selective release refused for "
@@ -350,6 +368,77 @@ class K8sJobHandler(K8sHandlerBase):
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
+
+    async def _resolve_parallelism_from_live_job(
+        self,
+        namespace: str,
+        job_name: str,
+        request_id: str,
+    ) -> int:
+        """Read parallelism from the live Job spec when provider_data omits it.
+
+        Returns ``spec.parallelism`` (falling back to ``spec.completions``)
+        from a live ``read_namespaced_job`` call.  Returns ``0`` when the
+        Job cannot be read (404, API error) or when neither field carries a
+        positive integer — the caller must then refuse the release rather
+        than guess.
+
+        This is called only when ``provider_data["parallelism"]`` is absent
+        or zero, which happens for return requests that stamp only
+        ``job_name`` and not the full acquire-time provider_data.
+        """
+        self._logger.debug(
+            "release_hosts: parallelism absent in provider_data for request %s "
+            "(job=%s/%s) — resolving from live Job spec",
+            request_id,
+            namespace,
+            job_name,
+        )
+        try:
+            job = await asyncio.to_thread(
+                self.with_retry,
+                self.client.batch_v1.read_namespaced_job,
+                name=job_name,
+                namespace=namespace,
+                operation_name="read_namespaced_job",
+            )
+        except Exception as exc:
+            if self.is_not_found(exc):
+                self._logger.debug(
+                    "release_hosts: Job %s/%s not found while resolving parallelism "
+                    "— treating as already-released (returning 0)",
+                    namespace,
+                    job_name,
+                )
+            else:
+                self._logger.warning(
+                    "release_hosts: read_namespaced_job failed for %s/%s while "
+                    "resolving parallelism: %s",
+                    namespace,
+                    job_name,
+                    exc,
+                )
+            return 0
+
+        spec = getattr(job, "spec", None)
+        if spec is None:
+            return 0
+        # Prefer spec.parallelism; fall back to spec.completions as a
+        # secondary source (they are always equal for ORB-created Jobs).
+        for attr in ("parallelism", "completions"):
+            value = getattr(spec, attr, None)
+            if isinstance(value, int) and value > 0:
+                self._logger.debug(
+                    "release_hosts: resolved parallelism=%s from live Job spec.%s "
+                    "for request %s (job=%s/%s)",
+                    value,
+                    attr,
+                    request_id,
+                    namespace,
+                    job_name,
+                )
+                return value
+        return 0
 
     def _resolve_job_name_from_provider_data(self, provider_data: dict[str, Any]) -> str:
         """Recover the Job name from a ``provider_data`` dict.
