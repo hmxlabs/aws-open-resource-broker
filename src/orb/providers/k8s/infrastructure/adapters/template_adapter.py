@@ -79,7 +79,10 @@ def _compute_supported_fields() -> list[str]:
     #   separately by the scheduler layer).
     # - ``native_spec``: full-replacement escape hatch that bypasses spec
     #   builders; not a "normal" operator field.
-    _EXCLUDED = {"namespaces", "native_spec"}
+    # - ``native_spec_path``: file-path companion to ``native_spec`` — also
+    #   bypasses the typed spec builders and is therefore excluded from the
+    #   operator-facing field list for the same reason.
+    _EXCLUDED = {"namespaces", "native_spec", "native_spec_path"}
 
     parent_fields = set(Template.model_fields.keys())
     k8s_specific = set(K8sTemplate.model_fields.keys()) - parent_fields - _INTERNAL_ONLY - _EXCLUDED

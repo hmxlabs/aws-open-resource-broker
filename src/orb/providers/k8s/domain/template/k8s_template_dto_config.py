@@ -170,6 +170,20 @@ class K8sTemplateDTOConfig(BaseModel):
         ),
     )
 
+    # Path to a YAML or JSON manifest file used as the native spec body.
+    # When set, the file is Jinja-rendered and used the same way as an inline
+    # ``native_spec``.  Relative paths are resolved against
+    # ``K8sProviderConfig.native_spec_base_path``; absolute paths are used
+    # as-is.  ``native_spec`` takes precedence when both are present.
+    native_spec_path: Optional[str] = Field(
+        None,
+        description=(
+            "Path to a YAML or JSON manifest file rendered as the native spec "
+            "body at acquire time.  Relative paths are resolved against the "
+            "configured native_spec_base_path."
+        ),
+    )
+
     @field_validator("env", mode="before")
     @classmethod
     def _coerce_env_wire_form(cls, v: Any) -> Optional[dict[str, str]]:

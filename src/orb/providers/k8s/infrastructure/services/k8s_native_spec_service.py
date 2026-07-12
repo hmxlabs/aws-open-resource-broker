@@ -25,6 +25,7 @@ back to the typed spec builders in :mod:`orb.providers.k8s.utilities`.
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from typing import Any, Optional
 
 from orb.domain.base.ports.configuration_port import ConfigurationPort
@@ -236,6 +237,59 @@ class K8sNativeSpecService:
         safe = rid.replace("-", "")
         return f"orb-{safe[:8]}"
 
+    def _resolve_native_spec_path(self, spec_path: str) -> str:
+        """Resolve a native_spec_path to an absolute filesystem path.
+
+        Resolution order:
+        1. Absolute paths are used as-is.
+        2. Relative paths are resolved against
+           ``K8sProviderConfig.native_spec_base_path`` when set.
+        3. Otherwise resolved against the current working directory.
+
+        After resolution the path is checked for existence (raises
+        :class:`K8sError` when missing) and, when a base is configured,
+        path traversal outside the base is rejected.
+
+        Args:
+            spec_path: The ``native_spec_path`` value from the template.
+
+        Returns:
+            Absolute path string suitable for :meth:`render_spec_from_file`.
+
+        Raises:
+            K8sError: when the resolved path does not exist or when it
+                traverses outside the configured ``native_spec_base_path``.
+        """
+        raw = Path(spec_path)
+        base_str = getattr(self._k8s_config, "native_spec_base_path", None)
+
+        if raw.is_absolute():
+            resolved = raw.resolve()
+        elif base_str is not None:
+            resolved = (Path(base_str) / raw).resolve()
+        else:
+            resolved = (Path.cwd() / raw).resolve()
+
+        # Guard against path traversal when a base directory is configured.
+        if base_str is not None:
+            base_resolved = Path(base_str).resolve()
+            try:
+                resolved.relative_to(base_resolved)
+            except ValueError:
+                raise K8sError(
+                    f"native_spec_path {spec_path!r} resolves to {resolved!s} which is "
+                    f"outside the configured native_spec_base_path {base_str!r}.  "
+                    "Path traversal is not permitted."
+                )
+
+        if not resolved.exists():
+            raise K8sError(
+                f"native_spec_path {spec_path!r} resolved to {resolved!s} but the file "
+                "does not exist.  Ensure the path is correct and the file is readable."
+            )
+
+        return str(resolved)
+
     def _process(
         self,
         template: Any,
@@ -248,8 +302,9 @@ class K8sNativeSpecService:
 
         When the escape hatch is disabled, returns ``None`` so the caller
         falls back to the typed builder path.  A warning is logged when
-        ``native_spec`` is set on the template but the flag is disabled, so
-        operators are not silently surprised by the bypass.
+        ``native_spec`` or ``native_spec_path`` is set on the template but
+        the flag is disabled, so operators are not silently surprised by the
+        bypass.
 
         When enabled:
 
@@ -259,6 +314,11 @@ class K8sNativeSpecService:
           is also set, it is ignored with a warning — ``native_spec`` is a
           full-replacement intent and layering a partial override on top of it
           would produce undefined behaviour.
+        * If ``K8sTemplate.native_spec_path`` is set (and ``native_spec`` is
+          not), the file at the resolved path is Jinja-rendered and used as the
+          override dict — the same deep-merge-onto-default pipeline applies.
+          When both ``native_spec`` and ``native_spec_path`` are set, inline
+          ``native_spec`` wins and a warning is logged.
         * Otherwise, render the default Jinja template and return it directly.
 
         The rendered dict is validated to carry ``apiVersion`` and ``kind``
@@ -267,12 +327,13 @@ class K8sNativeSpecService:
 
         Raises:
             K8sError: when the final rendered dict is missing ``apiVersion``
-                or ``kind``.
+                or ``kind``, when the spec file is not found, or when path
+                traversal outside the base directory is attempted.
         """
         k8s_template = upcast_to_k8s_template(template)
 
         if not self.is_native_spec_enabled():
-            if k8s_template.native_spec:
+            if k8s_template.native_spec or k8s_template.native_spec_path:
                 self.native_spec_service.logger.warning(
                     "native_spec is set on template %r but native_spec_enabled=False; "
                     "falling back to the typed K8sTemplate path",
@@ -289,6 +350,12 @@ class K8sNativeSpecService:
         default_spec = self.render_default_spec(api_type, context)
 
         if k8s_template.native_spec:
+            if k8s_template.native_spec_path:
+                self.native_spec_service.logger.warning(
+                    "Both native_spec and native_spec_path are set on template %r; "
+                    "inline native_spec takes precedence and native_spec_path will be ignored",
+                    k8s_template.template_id,
+                )
             if k8s_template.pod_spec_override:
                 self.native_spec_service.logger.warning(
                     "Both native_spec and pod_spec_override are set on template %r; "
@@ -296,6 +363,15 @@ class K8sNativeSpecService:
                     k8s_template.template_id,
                 )
             rendered_override = self.render_spec(k8s_template.native_spec, context)
+            result = deep_merge(default_spec, rendered_override)
+            _validate_api_version_and_kind(result, k8s_template.template_id)
+            return result
+
+        if k8s_template.native_spec_path:
+            resolved_path = self._resolve_native_spec_path(k8s_template.native_spec_path)
+            rendered_override = self.spec_renderer.render_spec_from_file(  # type: ignore[attr-defined]
+                resolved_path, context
+            )
             result = deep_merge(default_spec, rendered_override)
             _validate_api_version_and_kind(result, k8s_template.template_id)
             return result

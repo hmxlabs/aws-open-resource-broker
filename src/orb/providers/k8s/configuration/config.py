@@ -551,6 +551,24 @@ class K8sProviderConfig(BaseSettings, BaseProviderConfig):  # type: ignore[misc]
         ),
     )
 
+    # Base directory for native-spec manifest files.  Mirrors the AWS
+    # provider's ``spec_file_base_path`` field.  When set, relative
+    # ``native_spec_path`` values on templates are resolved against this
+    # directory; absolute paths are always used as-is.  When unset (the
+    # default), relative paths are resolved against the process working
+    # directory.  Path traversal outside this base is rejected at render
+    # time with a clear error.
+    native_spec_base_path: Optional[str] = Field(
+        None,
+        description=(
+            "Base directory for native-spec manifest files (YAML or JSON).  "
+            "Relative ``native_spec_path`` values on templates are resolved "
+            "against this directory.  Absolute paths are always honoured.  "
+            "When unset, relative paths are resolved against the current "
+            "working directory.  Path traversal outside the base is rejected."
+        ),
+    )
+
     # Circuit-breaker and retry knobs.
     # These values are threaded through K8sHandlerRegistry.get_handler() into
     # each K8sHandlerBase constructor so operators can tune resilience behaviour

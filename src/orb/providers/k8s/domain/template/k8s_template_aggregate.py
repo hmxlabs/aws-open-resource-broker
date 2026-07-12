@@ -433,6 +433,16 @@ class K8sTemplate(Template):
     # :class:`orb.providers.k8s.infrastructure.services.k8s_native_spec_service.K8sNativeSpecService`.
     native_spec: Optional[dict[str, Any]] = None
 
+    # Path to a YAML or JSON manifest file whose contents are Jinja-rendered
+    # and used as the native spec body (same pipeline as inline ``native_spec``
+    # but loaded from a file at acquire time).  Mirrors the AWS provider's
+    # ``spec_file_base_path`` / native-spec file loading pattern.
+    # Relative paths are resolved against ``K8sProviderConfig.native_spec_base_path``
+    # when set, otherwise against the current working directory.  Absolute
+    # paths are used as-is.  When both ``native_spec`` and ``native_spec_path``
+    # are set, inline ``native_spec`` takes precedence and a warning is logged.
+    native_spec_path: Optional[str] = None
+
     def __init__(self, **data: Any) -> None:
         """Initialise the K8sTemplate.
 
@@ -578,6 +588,7 @@ class K8sTemplate(Template):
             self._promote_field(pc, "active_deadline_seconds")
             self._promote_field(pc, "pod_spec_override")
             self._promote_field(pc, "native_spec")
+            self._promote_field(pc, "native_spec_path")
             self._promote_field(pc, "service_name")
 
             # Coerced probe / security-context fields go through per-field validators.

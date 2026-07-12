@@ -638,3 +638,413 @@ class TestEnvVolumesTolerationsMergePath:
         assert "volumeMounts" not in container, "volumeMounts must be absent when not set"
         assert "volumes" not in out["spec"], "volumes must be absent when not set"
         assert "tolerations" not in out["spec"], "tolerations must be absent when not set"
+
+
+# ---------------------------------------------------------------------------
+# native_spec_path — file-based manifest loading
+# ---------------------------------------------------------------------------
+
+
+import os
+
+
+def _make_template_with_path(*, path: str) -> K8sTemplate:
+    return K8sTemplate(
+        template_id="tpl-path",
+        image_id="nginx:1.27",
+        namespace="orb-test",
+        max_instances=4,
+        native_spec_path=path,
+    )
+
+
+class TestNativeSpecPath:
+    """Service loads a YAML/JSON manifest file and merges it like inline native_spec."""
+
+    def _make_yaml_manifest(self, tmp_path: Any, *, filename: str = "manifest.yaml") -> str:
+        """Write a minimal Deployment YAML with Jinja vars; return absolute path."""
+        content = (
+            "apiVersion: apps/v1\n"
+            "kind: Deployment\n"
+            "metadata:\n"
+            "  name: '{{ resource_name }}'\n"
+            "spec:\n"
+            "  replicas: {{ replicas }}\n"
+            "  selector:\n"
+            "    matchLabels:\n"
+            "      app: test\n"
+            "  template:\n"
+            "    metadata:\n"
+            "      labels:\n"
+            "        app: test\n"
+            "        orb-request-id: '{{ request_id }}'\n"
+            "    spec:\n"
+            "      containers:\n"
+            "      - name: main\n"
+            "        image: '{{ image }}'\n"
+        )
+        p = tmp_path / filename
+        p.write_text(content)
+        return str(p)
+
+    def test_yaml_path_renders_and_merges_onto_default(self, tmp_path: Any) -> None:
+        """A .yaml native_spec_path is loaded, Jinja-rendered, and merged onto default."""
+        service = _make_service()
+        yaml_path = self._make_yaml_manifest(tmp_path)
+        template = _make_template_with_path(path=yaml_path)
+        request = _make_request("Deployment", count=3)
+
+        out = service.process_deployment_spec(template, request, namespace="orb-test")
+
+        assert out is not None
+        assert out["apiVersion"] == "apps/v1"
+        assert out["kind"] == "Deployment"
+        # Jinja substitution in the file must have fired.
+        assert out["metadata"]["name"].startswith("orb-")
+        # replicas from the default template (our yaml overrides replicas too).
+        assert out["spec"]["replicas"] == 3
+
+    def test_json_path_renders_and_merges_onto_default(self, tmp_path: Any) -> None:
+        """A .json native_spec_path also works — the JSON parse path is taken."""
+        json_path = str(tmp_path / "manifest.json")
+        with open(json_path, "w") as f:
+            f.write(
+                '{"apiVersion": "apps/v1", "kind": "Deployment",'
+                ' "spec": {"strategy": {"type": "Recreate"}}}'
+            )
+        service = _make_service()
+        template = _make_template_with_path(path=json_path)
+        request = _make_request("Deployment", count=2)
+
+        out = service.process_deployment_spec(template, request, namespace="orb-test")
+
+        assert out is not None
+        assert out["kind"] == "Deployment"
+        assert out["spec"]["strategy"] == {"type": "Recreate"}
+        # Default template fills in replicas.
+        assert out["spec"]["replicas"] == 2
+
+    def test_inline_native_spec_wins_over_path_when_both_set(self, tmp_path: Any) -> None:
+        """Inline native_spec takes precedence over native_spec_path; a warning is logged."""
+        yaml_path = self._make_yaml_manifest(tmp_path)
+        service = _make_service()
+        logger_mock = Mock()
+        service.native_spec_service.logger = logger_mock
+
+        template = K8sTemplate(
+            template_id="tpl-both",
+            image_id="nginx:1.27",
+            namespace="orb-test",
+            max_instances=2,
+            native_spec={"spec": {"strategy": {"type": "Recreate"}}},
+            native_spec_path=yaml_path,
+        )
+        request = _make_request("Deployment", count=1)
+
+        out = service.process_deployment_spec(template, request, namespace="orb-test")
+
+        # Result should come from inline native_spec.
+        assert out is not None
+        assert out["spec"]["strategy"] == {"type": "Recreate"}
+        # Warning logged about native_spec_path being ignored.
+        logger_mock.warning.assert_called()
+        warnings = [str(call) for call in logger_mock.warning.call_args_list]
+        assert any("native_spec_path" in w and "ignored" in w for w in warnings)
+
+    def test_missing_file_raises_k8s_error(self) -> None:
+        """A native_spec_path pointing to a non-existent file raises K8sError."""
+        service = _make_service()
+        template = _make_template_with_path(path="/tmp/this-file-does-not-exist-orb-test.yaml")
+        request = _make_request("Deployment", count=1)
+
+        with pytest.raises(K8sError, match="does not exist"):
+            service.process_deployment_spec(template, request, namespace="orb-test")
+
+    def test_path_traversal_outside_base_raises_k8s_error(self, tmp_path: Any) -> None:
+        """Path traversal outside native_spec_base_path is rejected with K8sError."""
+        base_dir = str(tmp_path / "base")
+        os.makedirs(base_dir, exist_ok=True)
+
+        # Create the file outside the base (in the parent) to prove the
+        # traversal check fires before the existence check.
+        outside_file = tmp_path / "outside.yaml"
+        outside_file.write_text("apiVersion: v1\nkind: Pod\n")
+
+        app_service = _make_application_service(enabled=True)
+        config_port = _make_config_port()
+        k8s_config = K8sProviderConfig(
+            namespace="orb-test",
+            native_spec_enabled=True,
+            native_spec_base_path=base_dir,
+        )
+        service = K8sNativeSpecService(
+            native_spec_service=app_service,
+            config_port=config_port,
+            k8s_config=k8s_config,
+        )
+
+        # Attempt traversal via relative path "../outside.yaml".
+        template = _make_template_with_path(path="../outside.yaml")
+        request = _make_request("Pod", count=1)
+
+        with pytest.raises(K8sError, match="outside.*native_spec_base_path|Path traversal"):
+            service.process_pod_spec(template, request, namespace="orb-test")
+
+    def test_absolute_path_inside_base_is_allowed(self, tmp_path: Any) -> None:
+        """An absolute path inside the base directory is accepted."""
+        base_dir = str(tmp_path / "base")
+        os.makedirs(base_dir, exist_ok=True)
+        yaml_path = os.path.join(base_dir, "spec.yaml")
+        with open(yaml_path, "w") as f:
+            f.write(
+                "apiVersion: apps/v1\nkind: Deployment\n"
+                "spec:\n  selector:\n    matchLabels:\n      app: ok\n"
+            )
+
+        app_service = _make_application_service(enabled=True)
+        config_port = _make_config_port()
+        k8s_config = K8sProviderConfig(
+            namespace="orb-test",
+            native_spec_enabled=True,
+            native_spec_base_path=base_dir,
+        )
+        service = K8sNativeSpecService(
+            native_spec_service=app_service,
+            config_port=config_port,
+            k8s_config=k8s_config,
+        )
+
+        template = _make_template_with_path(path=yaml_path)
+        request = _make_request("Deployment", count=1)
+        out = service.process_deployment_spec(template, request, namespace="orb-test")
+        assert out is not None
+        assert out["kind"] == "Deployment"
+
+    def test_disabled_flag_short_circuits_path(self, tmp_path: Any) -> None:
+        """When native_spec_enabled=False, native_spec_path is bypassed (returns None)."""
+        service = _make_service(provider_flag_enabled=False)
+        yaml_path = self._make_yaml_manifest(tmp_path)
+        template = _make_template_with_path(path=yaml_path)
+        request = _make_request("Deployment", count=1)
+
+        result = service.process_deployment_spec(template, request, namespace="orb-test")
+        assert result is None
+
+    def test_path_missing_api_version_raises_k8s_error(self, tmp_path: Any) -> None:
+        """When both the file and the default template yield no apiVersion, K8sError is raised.
+
+        We simulate this by monkeypatching render_default_spec to return a
+        skeleton without apiVersion so the merged result is also missing it —
+        same technique used in TestNativeSpecSafetyHoles.
+        """
+        bad_yaml = tmp_path / "bad.yaml"
+        bad_yaml.write_text("kind: Deployment\nspec: {}\n")
+        service = _make_service()
+
+        original_render = service.render_default_spec
+
+        def _render_no_api_version(api_type: str, context: dict[str, Any]) -> dict[str, Any]:
+            rendered = original_render(api_type, context)
+            rendered.pop("apiVersion", None)
+            return rendered
+
+        service.render_default_spec = _render_no_api_version  # type: ignore[method-assign]
+
+        template = _make_template_with_path(path=str(bad_yaml))
+        request = _make_request("Deployment", count=1)
+
+        with pytest.raises(K8sError, match="missing required field"):
+            service.process_deployment_spec(template, request, namespace="orb-test")
+
+
+# ---------------------------------------------------------------------------
+# label_stamper — controller-kind label injection (Slice 5)
+# ---------------------------------------------------------------------------
+
+
+from orb.providers.k8s.infrastructure.handlers.shared.label_stamper import (
+    stamp_native_workload_body,
+)
+
+
+class TestStampNativeWorkloadBody:
+    """stamp_native_workload_body must inject ORB labels in three places for
+    Deployment/StatefulSet (metadata, pod-template, and selector.matchLabels).
+    Job bodies must NOT receive spec.selector (the Job controller manages it).
+    """
+
+    _LABEL_PREFIX = "orb.io"
+    _REQUEST_ID = "req-test-123"
+
+    def _fake_request(self) -> Any:
+        req = Mock()
+        req.request_id = self._REQUEST_ID
+        req.template_id = "tpl-test"
+        return req
+
+    def _deployment_native_body(self) -> dict[str, Any]:
+        return {
+            "apiVersion": "apps/v1",
+            "kind": "Deployment",
+            "metadata": {},
+            "spec": {
+                "replicas": 1,
+                "selector": {"matchLabels": {}},
+                "template": {
+                    "metadata": {"labels": {}},
+                    "spec": {"containers": [{"name": "main", "image": "nginx:1.27"}]},
+                },
+            },
+        }
+
+    def _statefulset_native_body(self) -> dict[str, Any]:
+        return {
+            "apiVersion": "apps/v1",
+            "kind": "StatefulSet",
+            "metadata": {},
+            "spec": {
+                "replicas": 1,
+                "selector": {"matchLabels": {}},
+                "template": {
+                    "metadata": {"labels": {}},
+                    "spec": {"containers": [{"name": "main", "image": "nginx:1.27"}]},
+                },
+            },
+        }
+
+    def _job_native_body(self) -> dict[str, Any]:
+        return {
+            "apiVersion": "batch/v1",
+            "kind": "Job",
+            "metadata": {},
+            "spec": {
+                "parallelism": 1,
+                "completions": 1,
+                "template": {
+                    "metadata": {"labels": {}},
+                    "spec": {
+                        "containers": [{"name": "main", "image": "busybox:1.37"}],
+                        "restartPolicy": "Never",
+                    },
+                },
+            },
+        }
+
+    def test_deployment_metadata_labels_stamped(self) -> None:
+        result = stamp_native_workload_body(
+            self._deployment_native_body(),
+            workload_name="orb-wl1",
+            namespace="ns",
+            replicas=2,
+            request=self._fake_request(),
+            label_prefix=self._LABEL_PREFIX,
+        )
+        labels = result["metadata"]["labels"]
+        assert labels[f"{self._LABEL_PREFIX}/request-id"] == self._REQUEST_ID
+        assert labels[f"{self._LABEL_PREFIX}/managed"] == "true"
+
+    def test_deployment_pod_template_labels_stamped(self) -> None:
+        result = stamp_native_workload_body(
+            self._deployment_native_body(),
+            workload_name="orb-wl1",
+            namespace="ns",
+            replicas=2,
+            request=self._fake_request(),
+            label_prefix=self._LABEL_PREFIX,
+        )
+        tpl_labels = result["spec"]["template"]["metadata"]["labels"]
+        assert tpl_labels[f"{self._LABEL_PREFIX}/request-id"] == self._REQUEST_ID
+        assert tpl_labels[f"{self._LABEL_PREFIX}/managed"] == "true"
+
+    def test_deployment_selector_match_labels_stamped(self) -> None:
+        """spec.selector.matchLabels must carry request-id for pod-list lookups."""
+        result = stamp_native_workload_body(
+            self._deployment_native_body(),
+            workload_name="orb-wl1",
+            namespace="ns",
+            replicas=2,
+            request=self._fake_request(),
+            label_prefix=self._LABEL_PREFIX,
+        )
+        match_labels = result["spec"]["selector"]["matchLabels"]
+        assert match_labels[f"{self._LABEL_PREFIX}/request-id"] == self._REQUEST_ID
+
+    def test_statefulset_selector_match_labels_stamped(self) -> None:
+        result = stamp_native_workload_body(
+            self._statefulset_native_body(),
+            workload_name="orb-sts1",
+            namespace="ns",
+            replicas=3,
+            request=self._fake_request(),
+            label_prefix=self._LABEL_PREFIX,
+        )
+        match_labels = result["spec"]["selector"]["matchLabels"]
+        assert match_labels[f"{self._LABEL_PREFIX}/request-id"] == self._REQUEST_ID
+        assert result["spec"]["replicas"] == 3
+
+    def test_job_selector_not_stamped(self) -> None:
+        """Job bodies must NOT receive spec.selector — the Job controller manages it."""
+        result = stamp_native_workload_body(
+            self._job_native_body(),
+            workload_name="orb-job1",
+            namespace="ns",
+            replicas=2,
+            request=self._fake_request(),
+            label_prefix=self._LABEL_PREFIX,
+        )
+        # Job uses parallelism/completions, NOT replicas.
+        assert result["spec"]["parallelism"] == 2
+        assert result["spec"]["completions"] == 2
+        assert "replicas" not in result["spec"]
+        # No spec.selector for Jobs.
+        assert "selector" not in result["spec"]
+
+    def test_deployment_replicas_stamped(self) -> None:
+        result = stamp_native_workload_body(
+            self._deployment_native_body(),
+            workload_name="orb-wl2",
+            namespace="ns",
+            replicas=5,
+            request=self._fake_request(),
+            label_prefix=self._LABEL_PREFIX,
+        )
+        assert result["spec"]["replicas"] == 5
+
+    def test_original_body_not_mutated(self) -> None:
+        body = self._deployment_native_body()
+        stamp_native_workload_body(
+            body,
+            workload_name="orb-wl3",
+            namespace="ns",
+            replicas=1,
+            request=self._fake_request(),
+            label_prefix=self._LABEL_PREFIX,
+        )
+        # Original must be untouched.
+        assert body["metadata"] == {}
+        assert body["spec"]["replicas"] == 1
+
+    def test_selector_created_when_absent(self) -> None:
+        """Deployment without spec.selector still gets selector.matchLabels stamped."""
+        body: dict[str, Any] = {
+            "apiVersion": "apps/v1",
+            "kind": "Deployment",
+            "metadata": {},
+            "spec": {
+                "replicas": 1,
+                "template": {"metadata": {"labels": {}}, "spec": {"containers": []}},
+            },
+        }
+        result = stamp_native_workload_body(
+            body,
+            workload_name="orb-wl4",
+            namespace="ns",
+            replicas=1,
+            request=self._fake_request(),
+            label_prefix=self._LABEL_PREFIX,
+        )
+        assert "selector" in result["spec"]
+        assert (
+            result["spec"]["selector"]["matchLabels"][f"{self._LABEL_PREFIX}/request-id"]
+            == self._REQUEST_ID
+        )

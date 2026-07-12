@@ -74,6 +74,8 @@ class K8sFieldMapping:
         # Job lifecycle
         "ttlSecondsAfterFinished": "ttl_seconds_after_finished",
         "activeDeadlineSeconds": "active_deadline_seconds",
+        # Native-spec file path escape hatch
+        "nativeSpecPath": "native_spec_path",
     }
 
     def get_mappings(self) -> dict[str, str]:
