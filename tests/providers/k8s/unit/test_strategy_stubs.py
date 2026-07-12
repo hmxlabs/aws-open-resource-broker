@@ -277,6 +277,106 @@ def test_get_ui_column_schema_covers_machines_and_templates() -> None:
     assert "templates" in resource_types
 
 
+# ---------------------------------------------------------------------------
+# Regression: cancel_mode dispatch (Fix 3 — cancel_mode branch was dead)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_execute_operation_cancel_mode_routes_to_cancel_handler() -> None:
+    """TERMINATE_INSTANCES + cancel_mode must reach _handle_cancel_resource.
+
+    Before Fix 3 the cancel_mode branch sat *after* the unconditional
+    TERMINATE_INSTANCES branch in the elif chain and was therefore unreachable.
+    This test would previously invoke _handle_terminate_instances (which
+    requires a 'request' object) and return MISSING_REQUEST, proving the wrong
+    branch fired.
+    """
+    from unittest.mock import patch
+
+    from orb.providers.base.strategy import ProviderOperation, ProviderResult
+
+    strategy = _make_strategy()
+
+    cancel_result = ProviderResult.success_result(
+        {"status": "success", "deleted": [], "already_gone": [], "failed": []},
+        {"operation": "cancel_resource"},
+    )
+
+    with (
+        patch.object(
+            strategy,
+            "_handle_cancel_resource",
+            new=AsyncMock(return_value=cancel_result),
+        ) as mock_cancel,
+        patch.object(
+            strategy,
+            "_handle_terminate_instances",
+            new=AsyncMock(
+                return_value=ProviderResult.error_result("should not be called", "WRONG_BRANCH")
+            ),
+        ) as mock_terminate,
+    ):
+        op = ProviderOperation(
+            operation_type=ProviderOperationType.TERMINATE_INSTANCES,
+            parameters={"request_id": "req-cancel-test"},
+            context={"cancel_mode": True},
+        )
+        result = await strategy.execute_operation(op)
+
+    mock_cancel.assert_called_once(), "cancel_mode must route to _handle_cancel_resource"
+    (
+        mock_terminate.assert_not_called(),
+        "_handle_terminate_instances must NOT be called for cancel_mode",
+    )
+    assert result.success is True
+
+
+@pytest.mark.asyncio
+async def test_execute_operation_terminate_without_cancel_mode_routes_to_terminate() -> None:
+    """Plain TERMINATE_INSTANCES (no cancel_mode) must reach _handle_terminate_instances.
+
+    Ensures Fix 3 did not accidentally break normal deprovisioning.
+    """
+    from unittest.mock import patch
+
+    from orb.providers.base.strategy import ProviderOperation, ProviderResult
+
+    strategy = _make_strategy()
+
+    with (
+        patch.object(
+            strategy,
+            "_handle_terminate_instances",
+            new=AsyncMock(
+                return_value=ProviderResult.success_result({}, {"operation": "terminate"})
+            ),
+        ) as mock_terminate,
+        patch.object(
+            strategy,
+            "_handle_cancel_resource",
+            new=AsyncMock(
+                return_value=ProviderResult.error_result("should not be called", "WRONG_BRANCH")
+            ),
+        ) as mock_cancel,
+    ):
+        op = ProviderOperation(
+            operation_type=ProviderOperationType.TERMINATE_INSTANCES,
+            parameters={"request": MagicMock(), "instance_ids": ["orb-pod-0000"]},
+            # No context / cancel_mode=False — normal deprovisioning path.
+        )
+        await strategy.execute_operation(op)
+
+    (
+        mock_terminate.assert_called_once(),
+        "Normal TERMINATE must route to _handle_terminate_instances",
+    )
+    (
+        mock_cancel.assert_not_called(),
+        "_handle_cancel_resource must NOT be called without cancel_mode",
+    )
+
+
 def test_cleanup_idempotent() -> None:
     strategy = _make_strategy()
     strategy.cleanup()
