@@ -214,6 +214,7 @@ class TestBaseContextMixin:
         self.template.subnet_ids = None
         self.template.security_group_ids = None
         self.template.instance_types = None
+        self.template.machine_role = None
 
         result = self.mixin._prepare_standard_flags(self.template)
 
