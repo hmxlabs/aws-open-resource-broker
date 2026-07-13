@@ -319,7 +319,25 @@ jobs:
         ls -la .coverage* 2>/dev/null || echo "no .coverage data files found"
 
     - name: Combine coverage and enforce combined threshold
+      id: coverage-gate
       run: make ci-tests-coverage-check
+
+    # Single deterministic Codecov upload: the combined report from ALL legs is
+    # sent once here, instead of each leg uploading separately.  Codecov then
+    # shows one stable number (no mid-run partial-merge flapping) and this needs
+    # no hardcoded leg count — it auto-scales to any number of provider legs.
+    # if: always() so the report uploads even when the threshold gate fails
+    # above (the job still fails on the gate; Codecov still gets the data).
+    - name: Upload combined coverage to Codecov
+      if: always()
+      continue-on-error: true
+      uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f  # v6
+      with:
+        token: ${{ secrets.CODECOV_TOKEN }}
+        files: coverage-combined.xml
+        name: combined
+        # Overwrite any prior partial report for this commit with the full merge.
+        override_commit: ${{ github.event.pull_request.head.sha || github.sha }}
 
   # Single stable required status check for branch protection.  Replaces listing
   # every individual job name (which drifts silently when jobs are renamed).
