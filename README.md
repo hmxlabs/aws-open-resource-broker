@@ -13,24 +13,24 @@
 </p>
 
 <p align="center">
-  <a href="https://pypi.org/project/orb-py/"><img src="https://img.shields.io/pypi/v/orb-py" alt="PyPI Version"></a>
-  <a href="https://pypi.org/project/orb-py/"><img src="https://img.shields.io/pypi/pyversions/orb-py" alt="Python Versions"></a>
   <a href="LICENSE"><img src="https://img.shields.io/github/license/finos/open-resource-broker" alt="License"></a>
+  <a href="https://pypi.org/project/orb-py/"><img src="https://img.shields.io/pypi/v/orb-py" alt="PyPI Version"></a>
   <a href="https://github.com/finos/open-resource-broker/releases"><img src="https://img.shields.io/github/v/release/finos/open-resource-broker" alt="Latest Release"></a>
+  <a href="https://pypi.org/project/orb-py/"><img src="https://img.shields.io/pypi/pyversions/orb-py" alt="Python Versions"></a>
   <a href="https://deepwiki.com/finos/open-resource-broker"><img src="https://deepwiki.com/badge.svg" alt="Ask DeepWiki"></a>
-</p>
-
-<p align="center">
+  <br>
   <a href="https://github.com/finos/open-resource-broker/actions/workflows/ci-tests.yml"><img src="https://github.com/finos/open-resource-broker/actions/workflows/ci-tests.yml/badge.svg" alt="Unit Tests"></a>
   <a href="https://github.com/finos/open-resource-broker/actions/workflows/ci-quality.yml"><img src="https://github.com/finos/open-resource-broker/actions/workflows/ci-quality.yml/badge.svg" alt="Quality Checks"></a>
   <a href="https://github.com/finos/open-resource-broker/actions/workflows/security-code.yml"><img src="https://github.com/finos/open-resource-broker/actions/workflows/security-code.yml/badge.svg" alt="Security Scanning"></a>
-  <a href="https://codecov.io/gh/finos/open-resource-broker"><img src="https://codecov.io/gh/finos/open-resource-broker/graph/badge.svg" alt="Coverage"></a>
   <a href="https://github.com/finos/open-resource-broker/actions/workflows/docs.yml"><img src="https://github.com/finos/open-resource-broker/actions/workflows/docs.yml/badge.svg" alt="Documentation"></a>
+  <br>
+  <a href="https://codecov.io/gh/finos/open-resource-broker"><img src="https://codecov.io/gh/finos/open-resource-broker/graph/badge.svg" alt="Coverage"></a>
+  <a href="https://scorecard.dev/viewer/?uri=github.com/finos/open-resource-broker"><img src="https://api.securityscorecards.dev/projects/github.com/finos/open-resource-broker/badge" alt="OpenSSF Scorecard"></a>
 </p>
 
 ---
 
-ORB is a unified API for orchestrating and provisioning compute capacity programmatically. Define what you need in a template, request it, track it, return it — through a CLI, REST API, Python SDK, or MCP server.
+Open Resource Broker (ORB) is a unified API for orchestrating and provisioning compute capacity programmatically. Define what you need in a template, request it, track it, return it — through a CLI, REST API, Python SDK, or MCP server.
 
 Built for AWS today (EC2, Auto Scaling Groups, SpotFleet, EC2Fleet), with an extensible provider system for adding new cloud backends.
 
@@ -189,6 +189,31 @@ aws sts get-caller-identity
 | `AutoScalingGroup` | Managed scaling groups |
 
 See the [AWS Provider Guide](docs/root/user_guide/configuration.md) for required IAM permissions and SpotFleet service-linked role setup.
+
+</details>
+
+<details>
+<summary>Kubernetes Provider Setup</summary>
+
+ORB uses the standard Kubernetes client credential chain — any context that works with `kubectl` works with ORB. Running in-cluster, it auto-detects the mounted service account; running outside, it reads your `KUBECONFIG` and current context.
+
+```bash
+# Verify your context is active
+kubectl config current-context
+```
+
+**Supported credential methods:** `KUBECONFIG` contexts, the default `~/.kube/config`, and in-cluster service accounts (auto-detected). See [provider discovery](docs/root/providers/k8s/discovery.md) for the detection order.
+
+### Supported resource types
+
+| Type | Description |
+|---|---|
+| `Pod` | Single-pod provisioning |
+| `Deployment` | Replica-managed stateless workloads |
+| `StatefulSet` | Stable-identity stateful workloads |
+| `Job` | Run-to-completion batch workloads |
+
+Install with `pip install "orb-py[k8s]"`. Minimum RBAC is in [`docs/root/providers/k8s/rbac.yaml`](docs/root/providers/k8s/rbac.yaml); see the [Kubernetes Provider Guide](docs/root/providers/k8s/index.md) for full setup.
 
 </details>
 
@@ -377,7 +402,8 @@ curl http://localhost:8000/health
 
 </details>
 
-## Symphony HostFactory on Kubernetes (legacy)
+<details>
+<summary>Symphony HostFactory on Kubernetes (legacy)</summary>
 
 The `k8s-legacy` module is a Symphony HostFactory custom provider plugin for Kubernetes, predating the modern multi-cloud ORB architecture.  It is now bundled with `orb-py` as an optional install extra rather than as a separate PyPI package.
 
@@ -397,6 +423,8 @@ The plugin is in maintenance mode.  A modern Kubernetes provider with native ORB
 
 - **Upgrading from `open-resource-broker`?** See the [migration guide](docs/root/operational/from-open-resource-broker.md).
 - **Deploying the Symphony HF plugin?** See the [k8s-legacy deployment guide](k8s-legacy/README.md).
+
+</details>
 
 ## Project
 

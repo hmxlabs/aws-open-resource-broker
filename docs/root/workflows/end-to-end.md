@@ -198,7 +198,7 @@ async with orb() as sdk:
         provider_api="EC2Fleet",
         image_id="ami-0abcdef1234567890",
         name="My Template",
-        instance_type="t3.medium",
+        machine_type="t3.medium",
         subnet_ids=["subnet-abc"],
         security_group_ids=["sg-123"],
         tags={"env": "dev"},
@@ -214,7 +214,7 @@ async with orb() as sdk:
     result = await sdk.update_template(
         template_id="my-tmpl",
         name="Updated Name",
-        instance_type="t3.large",
+        machine_type="t3.large",
     )
     # -> {"updated": True}
     # -> {"updated": False, "validation_errors": ["..."]}  on failure
@@ -247,7 +247,7 @@ curl -s -X POST http://localhost:8000/api/v1/templates/ \
     "provider_api": "EC2Fleet",
     "image_id": "ami-0abcdef1234567890",
     "name": "My Template",
-    "instance_type": "t3.medium",
+    "machine_type": "t3.medium",
     "subnet_ids": ["subnet-abc"],
     "security_group_ids": ["sg-123"],
     "tags": {"env": "dev"}
@@ -256,7 +256,7 @@ curl -s -X POST http://localhost:8000/api/v1/templates/ \
 # Update a template (only supplied fields are changed)
 curl -s -X PUT http://localhost:8000/api/v1/templates/my-tmpl \
   -H "Content-Type: application/json" \
-  -d '{"name": "Updated Name", "instance_type": "t3.large"}'
+  -d '{"name": "Updated Name", "machine_type": "t3.large"}'
 
 # Delete a template
 curl -s -X DELETE http://localhost:8000/api/v1/templates/my-tmpl

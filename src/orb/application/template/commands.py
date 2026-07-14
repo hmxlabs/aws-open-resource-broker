@@ -17,8 +17,9 @@ class CreateTemplateCommand(BaseCommand):
     name: Optional[str] = None
     description: Optional[str] = None
     provider_api: Optional[str] = None
-    instance_type: Optional[str] = None
-    image_id: str
+    machine_type: Optional[str] = None
+    instance_type: Optional[str] = None  # deprecated: use machine_type
+    image_id: Optional[str] = None
     tags: dict[str, str] = Field(default_factory=dict)
     configuration: dict[str, Any] = Field(default_factory=dict)
 
@@ -36,7 +37,8 @@ class UpdateTemplateCommand(BaseCommand):
     template_id: str
     name: Optional[str] = None
     description: Optional[str] = None
-    instance_type: Optional[str] = None
+    machine_type: Optional[str] = None
+    instance_type: Optional[str] = None  # deprecated: use machine_type
     image_id: Optional[str] = None
     configuration: dict[str, Any] = Field(default_factory=dict)
 

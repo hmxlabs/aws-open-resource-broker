@@ -15,8 +15,8 @@ from orb.domain.base.events.provider_events import (
     ProviderOperationExecutedEvent,
     ProviderStrategyRegisteredEvent,
 )
+from orb.domain.base.exceptions import ConfigurationError
 from orb.domain.base.ports import ContainerPort, ErrorHandlingPort, EventPublisherPort, LoggingPort
-from orb.domain.constants import PROVIDER_TYPE_AWS
 
 
 @command_handler(ExecuteProviderOperationCommand)  # type: ignore[arg-type]
@@ -50,7 +50,12 @@ class ExecuteProviderOperationHandler(BaseCommandHandler[ExecuteProviderOperatio
         self.logger.info("Executing provider operation: %s", operation.operation_type)
         start_time = time.time()
         try:
-            provider_identifier = command.strategy_override or PROVIDER_TYPE_AWS
+            if not command.strategy_override:
+                raise ConfigurationError(
+                    "ExecuteProviderOperationCommand requires an explicit strategy_override. "
+                    "Set strategy_override to the name or type of the target provider."
+                )
+            provider_identifier = command.strategy_override
             result = await self._provider_registry_service.execute_operation(
                 provider_identifier, operation
             )

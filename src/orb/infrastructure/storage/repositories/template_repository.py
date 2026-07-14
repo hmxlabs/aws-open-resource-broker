@@ -55,8 +55,6 @@ class TemplateSerializer(BaseEntitySerializer):
             data["machine_types_ondemand"] = {}
         if data.get("machine_types_priority") is None:
             data["machine_types_priority"] = {}
-        if data.get("provider_data") is None:
-            data["provider_data"] = {}
         return data
 
     def _normalize_machine_types(self, data: dict) -> dict[str, int]:
@@ -96,7 +94,7 @@ class TemplateSerializer(BaseEntitySerializer):
                 "encryption_key": template.encryption_key,
                 "key_name": template.key_name,
                 "user_data": template.user_data,
-                "instance_profile": template.instance_profile,
+                "machine_role": template.machine_role,
                 "monitoring_enabled": template.monitoring_enabled,
                 "price_type": template.price_type,
                 "allocation_strategy": template.allocation_strategy,
@@ -174,7 +172,7 @@ class TemplateSerializer(BaseEntitySerializer):
                 "encryption_key": data.get("encryption_key"),
                 "key_name": data.get("keyName", data.get("key_name", data.get("key_pair_name"))),
                 "user_data": data.get("user_data"),
-                "instance_profile": data.get("instance_profile"),
+                "machine_role": data.get("machine_role") or data.get("instance_profile"),
                 "monitoring_enabled": data.get("monitoring_enabled"),
                 "price_type": data.get("price_type", "ondemand"),
                 "allocation_strategy": data.get("allocation_strategy", "lowest_price"),

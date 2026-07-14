@@ -230,19 +230,20 @@ def update_pyproject_selective(pyproject_path: Path) -> None:
             continue
 
         elif line.startswith("[tool.coverage.run]"):
-            # Replace coverage source with package_root from .project.yml
-            new_lines.extend(
-                [
-                    "[tool.coverage.run]",
-                    f'source = ["{package_root}"]',
-                    "branch = true",
-                    "",
-                ]
-            )
-            # Skip existing coverage.run section
+            # Re-template only source (from package_root) + branch; preserve every
+            # other hand-authored key in this section (e.g. omit) instead of
+            # dropping it — the generator manages source, not the whole policy.
             i += 1
+            preserved = []
             while i < len(lines) and not lines[i].strip().startswith("["):
+                existing = lines[i].strip()
+                if not existing.startswith("source ") and not existing.startswith("branch "):
+                    preserved.append(lines[i])
                 i += 1
+            new_lines.append("[tool.coverage.run]")
+            new_lines.append(f'source = ["{package_root}"]')
+            new_lines.append("branch = true")
+            new_lines.extend(preserved)
             continue
 
         else:

@@ -111,7 +111,7 @@ def test_aws_template_basic():
 
         print(f"   PASS: Basic template created: {template.template_id}")
         print(f"   Provider API: {template.provider_api}")
-        print(f"   Instance Type: {template.instance_type}")
+        print(f"   Machine Type: {template.machine_type}")
         print(f"   Image ID: {template.image_id}")
         print(f"   Subnet IDs: {template.subnet_ids}")
         print(f"   Security Group IDs: {template.security_group_ids}")

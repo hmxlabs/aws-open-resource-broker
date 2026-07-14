@@ -185,15 +185,12 @@ jobs:
             coverage-*.xml
             .coverage*
 
-      - name: Upload coverage to Codecov
-        if: inputs.upload-coverage && always()
-        continue-on-error: true
-        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f  # v6
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          files: coverage-${{ inputs.test-type }}${{ inputs.provider != '' && format('-{0}', inputs.provider) || '' }}.xml
-          flags: ${{ inputs.test-type }}${{ inputs.provider != '' && format('-{0}', inputs.provider) || '' }}
-          name: ${{ inputs.test-type }}${{ inputs.provider != '' && format('-{0}', inputs.provider) || '' }}-tests
+      # NOTE: per-leg coverage is NOT uploaded to Codecov here.  The .coverage
+      # data files are uploaded as artifacts (above) and the coverage-combine
+      # fan-in job in ci-tests.yml merges them and uploads ONE combined report
+      # to Codecov.  A single upload gives Codecov one deterministic number
+      # (no mid-run partial-merge flapping) and auto-scales to any number of
+      # provider legs without a hardcoded after_n_builds count.
 
       - name: Upload test results to Codecov
         # Gated on upload-coverage: legs without pytest (e.g. ui-smoke) produce

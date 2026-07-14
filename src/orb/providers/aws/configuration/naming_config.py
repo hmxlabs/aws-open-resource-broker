@@ -56,6 +56,10 @@ class AWSNamingConfig(BaseModel):
         r"^\d{12}$",
         description="Regex pattern for AWS account IDs",
     )
+    region: str = Field(
+        r"^[a-z]{2}-[a-z]+-\d$",
+        description="Regex pattern for AWS region names (e.g. us-east-1, eu-west-2)",
+    )
     limits: AWSLimitsConfig = Field(
         default_factory=AWSLimitsConfig,  # type: ignore[call-arg]
         description="AWS service limits and constraints",

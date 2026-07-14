@@ -1,6 +1,10 @@
 """Template command handlers for CQRS pattern."""
 
+import logging
+
 from orb.application.base.handlers import BaseCommandHandler
+
+_logger = logging.getLogger(__name__)
 from orb.application.decorators import command_handler
 from orb.application.dto.template import TemplateDTO
 from orb.application.template.commands import (
@@ -49,8 +53,9 @@ class CreateTemplateHandler(BaseCommandHandler[CreateTemplateCommand, None]):  #
             raise ValueError("template_id is required")
         if not command.provider_api:
             raise ValueError("provider_api is required")
-        if not command.image_id:
-            raise ValueError("image_id is required")
+        # image_id presence is provider-specific: AWS requires it, other providers
+        # (e.g. GCP uses image_family/image_project, Azure uses image_reference).
+        # Enforcement is delegated to the provider's own validator.
 
     async def execute_command(self, command: CreateTemplateCommand) -> None:
         """Create new template via TemplateConfigurationManager."""
@@ -97,6 +102,9 @@ class CreateTemplateHandler(BaseCommandHandler[CreateTemplateCommand, None]):  #
         }
         # instance_type → machine_types (backward compat)
         if command.instance_type is not None and "machine_types" not in dto_fields:
+            _logger.warning(
+                "CreateTemplateCommand.instance_type is deprecated; use machine_type instead."
+            )
             dto_fields["machine_types"] = {command.instance_type: 1}
         # Remove None values so TemplateDTO defaults apply
         dto_fields = {k: v for k, v in dto_fields.items() if v is not None}
@@ -170,6 +178,9 @@ class UpdateTemplateHandler(BaseCommandHandler[UpdateTemplateCommand, None]):  #
 
         # instance_type → machine_types (backward compat)
         if command.instance_type is not None and "machine_types" not in update_fields:
+            _logger.warning(
+                "UpdateTemplateCommand.instance_type is deprecated; use machine_type instead."
+            )
             update_fields["machine_types"] = {command.instance_type: 1}
 
         if update_fields:

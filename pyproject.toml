@@ -545,6 +545,20 @@ env = []
 [tool.coverage.run]
 source = ["src/orb"]
 branch = true
+omit = [
+    # k8s_legacy is the legacy HostFactory plugin: it has its own test suite
+    # under src/orb/k8s_legacy/tests (in pytest testpaths) that runs separately
+    # from the main legs, so it always shows 0% here and unfairly drags the
+    # combined number.  Exclude it from the main coverage report.
+    "src/orb/k8s_legacy/*",
+    # Test files that live under src/ are not production source.
+    "*/tests/*",
+    # Thin process entrypoints / daemon lifecycle: not meaningfully unit-tested
+    # (exercised via subprocess/integration, not the coverage-uploading legs).
+    "src/orb/__main__.py",
+    "src/orb/run.py",
+    "src/orb/interface/server_daemon.py",
+]
 
 [tool.coverage.report]
 precision = 2

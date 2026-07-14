@@ -168,6 +168,9 @@ ci-tests-infrastructure:  ## Run infrastructure tests only (matches ci.yml infra
 ci-tests-coverage-check:  ## Combined-coverage gate: merge per-leg data + enforce threshold
 	@echo "Combining per-leg coverage data and checking combined threshold ($(COVERAGE_THRESHOLD)%)..."
 	$(call run-tool,coverage,combine)
+	# Emit the merged XML BEFORE the threshold check so it is always produced
+	# for the single Codecov upload, even when the gate below fails.
+	$(call run-tool,coverage,xml -o coverage-combined.xml)
 	# `coverage report` uses --fail-under (the pytest-cov spelling
 	# --cov-fail-under is not valid for the coverage CLI).
 	$(call run-tool,coverage,report --fail-under=$(COVERAGE_THRESHOLD))

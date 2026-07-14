@@ -189,7 +189,7 @@ class TemplateModel(Base):
     # Access
     key_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     user_data: Mapped[str | None] = mapped_column(Text, nullable=True)
-    instance_profile: Mapped[str | None] = mapped_column(Text, nullable=True)
+    machine_role: Mapped[str | None] = mapped_column(Text, nullable=True, name="instance_profile")
     launch_template_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     # Advanced

@@ -10,6 +10,36 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 ### BREAKING CHANGES
 
+- **`Template.instance_type` renamed to `Template.machine_type`.**
+  The `instance_type` field on the `Template` domain model has been renamed
+  to `machine_type` to reflect provider-neutral terminology.  The old name
+  is accepted as a write-only alias (via `AliasChoices`) for backward
+  compatibility with existing YAML / JSON configuration files, but it emits
+  a `DeprecationWarning` when used in Python code.  Update template
+  definitions to use `machine_type` at your earliest convenience.
+
+- **`Template.instance_profile` renamed to `Template.machine_role`.**
+  The `instance_profile` field has been renamed to `machine_role` for the
+  same provider-neutral reason.  The old name is accepted as a write-only
+  alias with a `DeprecationWarning`, just like `instance_type` above.
+  Update template definitions to use `machine_role`.
+
+- **`Template.provider_data` field removed.**
+  The `provider_data` catch-all dict has been deleted.  Provider-specific
+  data is now carried on typed subclasses (`AWSTemplate`, `K8sTemplate`,
+  etc.).  Code that reads or writes `template.provider_data` must be
+  migrated to the appropriate typed subclass field.
+
+### Deprecated aliases
+
+The following backward-compat aliases are available on the `Template` model
+and will be removed in the next major release:
+
+| Old name | New name | Notes |
+|---|---|---|
+| `instance_type` | `machine_type` | Accepted by `model_validate` and `__init__`; emits `DeprecationWarning` in Python |
+| `instance_profile` | `machine_role` | Accepted by `model_validate` and `__init__`; emits `DeprecationWarning` in Python |
+
 - **Daemon token file at `<work_dir>/server/orb-server.token`.**
   When `orb server start` is invoked (daemon or `--foreground` mode), a
   random bearer token is written to `<work_dir>/server/orb-server.token`

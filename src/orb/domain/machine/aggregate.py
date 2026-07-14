@@ -40,7 +40,7 @@ class Machine(AggregateRoot):
     template_id: str
     request_id: Optional[str] = None
     return_request_id: Optional[str] = None
-    provider_type: str = Field(default="aws")
+    provider_type: str
     provider_name: str
     # provider_api is required at the domain level — every machine MUST
     # know which provider API produced it (EC2Fleet / ASG / SpotFleet /
@@ -73,10 +73,9 @@ class Machine(AggregateRoot):
 
     # Lifecycle timestamps
     launch_time: Optional[datetime] = None
-    """AWS-reported timestamp when the instance actually started running.
+    """Provider-reported timestamp when the instance actually started running.
     Set when the machine transitions to RUNNING status (sourced from the
-    cloud provider, e.g. EC2 LaunchTime). Used for uptime calculations,
-    DTOs, and external consumers."""
+    cloud provider). Used for uptime calculations, DTOs, and external consumers."""
     provisioning_started_at: Optional[datetime] = None
     """ORB-internal timestamp recording when this broker initiated the
     launch sequence (i.e. when start_launching() was called and the

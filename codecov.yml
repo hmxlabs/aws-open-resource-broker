@@ -1,3 +1,8 @@
+# Coverage is uploaded to Codecov exactly ONCE, from the ci-tests
+# coverage-combine job, which merges every leg's .coverage data first.  A single
+# upload gives Codecov one deterministic number (no mid-run partial-merge
+# flapping) and needs no hardcoded leg count — it auto-scales to any number of
+# provider legs.
 coverage:
   status:
     project:
@@ -22,7 +27,14 @@ flags:
       - src/orb/
     carryforward: true
 
+# Kept in sync with [tool.coverage.run] omit in pyproject.toml so Codecov's
+# view matches the combined report we upload.
 ignore:
   - "tests/"
   - "docs/"
   - "scripts/"
+  - "src/orb/k8s_legacy/**"  # own separate test suite; runs outside the main legs
+  - "**/tests/**"            # test files under src/ are not production source
+  - "src/orb/__main__.py"    # thin process entrypoints — not unit-tested
+  - "src/orb/run.py"
+  - "src/orb/interface/server_daemon.py"
