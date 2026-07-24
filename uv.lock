@@ -408,16 +408,16 @@ wheels = [
 
 [[package]]
 name = "azure-mgmt-resource-subscriptions"
-version = "1.0.0b2"
+version = "1.0.0b1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "azure-mgmt-core" },
     { name = "isodate" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/1c/d2/1d42399ff4db0b3aa1c86ffde853199e7d34ca8416967a38418a883251dd/azure_mgmt_resource_subscriptions-1.0.0b2.tar.gz", hash = "sha256:9da8a9532469d738f4a24950565994f3627272edf63d0798c9ef523435e0f4a4", size = 57164, upload-time = "2026-05-22T08:33:50.352Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/ac/7c/115cadf1ed3e95be9c2bfa742c4b7195060ce6b16f4b10977c7041a1ed4f/azure_mgmt_resource_subscriptions-1.0.0b1.tar.gz", hash = "sha256:21a9329e4ff7b80a6001936ecfa1dcbf648aa08bd0d026737022679ae9df8bea", size = 44237, upload-time = "2026-02-05T10:05:57.889Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/a2/c1/a16f83c1fcde7e3c5f4e85768afdd55975e6cfa4d04b83ef9d613a3757c8/azure_mgmt_resource_subscriptions-1.0.0b2-py3-none-any.whl", hash = "sha256:bbd458f54a5f273674a1b0fe746aceee5dd5b582b28e34ddf22acc82f1e5c7a7", size = 64649, upload-time = "2026-05-22T08:33:51.646Z" },
+    { url = "https://files.pythonhosted.org/packages/90/5c/b1b8047e86b2db21f95c0063022211789d5a0026aa23af3ad33caa386a4a/azure_mgmt_resource_subscriptions-1.0.0b1-py3-none-any.whl", hash = "sha256:208bbec8f49afd0d975fb33a8c96c5bbc92b0be8a4916043c78d6837455c0c1e", size = 51605, upload-time = "2026-02-05T10:05:58.988Z" },
 ]
 
 [[package]]
@@ -3827,7 +3827,7 @@ requires-dist = [
     { name = "azure-mgmt-compute", marker = "extra == 'test-azure'", specifier = ">=37.2.0" },
     { name = "azure-mgmt-network", marker = "extra == 'azure'", specifier = ">=30.2.0" },
     { name = "azure-mgmt-resource", marker = "extra == 'azure'", specifier = ">=25.0.0" },
-    { name = "azure-mgmt-resource-subscriptions", marker = "extra == 'azure'", specifier = ">=1.0.0b1" },
+    { name = "azure-mgmt-resource-subscriptions", marker = "extra == 'azure'", specifier = "==1.0.0b1" },
     { name = "bandit", marker = "extra == 'ci'", specifier = ">=1.7.5,<2.0.0" },
     { name = "bandit-sarif-formatter", marker = "extra == 'ci'", specifier = ">=1.1.1,<2.0.0" },
     { name = "boto3", specifier = ">=1.42.21" },
